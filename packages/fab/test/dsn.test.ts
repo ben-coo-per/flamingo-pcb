@@ -111,7 +111,7 @@ describe('exportDSN', () => {
     expect(dsn).toContain('(place R1 5000 5000 front 0)');
   });
 
-  it('subsetting: only routed nets in (network); others become protect wiring', () => {
+  it('subsetting: routed net + untouched nets all declared in (network); untouched become protect wiring', () => {
     let b = tinyBoard();
     b = apply(b, { op: 'connectPins', net: 'N2', pins: ['R1.1', 'R2.2'] });
     // Give N2 an existing track so it must be emitted as a protect obstacle.
@@ -127,7 +127,11 @@ describe('exportDSN', () => {
 
     const dsn = exportDSN(b, { nets: ['N1'] });
     expect(dsn).toContain('(net N1 (pins R1-2 R2-1))');
-    expect(dsn).not.toContain('(net N2 (pins');
+    // N2 is still declared (with its class) even though it isn't being
+    // routed -- otherwise its protect wiring below would reference an
+    // undeclared net and fall back to the board's default clearance.
+    expect(dsn).toContain('(net N2 (pins R1-1 R2-2))');
+    expect(dsn).toContain('(class default N1 N2 ');
     expect(dsn).toContain('(wiring');
     expect(dsn).toContain(
       '(wire (path F.Cu 250 4250 5000 10750 5000) (net N2) (type protect))',
@@ -235,5 +239,84 @@ describe('exportDSN', () => {
     });
     const dsn = exportDSN(b);
     expect(dsn).toMatch(/\(padstack poly_[0-9a-f]{8}_F \(shape \(polygon F\.Cu 0 /);
+  });
+
+  it('fences a plated mounting hole with a keepout on every copper layer plus a via_keepout', () => {
+    let b = tinyBoard();
+    b = apply(b, {
+      op: 'addHole',
+      hole: { at: { x: 5, y: 10 }, drill: 1.0, padDiameter: 1.6, plated: true },
+    });
+    const dsn = exportDSN(b);
+    expect(dsn.match(/\(keepout "" \(polygon F\.Cu 0 /g) ?? []).toHaveLength(1);
+    expect(dsn.match(/\(keepout "" \(polygon B\.Cu 0 /g) ?? []).toHaveLength(1);
+    expect(dsn.match(/\(via_keepout "" \(polygon signal 0 /g) ?? []).toHaveLength(1);
+  });
+
+  it('sizes a non-plated hole keepout by drill (not annulus), grown by the default clearance', () => {
+    let b = tinyBoard();
+    b = apply(b, {
+      op: 'addHole',
+      hole: { at: { x: 0, y: 0 }, drill: 1.0, padDiameter: 3.0, plated: false },
+    });
+    const dsn = exportDSN(b);
+    // radius = drill/2 (0.5mm) + default clearance (0.2mm) = 0.7mm = 700um,
+    // so the circle's rightmost tessellated point sits at x=700 (y=0 center).
+    expect(dsn).toContain('(keepout "" (polygon F.Cu 0 700 0');
+  });
+
+  it('gives distinct-geometry parts sharing a footprint name their own image/padstacks', () => {
+    const wideFp: Footprint = {
+      name: '0603',
+      lcsc: 'A',
+      pads: [
+        { number: '1', shape: 'rect', at: { x: -0.75, y: 0 }, rotation: 0, size: { w: 0.8, h: 0.9 }, layer: 'top' },
+        { number: '2', shape: 'rect', at: { x: 0.75, y: 0 }, rotation: 0, size: { w: 0.8, h: 0.9 }, layer: 'top' },
+      ],
+      silk: [],
+      courtyard: [],
+    };
+    const narrowFp: Footprint = {
+      name: '0603', // same name, different real pads
+      lcsc: 'B',
+      pads: [
+        { number: '1', shape: 'rect', at: { x: -0.5, y: 0 }, rotation: 0, size: { w: 0.4, h: 0.5 }, layer: 'top' },
+        { number: '2', shape: 'rect', at: { x: 0.5, y: 0 }, rotation: 0, size: { w: 0.4, h: 0.5 }, layer: 'top' },
+      ],
+      silk: [],
+      courtyard: [],
+    };
+    let b = newBoard('t2', 2);
+    b = apply(b, { op: 'placeComponent', refdes: 'U1', lcsc: 'A', footprint: wideFp, at: { x: 0, y: 0 }, rotation: 0, side: 'top', fields: {} });
+    b = apply(b, { op: 'placeComponent', refdes: 'U2', lcsc: 'B', footprint: narrowFp, at: { x: 5, y: 0 }, rotation: 0, side: 'top', fields: {} });
+    const dsn = exportDSN(b);
+    // two distinct (image ...) blocks: the first-seen geometry keeps the bare
+    // name, the second gets a disambiguating suffix.
+    expect(dsn.match(/\(image /g) ?? []).toHaveLength(2);
+    expect(dsn).toContain('(image 0603\n');
+    expect(dsn).toMatch(/\(image 0603_[0-9a-f]{8}\n/);
+    // each component's placement points at its own image, and each image's
+    // pin list reflects its own pad geometry (not the other one's).
+    expect(dsn).toMatch(/\(pin rect_800x900_F 1 -750 0\)/);
+    expect(dsn).toMatch(/\(pin rect_400x500_F 1 -500 0\)/);
+  });
+
+  it('quotes odd pad numbers/refdes in the (pins ...) list', () => {
+    const fp: Footprint = {
+      name: 'ODD',
+      lcsc: 'X',
+      pads: [
+        { number: 'A 6', shape: 'rect', at: { x: -0.75, y: 0 }, rotation: 0, size: { w: 0.8, h: 0.9 }, layer: 'top' },
+        { number: '2', shape: 'rect', at: { x: 0.75, y: 0 }, rotation: 0, size: { w: 0.8, h: 0.9 }, layer: 'top' },
+      ],
+      silk: [],
+      courtyard: [],
+    };
+    let b = newBoard('o', 2);
+    b = apply(b, { op: 'placeComponent', refdes: 'U-1', lcsc: 'X', footprint: fp, at: { x: 0, y: 0 }, rotation: 0, side: 'top', fields: {} });
+    b = apply(b, { op: 'placeComponent', refdes: 'U2', lcsc: 'X', footprint: fp, at: { x: 5, y: 0 }, rotation: 0, side: 'top', fields: {} });
+    b = apply(b, { op: 'connectPins', net: 'N1', pins: ['U-1.A 6', 'U2.2'] });
+    const dsn = exportDSN(b);
+    expect(dsn).toContain('(net N1 (pins "U-1"-"A 6" U2-2))');
   });
 });

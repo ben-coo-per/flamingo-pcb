@@ -26,18 +26,30 @@
 
 import { createRequire } from 'node:module';
 import type { Board, ComponentInst, LayerId, Net, NetClass, Pad, Point, Track } from '@flamingo/engine';
-import { copperLayersOf, boardBBox, outlineToPolygon, padOutline, RULESETS } from '@flamingo/engine';
+import {
+  copperLayersOf,
+  boardBBox,
+  outlineToPolygon,
+  padOutline,
+  RULESETS,
+  allHoles,
+  holeSlotCenterline,
+  capsulePolygon,
+} from '@flamingo/engine';
 
 const HOST_CAD = 'flamingo';
 const HOST_VERSION = createRequire(import.meta.url)('../package.json').version as string;
 
 export interface ExportDSNOptions {
   /**
-   * If given, the `(network)` section contains ONLY these nets (the ones we
-   * are about to route). Every OTHER net's existing tracks/vias are emitted
-   * in `(wiring)` as `(type protect)` obstacles so the router respects them.
-   * If omitted, the full network is emitted and no wiring is written (a fresh
-   * route of everything).
+   * If given, only these nets are handed to the router as things to route.
+   * Every net (routable or not) is still declared in `(network)`/`(class)`
+   * with its real class rules -- otherwise an excluded net's protect wiring
+   * would reference an undeclared net and fall back to the board's default
+   * clearance instead of its own. Every OTHER net's existing tracks/vias are
+   * emitted in `(wiring)` as `(type protect)` obstacles so the router
+   * respects them. If omitted, the full board is routed and no wiring is
+   * written (a fresh route of everything).
    */
   nets?: string[];
   /** With `nets`: also emit the listed nets' own existing tracks/vias as protected wiring (pre-routed fanout the router must keep and connect to). */
@@ -61,6 +73,20 @@ function needsQuote(s: string): boolean {
 /** Quote a token if necessary (net names / ids with spaces etc.). */
 function tok(s: string): string {
   return needsQuote(s) ? `"${s}"` : s;
+}
+
+/**
+ * A `REFDES.PAD` pin ref as the Specctra `component-pin` pair. Refdes and pad
+ * number are quoted independently so a pad name with a space/paren can't
+ * split into extra tokens, and so a refdes or pad name containing `-` can't
+ * be confused with the pair's own `-` separator.
+ */
+function pinRefTok(ref: string): string {
+  const i = ref.indexOf('.');
+  const refdes = i >= 0 ? ref.slice(0, i) : ref;
+  const pad = i >= 0 ? ref.slice(i + 1) : '';
+  const q = (s: string): string => (needsQuote(s) || s.includes('-') ? `"${s}"` : s);
+  return `${q(refdes)}-${q(pad)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -250,25 +276,46 @@ export function exportDSN(b: Board, opts: ExportDSNOptions = {}): string {
   const nets = opts.nets;
   const includeNet = (name: string): boolean => (nets ? nets.includes(name) : true);
 
-  // Nets that go into the (network) section: routable (>=2 pins) and included.
-  const networkNets = b.nets.filter((n) => n.pins.length >= 2 && includeNet(n.name));
+  // Nets that go into the (network) section: every routable (>=2 pins) net,
+  // included or not -- an excluded net's protect wiring still needs its own
+  // declared net/class so it gets its real clearance instead of the board
+  // default (see ExportDSNOptions.nets above).
+  const networkNets = b.nets.filter((n) => n.pins.length >= 2);
 
-  // ---- Images (deduped by footprint name; pads share padstacks) ----
+  // ---- Images (deduped by footprint name + a hash of the pad geometry, so
+  // two parts that happen to share a (sometimes empty) footprint name but
+  // have different real pads -- e.g. both just called "0603" -- get distinct
+  // images instead of silently sharing the first one's pads). The bare name
+  // is kept as the DSN image id for the first geometry seen under it; only a
+  // later, distinct geometry under the same name gets a disambiguating
+  // suffix, so the common (single-geometry) case is untouched. ----
   const imageOrder: string[] = [];
-  const imageByName = new Map<string, ComponentInst>();
+  const imageByToken = new Map<string, ComponentInst>();
+  const imageTokenOf = new Map<ComponentInst, string>();
+  const tokensByName = new Map<string, Map<string, string>>(); // name -> (padHash -> token)
   for (const c of b.components) {
-    const id = c.footprint.name;
-    if (!imageByName.has(id)) {
-      imageByName.set(id, c);
-      imageOrder.push(id);
+    const name = c.footprint.name;
+    const padHash = hash8(JSON.stringify(c.footprint.pads));
+    let byHash = tokensByName.get(name);
+    if (!byHash) {
+      byHash = new Map();
+      tokensByName.set(name, byHash);
     }
+    let token = byHash.get(padHash);
+    if (!token) {
+      token = byHash.size === 0 ? name : `${name}_${padHash}`;
+      byHash.set(padHash, token);
+      imageByToken.set(token, c);
+      imageOrder.push(token);
+    }
+    imageTokenOf.set(c, token);
   }
 
   // ---- Padstacks (deduped by geometry-derived name) ----
   const padStacks = new Map<string, string[]>(); // name -> shapeForms
   const padStackNameOf = new Map<Pad, string>();
   for (const id of imageOrder) {
-    const comp = imageByName.get(id)!;
+    const comp = imageByToken.get(id)!;
     for (const pad of comp.footprint.pads) {
       const ps = padStackFor(b, pad);
       padStackNameOf.set(pad, ps.name);
@@ -341,6 +388,21 @@ export function exportDSN(b: Board, opts: ExportDSNOptions = {}): string {
     const coords = k.polygon.map((p) => `${um(p.x)} ${um(p.y)}`).join(' ');
     out.push(`    (via_keepout "" (polygon signal 0 ${coords}))`);
   }
+  // Hole keepouts (mounting holes + footprint mechanical holes): freerouting
+  // has no concept of a bare hole, so without this it happily routes copper
+  // straight through one. Plated holes are fenced by their annulus
+  // (padDiameter), NPTH by the bare drill; a slot uses its centerline capsule.
+  // Grown by the default net class clearance so the router leaves normal
+  // clearance around them too, same as any other keepout.
+  for (const h of allHoles(b)) {
+    const { start, end } = holeSlotCenterline(h);
+    const r = (h.plated ? h.padDiameter : h.drill) / 2 + dnc.clearance;
+    const coords = capsulePolygon(start, end, r)
+      .map((p) => `${um(p.x)} ${um(p.y)}`)
+      .join(' ');
+    for (const layer of L) out.push(`    (keepout "" (polygon ${layer} 0 ${coords}))`);
+    out.push(`    (via_keepout "" (polygon signal 0 ${coords}))`);
+  }
   const allViaNames = [...viaStacks.keys()];
   if (allViaNames.length > 0) out.push(`    (via ${allViaNames.join(' ')})`);
   out.push(`    (rule (width ${um(dnc.trackWidth)}) (clearance ${um(dnc.clearance)})${drillRules})`);
@@ -351,7 +413,7 @@ export function exportDSN(b: Board, opts: ExportDSNOptions = {}): string {
   for (const id of imageOrder) {
     out.push(`    (component ${tok(id)}`);
     for (const c of b.components) {
-      if (c.footprint.name !== id) continue;
+      if (imageTokenOf.get(c) !== id) continue;
       const side = c.side === 'bottom' ? 'back' : 'front';
       out.push(`      (place ${tok(c.refdes)} ${um(c.at.x)} ${um(c.at.y)} ${side} ${c.rotation})`);
     }
@@ -362,7 +424,7 @@ export function exportDSN(b: Board, opts: ExportDSNOptions = {}): string {
   // library
   out.push('  (library');
   for (const id of imageOrder) {
-    const comp = imageByName.get(id)!;
+    const comp = imageByToken.get(id)!;
     out.push(`    (image ${tok(id)}`);
     for (const pad of comp.footprint.pads) {
       const psName = padStackNameOf.get(pad)!;
@@ -381,7 +443,7 @@ export function exportDSN(b: Board, opts: ExportDSNOptions = {}): string {
   // network
   out.push('  (network');
   for (const net of networkNets) {
-    const pins = net.pins.map((p) => p.replace('.', '-')).join(' ');
+    const pins = net.pins.map(pinRefTok).join(' ');
     out.push(`    (net ${tok(net.name)} (pins ${pins}))`);
   }
   // classes: group included nets by their class
