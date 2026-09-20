@@ -14,7 +14,8 @@
 import type { Board, ComponentInst, Pad, PathSeg, Point, Via } from './types.js';
 import { componentTransformPoints } from './geometry.js';
 import { fillAllZones } from './zonefill.js';
-import { pointInPolygon } from './geometry.js';
+import { pointInPolygon, polyGroupDistance, polyPolyDistance } from './geometry.js';
+import { buildCopperItems, circlePolygon } from './drc/drc.js';
 import { RULESETS } from './drc/rules.js';
 
 export interface StitchOptions {
@@ -207,9 +208,23 @@ export function planZoneStitching(board: Board, opts: StitchOptions = {}): Stitc
   };
 
   const planned: Via[] = [];
-  const viaClear = (p: Point, diameter: number): boolean => {
+  // A through via also lands on every inner layer (4/6L), where no pour
+  // island vouches for it: it must clear other-net inner copper and holes.
+  const inner = buildCopperItems(filled).filter((it) => it.layer !== 'F.Cu' && it.layer !== 'B.Cu');
+  const netClr = (net: string): number => {
+    const cls = board.netClasses.find((k) => k.name === (board.nets.find((n) => n.name === net)?.class ?? 'default'));
+    return cls?.clearance ?? 0;
+  };
+  const viaClear = (p: Point, diameter: number, net: string): boolean => {
     for (const v of [...board.vias, ...planned]) {
       if (Math.hypot(v.at.x - p.x, v.at.y - p.y) < (v.diameter + diameter) / 2 + 0.2) return false;
+    }
+    const disk = circlePolygon(p, diameter / 2);
+    for (const it of inner) {
+      if (it.net && it.net === net) continue;
+      const need = Math.max(rules.minClearance, netClr(net), netClr(it.net));
+      const d = it.group ? polyGroupDistance(disk, it.group) : polyPolyDistance(disk, it.polygon);
+      if (d < need) return false;
     }
     return true;
   };
@@ -230,7 +245,7 @@ export function planZoneStitching(board: Board, opts: StitchOptions = {}): Stitc
           if (!inIsland(p, a.isl) || !inIsland(p, b.isl)) continue;
           const m = Math.min(boundaryMargin(p, a.isl), boundaryMargin(p, b.isl));
           if (m < need) continue;
-          if (!viaClear(p, diameter)) continue;
+          if (!viaClear(p, diameter, a.net)) continue;
           if (!best || m > best.margin) best = { at: p, margin: m };
         }
       }

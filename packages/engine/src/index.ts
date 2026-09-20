@@ -49,6 +49,7 @@ export {
   componentTransformRotation,
   isSlot,
   holeSlotCenterline,
+  padDrillCenterline,
   footprintHoles,
   allHoles,
   capsulePolygon,

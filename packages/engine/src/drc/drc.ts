@@ -3,10 +3,9 @@
  * Units: mm
  */
 
-import type { Board, Point } from '../types.js';
+import type { Board } from '../types.js';
 import { copperLayersOf, padCopperLayers } from '../layers.js';
-import { expandTrack, padOutline } from '../geometry.js';
-import type { PolyGroup } from '../geometry.js';
+import { expandTrack, padOutline, allHoles, holeSlotCenterline, capsulePolygon, groupFillRings } from '../geometry.js';
 import { RULESETS } from './rules.js';
 import type { RuleSet } from './rules.js';
 import type { CopperItem, DrcViolation } from './types.js';
@@ -31,44 +30,11 @@ export { RULESETS } from './rules.js';
 export type { DrcViolation, CopperItem } from './types.js';
 
 export { circlePolygon } from './util.js';
+export { groupFillRings } from '../geometry.js';
 
 function netOfPin(b: Board, pinRef: string): string {
   const net = b.nets.find((n) => n.pins.includes(pinRef));
   return net ? net.name : '';
-}
-
-/** Signed area of a ring (CCW positive, y-up). */
-function ringSignedArea(pts: Point[]): number {
-  let s = 0;
-  const n = pts.length;
-  for (let i = 0; i < n; i++) {
-    const a = pts[i];
-    const b = pts[(i + 1) % n];
-    s += a.x * b.y - b.x * a.y;
-  }
-  return s / 2;
-}
-
-/**
- * Decode a zone's winding-encoded fill (see zonefill.ts) into polygons-with-
- * holes. A CCW ring (signedArea > 0) opens a new solid group; a CW ring
- * (signedArea < 0) is a hole of the most recently opened group — matching the
- * documented "outer, then its holes" ordering. Defensive: a hole appearing
- * before any outer, or a degenerate ring, is skipped rather than trusted.
- */
-export function groupFillRings(fill: Point[][]): PolyGroup[] {
-  const groups: PolyGroup[] = [];
-  for (const ring of fill) {
-    if (ring.length < 3) continue; // degenerate
-    const area = ringSignedArea(ring);
-    if (area > 0) {
-      groups.push({ outer: ring, holes: [] });
-    } else if (area < 0) {
-      if (groups.length === 0) continue; // hole before any outer — contract violation, skip
-      groups[groups.length - 1].holes.push(ring);
-    }
-  }
-  return groups;
 }
 
 /**
@@ -102,6 +68,12 @@ export function buildCopperItems(b: Board): CopperItem[] {
         items.push({ kind: 'pad', net, ref, polygon, layer });
       }
     }
+  }
+
+  for (const h of allHoles(b)) {
+    const { start, end } = holeSlotCenterline(h);
+    const polygon = capsulePolygon(start, end, (h.plated ? h.padDiameter : h.drill) / 2);
+    for (const layer of cu) items.push({ kind: 'hole', net: '', ref: h.id, polygon, layer, plated: h.plated });
   }
 
   for (const z of b.zones) {

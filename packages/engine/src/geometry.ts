@@ -16,7 +16,7 @@
 import polygonClipping from 'polygon-clipping';
 import type { Point, PathSeg, Pad, ComponentInst, Track, Board, MountingHole } from './types.js';
 
-const CHORD_ERROR_MM = 0.05;
+const CHORD_ERROR_MM = 0.01;
 const MIN_CIRCLE_SEGMENTS = 16;
 
 // ---------------------------------------------------------------------------
@@ -455,8 +455,47 @@ export interface PolyGroup {
   holes: Point[][];
 }
 
-/** Does simple polygon `item` overlap the solid region (outer minus holes) of `group` with positive area? */
-export function polyGroupIntersects(item: Point[], group: PolyGroup): boolean {
+/** Signed area of a ring (CCW positive, y-up). */
+function ringSignedArea(pts: Point[]): number {
+  let s = 0;
+  const n = pts.length;
+  for (let i = 0; i < n; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % n];
+    s += a.x * b.y - b.x * a.y;
+  }
+  return s / 2;
+}
+
+/**
+ * Decode a zone's winding-encoded fill (see zonefill.ts) into polygons-with-
+ * holes. A CCW ring (signedArea > 0) opens a new solid group; a CW ring
+ * (signedArea < 0) is a hole of the most recently opened group — matching the
+ * documented "outer, then its holes" ordering. Defensive: a hole appearing
+ * before any outer, or a degenerate ring, is skipped rather than trusted.
+ */
+export function groupFillRings(fill: Point[][]): PolyGroup[] {
+  const groups: PolyGroup[] = [];
+  for (const ring of fill) {
+    if (ring.length < 3) continue; // degenerate
+    const area = ringSignedArea(ring);
+    if (area > 0) {
+      groups.push({ outer: ring, holes: [] });
+    } else if (area < 0) {
+      if (groups.length === 0) continue; // hole before any outer — contract violation, skip
+      groups[groups.length - 1].holes.push(ring);
+    }
+  }
+  return groups;
+}
+
+/** Is `p` inside the solid region (outer minus holes) of `group`? */
+export function pointInGroup(p: Point, group: PolyGroup): boolean {
+  return pointInPolygon(p, group.outer) && !group.holes.some((h) => pointInPolygon(p, h));
+}
+
+/** Area of simple polygon `item` that overlaps the solid region (outer minus holes) of `group`. */
+export function polyGroupOverlapArea(item: Point[], group: PolyGroup): number {
   const clip: [number, number][][] = [toRing(group.outer), ...group.holes.map(toRing)];
   const result = polygonClipping.intersection([toRing(item)], clip);
   let area = 0;
@@ -466,7 +505,12 @@ export function polyGroupIntersects(item: Point[], group: PolyGroup): boolean {
       area += i === 0 ? a : -a;
     }
   }
-  return area > 1e-9;
+  return area;
+}
+
+/** Does simple polygon `item` overlap the solid region (outer minus holes) of `group` with positive area? */
+export function polyGroupIntersects(item: Point[], group: PolyGroup): boolean {
+  return polyGroupOverlapArea(item, group) > 1e-9;
 }
 
 /**
@@ -569,6 +613,8 @@ function strokeCapsule(pts: Point[], hw: number): Point[] {
 
 /** Stroke a track's segment (with width) into a capsule polygon (arcs tessellated first). */
 export function expandTrack(t: Track): Point[] {
+  // A zero-length track is a round dot; strokeCapsule's normals degenerate.
+  if (t.seg.type === 'line' && dist(t.seg.start, t.seg.end) < 1e-9) return tessellateCircle(t.seg.start, t.width / 2);
   const centerline = tessellateSeg(t.seg);
   return strokeCapsule(centerline, t.width / 2);
 }
@@ -593,6 +639,23 @@ export function holeSlotCenterline(h: MountingHole): { start: Point; end: Point 
   return {
     start: { x: h.at.x - dir.x * half, y: h.at.y - dir.y * half },
     end: { x: h.at.x + dir.x * half, y: h.at.y + dir.y * half },
+  };
+}
+
+/**
+ * World-space drill centerline of a through pad: a point (start == end) for a
+ * round drill, else the slot's axis, `slotLength - diameter` long along the
+ * pad's longer side. Shared by the drill file and hole-to-hole DRC so both
+ * see the same slot.
+ */
+export function padDrillCenterline(c: ComponentInst, pad: Pad): { start: Point; end: Point } {
+  const world = padWorld(c, pad);
+  const d = pad.drill;
+  const half = d?.slotLength !== undefined ? Math.max(0, (d.slotLength - d.diameter) / 2) : 0;
+  const dir = rotate(pad.size.w >= pad.size.h ? { x: 1, y: 0 } : { x: 0, y: 1 }, world.rotation);
+  return {
+    start: { x: world.at.x - dir.x * half, y: world.at.y - dir.y * half },
+    end: { x: world.at.x + dir.x * half, y: world.at.y + dir.y * half },
   };
 }
 

@@ -78,9 +78,17 @@ export function check(b: Board, rules: RuleSet, items: CopperItem[]): DrcViolati
       const a = withBbox[i];
       const c = withBbox[j];
       if (a.it.layer !== c.it.layer) continue;
-      if (a.it.net === c.it.net) continue; // same-net (or both unassigned) — not a clearance violation
+      // Same net is one conductor. Net '' (NC pads, holes) is never "the same
+      // net" as another item -- only the same pad (identical ref) is.
+      if (a.it.net ? a.it.net === c.it.net : a.it.ref === c.it.ref) continue;
+      if (a.it.kind === 'hole' && c.it.kind === 'hole') continue; // hole-to-hole's job
 
-      const required = Math.max(rules.minClearance, netClearance(b, a.it.net), netClearance(b, c.it.net));
+      // Net-class clearance is net-to-net spacing; a bare NPTH drill isn't a
+      // net, so copper-to-NPTH is held to the fab floor only.
+      const npth = (a.it.kind === 'hole' && !a.it.plated) || (c.it.kind === 'hole' && !c.it.plated);
+      const required = npth
+        ? rules.minClearance
+        : Math.max(rules.minClearance, netClearance(b, a.it.net), netClearance(b, c.it.net));
 
       if (
         a.bbox.minX - required > c.bbox.maxX ||

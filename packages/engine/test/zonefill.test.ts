@@ -106,15 +106,16 @@ describe('fillZone', () => {
     expect(inFill(fill, { x: 8.5, y: 5 })).toBe(true);
   });
 
-  it('does not subtract a round mounting hole (existing behavior preserved)', () => {
+  it('subtracts a round mounting hole (net-less annulus must not bond pours)', () => {
     let b = baseBoard();
     b = apply(b, {
       op: 'addHole',
       hole: { at: { x: 5, y: 5 }, drill: 3, padDiameter: 5, plated: true },
     });
     const fill = fillZone(b, zoneOf(b));
-    // A plain round mounting hole is not a pour obstacle -> copper fills over it.
-    expect(inFill(fill, { x: 5, y: 5 })).toBe(true);
+    // Annulus r=2.5 + zone clearance: centre and ring are clear of copper.
+    expect(inFill(fill, { x: 5, y: 5 })).toBe(false);
+    expect(inFill(fill, { x: 7.4, y: 5 })).toBe(false);
   });
 
   it('does not subtract a same-net track', () => {

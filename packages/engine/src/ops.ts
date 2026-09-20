@@ -269,6 +269,14 @@ export function applyOp(b: Board, op: Op): OpResult | OpError {
     }
 
     case 'addZone': {
+      // A pour on a missing net, or on a layer the board doesn't fab (F.Silk,
+      // In1.Cu on a 2-layer board), would be silently dropped from the Gerbers.
+      if (!board.nets.some((n) => n.name === op.zone.net)) {
+        return err(`Unknown net "${op.zone.net}"`);
+      }
+      if (!copperLayersOf(board).includes(op.zone.layer)) {
+        return err(`Layer "${op.zone.layer}" is not valid for a ${board.copperLayers}-layer board`);
+      }
       const id = globalThis.crypto.randomUUID();
       const zone: Zone = { id, ...op.zone };
       board.zones.push(zone);

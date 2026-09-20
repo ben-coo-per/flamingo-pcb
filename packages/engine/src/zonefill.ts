@@ -212,6 +212,9 @@ function runClip(op: ClipOp, geoms: MultiPolygon[]): MultiPolygon {
  *     unconstrained area. Conservative in the same direction as the
  *     difference fallback -- downstream DRC still gates the result.
  */
+/** Worst-case vertex movement from robustClip's grid snap (0.01mm grid, rounded up). */
+const SNAP_MARGIN = 0.01;
+
 function robustClip(op: ClipOp, ...geoms: MultiPolygon[]): MultiPolygon {
   for (const grid of [0.01, 0.02]) {
     try {
@@ -322,13 +325,16 @@ function netOfPin(b: Board, pinRef: string): string {
  * header for the winding-encoding of the returned rings.
  */
 export function fillZone(b: Board, zone: Zone): Point[][] {
+  // robustClip snaps vertices to a 0.01mm grid (up to ~7µm of movement), so
+  // carve with that much extra clearance or the fill can land under the rule.
+  const clr = zone.clearance + SNAP_MARGIN;
   const zonePoly: Polygon = [toRing(zone.polygon)];
 
   // Base region: zone polygon, intersected with the outline inset by clearance.
   let base: MultiPolygon = [zonePoly];
   if (b.outline.length > 0) {
     const outlinePts = outlineToPolygon(b.outline);
-    const caps = edgeCapsules(outlinePts, zone.clearance);
+    const caps = edgeCapsules(outlinePts, clr);
     const band = robustClip('union', ...caps.map((c): MultiPolygon => [c]));
     const inset = robustClip('difference', [[toRing(outlinePts)]], band);
     base = robustClip('intersection', [zonePoly], inset);
@@ -341,10 +347,10 @@ export function fillZone(b: Board, zone: Zone): Point[][] {
   // bufferPolygon (a full clip union) or add operands to the difference clip.
   const zb = bboxOf(zone.polygon);
   const reach = {
-    minX: zb.minX - zone.clearance,
-    minY: zb.minY - zone.clearance,
-    maxX: zb.maxX + zone.clearance,
-    maxY: zb.maxY + zone.clearance,
+    minX: zb.minX - clr,
+    minY: zb.minY - clr,
+    maxX: zb.maxX + clr,
+    maxY: zb.maxY + clr,
   };
   const nearZone = (pts: Point[]): boolean => {
     const o = bboxOf(pts);
@@ -357,13 +363,13 @@ export function fillZone(b: Board, zone: Zone): Point[][] {
   for (const t of b.tracks) {
     if (t.layer !== zone.layer || t.net === zone.net) continue;
     // Expand the capsule by widening the track by 2*clearance (cheap + exact).
-    const cap = expandTrack({ ...t, width: t.width + 2 * zone.clearance });
+    const cap = expandTrack({ ...t, width: t.width + 2 * clr });
     if (nearZone(cap)) obstacles.push([[toRing(cap)]]);
   }
 
   for (const v of b.vias) {
     if (v.net === zone.net) continue; // vias span every copper layer
-    const d = disk(v.at, v.diameter / 2 + zone.clearance);
+    const d = disk(v.at, v.diameter / 2 + clr);
     if (nearZone(d)) obstacles.push([[toRing(d)]]);
   }
 
@@ -374,12 +380,12 @@ export function fillZone(b: Board, zone: Zone): Point[][] {
       const net = netOfPin(b, `${c.refdes}.${pad.number}`);
       if (net === zone.net) continue;
       const outline = padOutline(c, pad);
-      if (nearZone(outline)) obstacles.push(bufferPolygon(outline, zone.clearance));
+      if (nearZone(outline)) obstacles.push(bufferPolygon(outline, clr));
     }
   }
 
   // Copper keepouts are a hard exclusion (no associated net to compare
-  // against) affecting this layer. Buffer by zone.clearance like every
+  // against) affecting this layer. Buffer by clr like every
   // other obstacle above for conservative, consistent behavior -- a pour
   // shouldn't hug a keepout boundary any closer than it hugs a track.
   // Via-only keepouts (keepout.copper === false, keepout.pour !== true) don't
@@ -388,20 +394,28 @@ export function fillZone(b: Board, zone: Zone): Point[][] {
   for (const k of b.keepouts) {
     if (!k.keepout.copper && !k.keepout.pour) continue;
     if (k.layers !== 'all' && !k.layers.includes(zone.layer)) continue;
-    if (nearZone(k.polygon)) obstacles.push(bufferPolygon(k.polygon, zone.clearance));
+    if (nearZone(k.polygon)) obstacles.push(bufferPolygon(k.polygon, clr));
   }
 
-  // Slotted mounting holes are milled cutouts (e.g. a slot to pass a display
-  // flex through the board): a pour must clear the slot's annulus footprint on
-  // every layer, buffered like any other obstacle. Round mounting holes keep
-  // the existing behavior (not subtracted from the pour).
+  // Every hole is an obstacle on every layer. Holes carry no net, so a pour
+  // touching a plated annulus would bond it to whatever else touches it (a
+  // VCC pour on F.Cu + GND pour on B.Cu over one plated hole = short), and a
+  // pour over an NPTH is drilled away. Slots clear their capsule, round holes
+  // a (circumscribed) disk.
   for (const h of allHoles(b)) {
-    if (!isSlot(h)) continue;
-    const { start, end } = holeSlotCenterline(h);
-    const capsule = capsulePolygon(start, end, h.padDiameter / 2);
-    if (nearZone(capsule)) obstacles.push(bufferPolygon(capsule, zone.clearance));
+    const r = h.padDiameter / 2;
+    let shape: MultiPolygon;
+    if (isSlot(h)) {
+      const { start, end } = holeSlotCenterline(h);
+      shape = bufferPolygon(capsulePolygon(start, end, r), clr);
+    } else {
+      shape = [[toRing(disk(h.at, r + clr))]];
+    }
+    if (nearZone(shape[0][0].map(([x, y]) => ({ x, y })))) obstacles.push(shape);
   }
 
+  // ponytail: minWidth only filters islands by area; necks/slivers narrower
+  // than minWidth survive (needs a real offsetter, e.g. Clipper2, to open).
   const filled: MultiPolygon =
     obstacles.length > 0 ? robustClip('difference', base, ...obstacles) : base;
 
