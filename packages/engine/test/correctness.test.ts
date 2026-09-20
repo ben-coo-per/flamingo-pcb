@@ -2,7 +2,7 @@
 // the 2026-09 correctness review: each case is a board that used to pass DRC
 // (or misreport connectivity) while the fabricated board would be wrong.
 import { describe, it, expect } from 'vitest';
-import { applyOp, newBoard, runDRC, fillAllZones, connectedGroups, expandTrack } from '../src/index.js';
+import { applyOp, newBoard, runDRC, fillAllZones, connectedGroups, expandTrack, pointInPolygon } from '../src/index.js';
 import type { Board, ComponentInst, Pad, PathSeg, Point, Track, Zone } from '../src/index.js';
 
 const W = 20;
@@ -166,5 +166,21 @@ describe('ops reject copper that would never reach fab', () => {
     expect(applyOp(b, { op: 'addZone', zone: { ...z, net: 'GDN' } }).ok).toBe(false);
     expect(applyOp(b, { op: 'addZone', zone: { ...z, layer: 'In1.Cu' } }).ok).toBe(false);
     expect(applyOp(b, { op: 'addZone', zone: { ...z, layer: 'F.Silk' as never } }).ok).toBe(false);
+  });
+});
+
+describe('zone fill honours minWidth', () => {
+  it('drops a sliver narrower than minWidth but keeps wide copper', () => {
+    // Two 0.25mm SIG tracks 0.94mm apart (centres): their knockouts
+    // (0.3 clearance + 0.01 snap margin) leave a ~0.07mm GND strip.
+    const b = fillAllZones(board({
+      nets: [{ name: 'GND', class: 'default', pins: [] }, { name: 'SIG', class: 'default', pins: [] }],
+      tracks: [track('a', 'SIG', { x: -1, y: 9.53 }, { x: 21, y: 9.53 }), track('b', 'SIG', { x: -1, y: 10.47 }, { x: 21, y: 10.47 })],
+      zones: [zone('z', 'GND', 'F.Cu')],
+    }));
+    const fill = b.zones[0].fill!;
+    const inFill = (p: Point) => fill.filter((r) => pointInPolygon(p, r)).length % 2 === 1;
+    expect(inFill({ x: 10, y: 10 })).toBe(false); // sliver gone
+    expect(inFill({ x: 10, y: 5 })).toBe(true); // bulk pour intact
   });
 });

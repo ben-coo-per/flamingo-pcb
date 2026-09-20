@@ -16,6 +16,10 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "clipper-lib": "^6.4.2",
     "polygon-clipping": "^0.15.7"
+  },
+  "devDependencies": {
+    "@types/clipper-lib": "^6.4.0"
   }
 }

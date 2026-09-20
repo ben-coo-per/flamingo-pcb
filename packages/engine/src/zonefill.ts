@@ -34,6 +34,7 @@
  */
 
 import polygonClipping from 'polygon-clipping';
+import ClipperLib from 'clipper-lib';
 import type { MultiPolygon, Polygon, Ring, Pair } from 'polygon-clipping';
 import type { Board, Point, Zone } from './types.js';
 import { bboxOf, expandTrack, padOutline, outlineToPolygon, isSlot, holeSlotCenterline, capsulePolygon, allHoles } from './geometry.js';
@@ -320,6 +321,52 @@ function netOfPin(b: Board, pinRef: string): string {
 // Fill
 // ---------------------------------------------------------------------------
 
+/** Clipper works in integers: 1e5/mm = 10nm resolution, well inside its 32-bit fast path. */
+const CLIPPER_SCALE = 1e5;
+
+/**
+ * Morphological opening (erode then dilate by `r`, round joins), clipped back
+ * to `m` so it can only remove copper: drops every neck and sliver narrower
+ * than 2r -- copper the fab can't etch reliably, which lifts and shorts --
+ * and leaves wider copper as-is. Area filtering alone keeps a 0.07 x 20mm
+ * strip between two tracks.
+ *
+ * Width is judged on the copper the fab actually sees: the pour UNION the
+ * same-net copper it merges with (`sameNet`). Pour lying on a same-net pad is
+ * often a thin strip between the neighbours' knockouts, but pad + strip is
+ * solid copper -- opening the pour alone would cut fine-pitch pads off.
+ */
+function openBy(m: MultiPolygon, r: number, sameNet: Point[][]): MultiPolygon {
+  if (r <= 1e-9 || m.length === 0) return m;
+  const S = CLIPPER_SCALE;
+  const toPath = (pts: Point[]): ClipperLib.Path => pts.map((p) => ({ X: Math.round(p.x * S), Y: Math.round(p.y * S) }));
+  const paths: ClipperLib.Paths = m.flatMap((poly) => poly.map((ring) => toPath(fromRing(ring))));
+  const merged: ClipperLib.Paths = [];
+  const u = new ClipperLib.Clipper();
+  u.AddPaths(paths, ClipperLib.PolyType.ptSubject, true);
+  u.AddPaths(sameNet.map(toPath), ClipperLib.PolyType.ptClip, true);
+  u.Execute(ClipperLib.ClipType.ctUnion, merged, ClipperLib.PolyFillType.pftEvenOdd, ClipperLib.PolyFillType.pftNonZero);
+  const offset = (src: ClipperLib.Paths, delta: number): ClipperLib.Paths => {
+    const co = new ClipperLib.ClipperOffset(2, 0.01 * S); // 10µm arc tolerance: result is clipped to `m` anyway
+    co.AddPaths(src, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
+    const out: ClipperLib.Paths = [];
+    co.Execute(out, delta * S);
+    return out;
+  };
+  const opened = offset(offset(merged, -r), r);
+  const c = new ClipperLib.Clipper();
+  c.AddPaths(opened, ClipperLib.PolyType.ptSubject, true);
+  c.AddPaths(paths, ClipperLib.PolyType.ptClip, true);
+  const tree = new ClipperLib.PolyTree();
+  c.Execute(ClipperLib.ClipType.ctIntersection, tree, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftEvenOdd);
+  const ring = (path: ClipperLib.Path): Ring => {
+    const pts = path.map((q): Pair => [q.X / S, q.Y / S]);
+    if (pts.length > 0) pts.push(pts[0]);
+    return pts;
+  };
+  return ClipperLib.JS.PolyTreeToExPolygons(tree).map((ex): Polygon => [ring(ex.outer), ...ex.holes.map(ring)]);
+}
+
 /**
  * Compute the filled copper rings of `zone` against board `b`. See the file
  * header for the winding-encoding of the returned rings.
@@ -414,10 +461,24 @@ export function fillZone(b: Board, zone: Zone): Point[][] {
     if (nearZone(shape[0][0].map(([x, y]) => ({ x, y })))) obstacles.push(shape);
   }
 
-  // ponytail: minWidth only filters islands by area; necks/slivers narrower
-  // than minWidth survive (needs a real offsetter, e.g. Clipper2, to open).
-  const filled: MultiPolygon =
+  const carved: MultiPolygon =
     obstacles.length > 0 ? robustClip('difference', base, ...obstacles) : base;
+
+  // Same-net copper on this layer merges with the pour (see openBy).
+  const sameNet: Point[][] = [];
+  for (const t of b.tracks) {
+    if (t.layer === zone.layer && t.net === zone.net && nearZone(expandTrack(t))) sameNet.push(expandTrack(t));
+  }
+  for (const v of b.vias) if (v.net === zone.net) sameNet.push(disk(v.at, v.diameter / 2));
+  for (const c of b.components) {
+    for (const pad of c.footprint.pads) {
+      if (!padCopperLayers(pad, c.side, cu).includes(zone.layer)) continue;
+      if (netOfPin(b, `${c.refdes}.${pad.number}`) !== zone.net) continue;
+      const outline = padOutline(c, pad);
+      if (nearZone(outline)) sameNet.push(outline);
+    }
+  }
+  const filled = openBy(carved, zone.minWidth / 2, sameNet);
 
   // Emit rings, dropping islands whose net copper area < minWidth^2.
   const minArea = zone.minWidth * zone.minWidth;
