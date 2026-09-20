@@ -184,3 +184,17 @@ describe('zone fill honours minWidth', () => {
     expect(inFill({ x: 10, y: 5 })).toBe(true); // bulk pour intact
   });
 });
+
+describe('indexed clearance (spatial grid) keeps exact semantics', () => {
+  it('flags a pour island lying wholly inside another net\'s pad (no edge crossing)', () => {
+    // Stale fill: a 1mm GND island inside a 4mm SIG pad. No boundaries cross,
+    // so only the island-inside-item test catches the overlap.
+    const island = rect(9.5, 9.5, 10.5, 10.5);
+    const b = board({
+      nets: [{ name: 'GND', class: 'default', pins: [] }, { name: 'SIG', class: 'default', pins: ['U1.1'] }],
+      components: [comp('U1', { x: 10, y: 10 }, [pad('1', { x: 0, y: 0 }, { size: { w: 4, h: 4 } })])],
+      zones: [{ ...zone('z', 'GND', 'F.Cu', island), fill: [island] }],
+    });
+    expect(runDRC(b).some((v) => v.rule === 'clearance' && v.items.includes('z'))).toBe(true);
+  });
+});

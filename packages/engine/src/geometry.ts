@@ -136,7 +136,8 @@ function pointToLineSegDistance(p: Point, a: Point, b: Point): number {
 }
 
 /** Closest distance between two line segments (Ericson, RTCD 5.1.9). */
-function segToSegDistance(p1: Point, p2: Point, p3: Point, p4: Point): number {
+/** Minimum distance between segments p1-p2 and p3-p4 (0 when they cross). */
+export function segToSegDistance(p1: Point, p2: Point, p3: Point, p4: Point): number {
   const d1x = p2.x - p1.x;
   const d1y = p2.y - p1.y;
   const d2x = p4.x - p3.x;
@@ -341,6 +342,58 @@ export function bboxOf(pts: Point[]): { minX: number; minY: number; maxX: number
 }
 
 /** Board bounding box: outline if present, else the bbox of all board content. */
+export interface Box {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+/**
+ * Uniform-grid spatial index over axis-aligned boxes: `query` visits every id
+ * whose box shares a cell with the query box (a superset of true overlaps,
+ * each id once). Keeps DRC/fill pair searches near-linear instead of O(n^2).
+ */
+export class BoxGrid {
+  private cells = new Map<number, number[]>();
+  private stamp: number[] = [];
+  private gen = 0;
+  constructor(private readonly cell: number) {}
+
+  private range(b: Box): [number, number, number, number] {
+    const c = this.cell;
+    return [Math.floor(b.minX / c), Math.floor(b.minY / c), Math.floor(b.maxX / c), Math.floor(b.maxY / c)];
+  }
+
+  insert(id: number, b: Box): void {
+    const [x0, y0, x1, y1] = this.range(b);
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) {
+        const k = x * 4194304 + y; // cells stay within +-2^21 for any real board
+        const list = this.cells.get(k);
+        if (list) list.push(id);
+        else this.cells.set(k, [id]);
+      }
+    }
+  }
+
+  query(b: Box, visit: (id: number) => void): void {
+    const gen = ++this.gen;
+    const [x0, y0, x1, y1] = this.range(b);
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) {
+        const list = this.cells.get(x * 4194304 + y);
+        if (!list) continue;
+        for (const id of list) {
+          if (this.stamp[id] === gen) continue;
+          this.stamp[id] = gen;
+          visit(id);
+        }
+      }
+    }
+  }
+}
+
 export function boardBBox(b: Board): { minX: number; minY: number; maxX: number; maxY: number } {
   if (b.outline.length > 0) {
     return bboxOf(outlineToPolygon(b.outline));
@@ -402,6 +455,9 @@ function ringArea(ring: [number, number][]): number {
 
 /** Do polygons a and b overlap with positive intersection area? */
 export function polyIntersects(a: Point[], b: Point[]): boolean {
+  const ba = bboxOf(a);
+  const bb = bboxOf(b);
+  if (ba.minX > bb.maxX || bb.minX > ba.maxX || ba.minY > bb.maxY || bb.minY > ba.maxY) return false;
   const result = polygonClipping.intersection([toRing(a)], [toRing(b)]);
   let area = 0;
   for (const polygon of result) {
@@ -496,6 +552,9 @@ export function pointInGroup(p: Point, group: PolyGroup): boolean {
 
 /** Area of simple polygon `item` that overlaps the solid region (outer minus holes) of `group`. */
 export function polyGroupOverlapArea(item: Point[], group: PolyGroup): number {
+  const bi = bboxOf(item);
+  const bg = bboxOf(group.outer);
+  if (bi.minX > bg.maxX || bg.minX > bi.maxX || bi.minY > bg.maxY || bg.minY > bi.maxY) return 0;
   const clip: [number, number][][] = [toRing(group.outer), ...group.holes.map(toRing)];
   const result = polygonClipping.intersection([toRing(item)], clip);
   let area = 0;
