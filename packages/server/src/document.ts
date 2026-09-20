@@ -25,6 +25,14 @@ export class Doc extends EventEmitter {
   private redoStack: Board[] = [];
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private dirty = false;
+  /** Bumped on every board mutation; lets a finishing save() tell whether the
+   *  board it just wrote is still current (see doSave). */
+  private version = 0;
+  /** Every save() call chains onto this so writes to `_filePath` happen one
+   *  at a time, in call order -- otherwise two overlapping saves can race
+   *  their rename() calls and leave an older board's content on disk. */
+  private saveChain: Promise<void> = Promise.resolve();
+  private _lastSaveError: string | undefined;
 
   constructor(initial: Board, filePath?: string, debounceMs: number = DEFAULT_DEBOUNCE_MS) {
     super();
@@ -40,6 +48,13 @@ export class Doc extends EventEmitter {
   /** The board's current on-disk path, if any (set by the constructor/resetBoard). */
   get filePath(): string | undefined {
     return this._filePath;
+  }
+
+  /** Error message from the most recent save attempt (direct or debounced), or
+   *  undefined if the last attempt (if any) succeeded. Surfaced in
+   *  get_board_state so a failing debounced save isn't silently lost. */
+  get lastSaveError(): string | undefined {
+    return this._lastSaveError;
   }
 
   /**
@@ -64,6 +79,7 @@ export class Doc extends EventEmitter {
       this.pushUndo(this._board);
       this.redoStack = [];
       this._board = result.board;
+      this.version++;
       this.markDirty();
       this.emit('change', this._board);
       this.scheduleSave();
@@ -76,6 +92,7 @@ export class Doc extends EventEmitter {
     if (prev === undefined) return null;
     this.redoStack.push(this._board);
     this._board = prev;
+    this.version++;
     this.markDirty();
     this.emit('change', this._board);
     this.scheduleSave();
@@ -87,6 +104,7 @@ export class Doc extends EventEmitter {
     if (next === undefined) return null;
     this.pushUndo(this._board);
     this._board = next;
+    this.version++;
     this.markDirty();
     this.emit('change', this._board);
     this.scheduleSave();
@@ -112,6 +130,7 @@ export class Doc extends EventEmitter {
       this.saveTimer = null;
     }
     this._board = board;
+    this.version++;
     if (filePath !== undefined) this._filePath = filePath;
     this.undoStack = [];
     this.redoStack = [];
@@ -119,6 +138,42 @@ export class Doc extends EventEmitter {
     if (persist) this.markDirty();
     this.emit('change', this._board);
     if (persist) this.scheduleSave();
+  }
+
+  /**
+   * Snapshot the undo stack depth so a multi-`apply()` pipeline (e.g.
+   * autoroute) can later collapse everything it did into one undo step
+   * (`collapseUndo`) or unwind it entirely on failure (`restoreUndo`).
+   */
+  undoMark(): number {
+    return this.undoStack.length;
+  }
+
+  /**
+   * Merge every undo entry pushed since `mark` into a single one, so a whole
+   * multi-op pipeline undoes in one `undo()` call instead of one call per
+   * internal op. No-op if nothing was applied since `mark`.
+   */
+  collapseUndo(mark: number): void {
+    if (this.undoStack.length > mark + 1) this.undoStack.length = mark + 1;
+  }
+
+  /**
+   * Roll the board back to exactly how it was at `mark`, discarding every op
+   * applied since (and the undo entries they pushed) as if the pipeline never
+   * ran. Used to abort a multi-op pipeline that fails partway through. No-op
+   * if nothing was applied since `mark`.
+   */
+  restoreUndo(mark: number): void {
+    if (this.undoStack.length <= mark) return;
+    const target = this.undoStack[mark]!;
+    this.undoStack.length = mark;
+    this.redoStack = [];
+    this._board = target;
+    this.version++;
+    this.markDirty();
+    this.emit('change', this._board);
+    this.scheduleSave();
   }
 
   private markDirty(): void {
@@ -147,21 +202,50 @@ export class Doc extends EventEmitter {
    * filePath is set -- there is nothing to write to, and silently succeeding
    * would let callers (e.g. the save_board MCP tool) report "Saved." having
    * written nothing. Also throws on write failure -- direct callers (HTTP
-   * /api/save, close()) are responsible for handling/reporting the error;
+   * /api/save, close()) still see the rejection via the returned promise;
    * the debounced path installed by scheduleSave() catches instead (and
    * never fires without a filePath in the first place -- see scheduleSave).
+   *
+   * Chains onto `saveChain` so two save() calls in flight at once (a manual
+   * save racing the debounce timer, or two quick manual saves) write and
+   * rename in call order instead of racing -- otherwise the write that
+   * finishes last always wins, even if it started first and captured an
+   * older board. `lastSaveError` reflects the outcome of whichever save()
+   * call most recently settled, so a failing debounced save is remembered
+   * instead of silently vanishing (see get_board_state in mcp.ts).
    */
-  async save(): Promise<void> {
+  save(): Promise<void> {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
       this.saveTimer = null;
     }
-    if (!this._filePath) throw new Error('no file path set — cannot save');
+    if (!this._filePath) return Promise.reject(new Error('no file path set — cannot save'));
+    const task = this.saveChain.then(() => this.doSave());
+    this.saveChain = task.then(
+      () => {
+        this._lastSaveError = undefined;
+      },
+      (err: unknown) => {
+        this._lastSaveError = err instanceof Error ? err.message : String(err);
+      },
+    );
+    return task;
+  }
+
+  /** The actual write, run strictly after any earlier queued save (see save()). */
+  private async doSave(): Promise<void> {
+    const filePath = this._filePath;
+    if (!filePath) throw new Error('no file path set — cannot save');
+    const versionAtSerialize = this.version;
     const data = serializeBoard(this._board);
-    const tmpPath = `${this._filePath}.tmp-${randomUUID()}`;
+    const tmpPath = `${filePath}.tmp-${randomUUID()}`;
     await writeFile(tmpPath, data, 'utf8');
-    await rename(tmpPath, this._filePath);
-    this.dirty = false;
+    await rename(tmpPath, filePath);
+    // Only clear dirty if nothing changed since we serialized -- an apply()
+    // that landed while this write was in flight already re-armed its own
+    // debounced save (or will be caught by a later close()), so clearing
+    // dirty here would make that edit look already-saved when it isn't.
+    if (this.version === versionAtSerialize) this.dirty = false;
   }
 
   /**

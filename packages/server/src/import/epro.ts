@@ -267,6 +267,9 @@ function parseProPad(r: Rec, warn: (m: string) => void): Pad | null {
     const pieces = walkPoly(raw, warn);
     const abs = piecesToPolygon(pieces);
     polygon = abs.map((p) => ({ x: mm((p.x - at.x) / UNIT_MM), y: mm((p.y - at.y) / UNIT_MM) }));
+    // EasyEDA Std bakes pad rotation into POLYGON points (see parts'
+    // easyeda-parse); whether Pro does is unverified -- no sample has one.
+    if (rotation !== 0) warn(`polygon pad ${str(r[5])} is rotated ${rotation}° — outline orientation unverified, check it against EasyEDA`);
     const xs = polygon.map((p) => p.x);
     const ys = polygon.map((p) => p.y);
     size = {

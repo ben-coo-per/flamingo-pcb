@@ -98,12 +98,44 @@ export async function runAutoroute(
   }
 }
 
+/**
+ * Runs the pipeline body, then either collapses everything it did into one
+ * undo step (success) or rolls the board all the way back to how it was
+ * before this call (any failure) -- a router crash, a bad SES parse, or a
+ * board edit landing mid-route must never leave the board half-unrouted with
+ * only the error message to show for it.
+ */
 async function runAutoroutePipeline(
   doc: Doc,
   route: RouteRunner,
   opts: AutorouteOptions = {},
 ): Promise<AutorouteResult> {
-  const netList = opts.nets && opts.nets.length > 0 ? opts.nets : undefined;
+  const mark = doc.undoMark();
+  try {
+    const result = await runAutoroutePipelineBody(doc, route, opts);
+    doc.collapseUndo(mark);
+    return result;
+  } catch (err) {
+    doc.restoreUndo(mark);
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`${msg} (board restored to its state before this autoroute run)`);
+  }
+}
+
+async function runAutoroutePipelineBody(
+  doc: Doc,
+  route: RouteRunner,
+  opts: AutorouteOptions = {},
+): Promise<AutorouteResult> {
+  // keepExisting with no explicit nets means "route the whole board but keep
+  // what's already there" -- reuse the per-net keep/protect path with every
+  // routable net as the list, instead of falling through to a full unroute.
+  const netList =
+    opts.nets && opts.nets.length > 0
+      ? opts.nets
+      : opts.keepExisting
+        ? doc.board.nets.filter((n) => n.pins.length >= 2).map((n) => n.name)
+        : undefined;
 
   // 1. Unroute the nets we are about to (re)route so freerouting starts fresh.
   if (netList && opts.keepExisting) {
@@ -126,8 +158,22 @@ async function runAutoroutePipeline(
     throw new Error('board was edited while freerouting was running — routes discarded, rerun autoroute');
   }
   let { tracks, vias } = importSES(ses, board);
+  if (netList) {
+    // Other nets' existing copper went into the DSN only as `(type protect)`
+    // obstacles for the router to avoid -- freerouting can echo that wiring
+    // straight back in the SES (verbatim for straight tracks, as a
+    // tessellated polyline for a protected arc), which would otherwise import
+    // as duplicate/near-duplicate copper on nets we never asked to route.
+    const wanted = new Set(netList);
+    tracks = tracks.filter((t) => wanted.has(t.net));
+    vias = vias.filter((v) => wanted.has(v.net));
+  }
   if (opts.keepExisting) {
     // The SES echoes the protected wiring back; drop anything we already have.
+    // ponytail: exact-match only, so a *protected arc* (tessellated to a
+    // straight-line polyline for the DSN) echoes back as new duplicate line
+    // tracks instead of being recognized as the same copper -- upgrade to a
+    // geometric/tessellation-aware match if arcs on kept nets show up doubled.
     const r3 = (n: number) => Math.round(n * 1000) / 1000; // DSN is in integer µm, so match at 1 µm
     const tKey = (t: { net: string; layer: string; width: number; seg: unknown }) => `${t.net}|${t.layer}|${r3(t.width)}|${JSON.stringify(t.seg, (_k, v) => (typeof v === 'number' ? r3(v) : v))}`;
     const vKey = (v: { net: string; at: { x: number; y: number } }) => `${v.net}|${r3(v.at.x)}|${r3(v.at.y)}`;
@@ -199,6 +245,9 @@ async function runAutoroutePipeline(
         throw new Error('board was edited while freerouting was running — routes discarded, rerun autoroute');
       }
       const imported = importSES(ses2, doc.board);
+      const thinWanted = new Set(thinNets);
+      imported.tracks = imported.tracks.filter((t) => thinWanted.has(t.net));
+      imported.vias = imported.vias.filter((v) => thinWanted.has(v.net));
       const applyRes2 = doc.apply({ op: 'addTracks', tracks: imported.tracks, vias: imported.vias });
       if (!applyRes2.ok) throw new Error((applyRes2 as OpError).error);
       tracksAdded += imported.tracks.length;

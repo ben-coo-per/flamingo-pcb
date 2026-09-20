@@ -9,14 +9,14 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Board, Op } from '@flamingo/engine';
-import { fillAllZones, parseBoard, renderSVG, runDRC } from '@flamingo/engine';
+import { fillAllZones, parseBoard, renderSVG } from '@flamingo/engine';
 import { generateBOM, generateCPL, generateGerbers, zipFiles } from '@flamingo/fab';
 import type { Model3d } from '@flamingo/parts';
 import { extractModel3d, fetchJlcStock, fetchPart, readCache, searchParts } from '@flamingo/parts';
 import { runAutorouteBroadcast } from './autoroute.js';
 import { Doc } from './document.js';
 import type { McpContext, PartsApi } from './mcp.js';
-import { boardSearchRoots, createMcpServer } from './mcp.js';
+import { boardSearchRoots, createMcpServer, runDrcWithStock } from './mcp.js';
 import type { RouteRunner } from './route.js';
 import { defaultRouteRunner } from './route.js';
 import type { ScreenshotOpts } from './screenshot.js';
@@ -57,6 +57,25 @@ const MIME_TYPES: Record<string, string> = {
 
 function mimeFor(path: string): string {
   return MIME_TYPES[extname(path)] ?? 'application/octet-stream';
+}
+
+/**
+ * CSRF guard shared by the mutating HTTP routes and the /ws upgrade: browsers
+ * attach an Origin header on cross-site requests (including a "simple"
+ * text/plain form POST, which needs no CORS preflight), so rejecting any
+ * request that names a non-local origin stops a malicious page from driving
+ * board mutations through a victim's open localhost session. A request with
+ * no Origin header at all (curl, an MCP client, the Electron app's own
+ * same-origin fetches) is allowed through.
+ */
+function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true;
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'; // WHATWG URL keeps IPv6 brackets
+  } catch {
+    return false;
+  }
 }
 
 function sendJSON(res: ServerResponse, status: number, body: unknown): void {
@@ -260,12 +279,26 @@ async function handleApi(
     req.resume();
   }
 
+  // Every /api/* POST mutates the board (there are no read-only ones) -- gate
+  // them all here, once, instead of per-route, per the CSRF guard above.
+  if (method === 'POST' && !isAllowedOrigin(req.headers.origin)) {
+    req.resume();
+    sendJSON(res, 403, { ok: false, error: 'cross-origin request rejected' });
+    return true;
+  }
+
   if (method === 'GET' && pathname === '/api/board') {
     sendJSON(res, 200, doc.board);
     return true;
   }
 
   if (method === 'POST' && pathname === '/api/op') {
+    const contentType = req.headers['content-type'] ?? '';
+    if (!contentType.toLowerCase().includes('application/json')) {
+      req.resume();
+      sendJSON(res, 400, { ok: false, error: 'content-type must be application/json' });
+      return true;
+    }
     const raw = await readBody(req);
     let body: unknown;
     try {
@@ -302,9 +335,12 @@ async function handleApi(
   if (method === 'GET' && pathname === '/api/drc') {
     // Run on the *filled* board, matching the export gate: the raw zone
     // outline polygon overlaps every non-pour-net pad, so an unfilled check
-    // would drown real findings in zone-clearance noise.
+    // would drown real findings in zone-clearance noise. Shares runDrcWithStock
+    // with the export_fab MCP tool and /api/export.fab below so the UI, MCP,
+    // and fab download all gate on exactly the same checks (geometry + stock).
     const board = doc.board.zones.length > 0 ? fillAllZones(doc.board) : doc.board;
-    sendJSON(res, 200, { ok: true, violations: runDRC(board) });
+    const { violations, advisories } = await runDrcWithStock(ctx, board);
+    sendJSON(res, 200, { ok: true, violations, advisories });
     return true;
   }
 
@@ -462,17 +498,19 @@ async function handleApi(
   }
 
   if (method === 'GET' && pathname === '/api/export.fab') {
-    // DRC-gated fab download (mirrors POST /api/export's gate). ?waive=1 bypasses
-    // the gate like the export_fab MCP tool's waiveDrc; violations are still
-    // computed but not fatal. Streams a single zip of the fab fileset.
+    // DRC + stock gated fab download (mirrors the export_fab MCP tool's gate,
+    // via the shared runDrcWithStock). ?waive=1 bypasses the gate like
+    // waiveDrc; violations are still computed but not fatal. Streams a single
+    // zip of the fab fileset.
     const waive = url.searchParams.get('waive') === '1';
     const filled = fillAllZones(doc.board);
-    const violations = runDRC(filled);
+    const { violations, advisories } = await runDrcWithStock(ctx, filled);
     if (violations.length > 0 && !waive) {
       sendJSON(res, 400, {
         ok: false,
         error: 'DRC violations present; export refused',
         violations,
+        advisories,
       });
       return true;
     }
@@ -633,7 +671,17 @@ function makeRequestListener(
 }
 
 function attachWebSocket(doc: Doc, server: http.Server): WebSocketServer {
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  const wss = new WebSocketServer({
+    server,
+    path: '/ws',
+    // Same CSRF guard as the /api/* POSTs: refuse the upgrade if the browser
+    // sent an Origin that isn't local (a plain WS client / curl / the
+    // Electron app's own page sends none, and is allowed through).
+    verifyClient: (info, callback) => {
+      if (isAllowedOrigin(info.origin)) callback(true);
+      else callback(false, 403, 'cross-origin request rejected');
+    },
+  });
   const clients = new Set<WebSocket>();
 
   const onChange = (board: unknown): void => {

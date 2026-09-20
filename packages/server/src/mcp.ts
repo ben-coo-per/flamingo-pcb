@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
@@ -110,8 +111,9 @@ function formatComponent(c: ComponentInst): string {
 // get_board_state / describe_connections summaries
 // ---------------------------------------------------------------------------
 
-function summarizeBoardState(board: Board): string {
+function summarizeBoardState(board: Board, lastSaveError?: string): string {
   const lines: string[] = [];
+  if (lastSaveError) lines.push(`WARNING: last save to disk failed: ${lastSaveError}`);
   lines.push(`Board "${board.name}" — ${board.copperLayers}-layer (${board.rules})`);
 
   if (board.outline.length > 0) {
@@ -181,7 +183,7 @@ function formatDrcReport(violations: DrcViolation[]): string {
  * gating violation list; low/unknown-stock findings come back separately as
  * non-gating advisories. FLAMINGO_STOCK_CHECK=off skips the stock half.
  */
-async function runDrcWithStock(
+export async function runDrcWithStock(
   ctx: McpContext,
   board: Board,
 ): Promise<{ violations: DrcViolation[]; advisories: DrcViolation[] }> {
@@ -362,12 +364,19 @@ export function createMcpServer(ctx: McpContext): McpServer {
         copperLayers: z
           .union([z.literal(2), z.literal(4), z.literal(6)])
           .describe('Number of copper layers: 2, 4, or 6'),
+        overwrite: z
+          .boolean()
+          .optional()
+          .describe('Overwrite the destination .flamingo file if it already exists (default false)'),
       },
     },
-    async ({ name, copperLayers }) => {
+    async ({ name, copperLayers, overwrite }) => {
       const board = newBoard(name, copperLayers);
       const safeName = name.replace(/[^a-zA-Z0-9_-]+/g, '_') || 'board';
       const filePath = join(ctx.projectDir, `${safeName}.flamingo`);
+      if (!overwrite && existsSync(filePath)) {
+        return errorResult(`"${filePath}" already exists — pass overwrite: true to replace it.`);
+      }
       ctx.doc.resetBoard(board, filePath, true);
       try {
         await ctx.doc.save();
@@ -389,13 +398,20 @@ export function createMcpServer(ctx: McpContext): McpServer {
           .string()
           .describe('Destination .flamingo path inside the project directory for the imported board'),
         pcb: z.string().optional().describe('PCB document name inside the project, when it has more than one'),
+        overwrite: z
+          .boolean()
+          .optional()
+          .describe('Overwrite the destination .flamingo file if it already exists (default false)'),
       },
     },
-    async ({ source, path, pcb }) => {
+    async ({ source, path, pcb, overwrite }) => {
       const src = resolve(isAbsolute(source) ? source : join(ctx.projectDir, source));
       const abs = resolve(isAbsolute(path) ? path : join(ctx.projectDir, path));
       if (extname(abs) !== '.flamingo' || !boardSearchRoots(ctx).some((r) => abs.startsWith(r + sep))) {
         return errorResult(`path must be a .flamingo file inside the project (got "${abs}")`);
+      }
+      if (!overwrite && existsSync(abs)) {
+        return errorResult(`"${abs}" already exists — pass overwrite: true to replace it.`);
       }
       let board: Board;
       let warnings: string[];
@@ -495,7 +511,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
         'Get a compact human-readable summary of the current board: name, layers, outline, components, nets with routed status, and item counts.',
       inputSchema: {},
     },
-    () => textResult(summarizeBoardState(ctx.doc.board)),
+    () => textResult(summarizeBoardState(ctx.doc.board, ctx.doc.lastSaveError)),
   );
 
   server.registerTool(
@@ -634,7 +650,11 @@ export function createMcpServer(ctx: McpContext): McpServer {
         rotation: rotation ?? 0,
         side: side ?? 'top',
         fields: {
-          value: value ?? info.description ?? undefined,
+          // Bare value only (per CLAUDE.md: becomes the BOM Comment) -- the
+          // MPN is a reasonable stand-in when nothing was given; the long
+          // free-text `description` field must never land here (see the
+          // `description` field just below it, which does carry that text).
+          value: value ?? info.mpn ?? undefined,
           description: info.description,
           role,
           mfr: info.mfr,
@@ -806,10 +826,10 @@ export function createMcpServer(ctx: McpContext): McpServer {
       description: 'Define a net class with track/via routing rules.',
       inputSchema: {
         name: z.string().describe('Net class name'),
-        trackWidth: z.number().describe('Default track width in mm'),
-        clearance: z.number().describe('Minimum copper clearance in mm'),
-        viaDrill: z.number().describe('Via drill diameter in mm'),
-        viaDiameter: z.number().describe('Via pad diameter in mm'),
+        trackWidth: z.number().positive().describe('Default track width in mm'),
+        clearance: z.number().positive().describe('Minimum copper clearance in mm'),
+        viaDrill: z.number().positive().describe('Via drill diameter in mm'),
+        viaDiameter: z.number().positive().describe('Via pad diameter in mm'),
       },
     },
     ({ name, trackWidth, clearance, viaDrill, viaDiameter }) => {
@@ -841,9 +861,13 @@ export function createMcpServer(ctx: McpContext): McpServer {
         'Set the board outline. For "rect", give width/height (and optional cornerRadius for rounded corners). For "polygon", give a list of vertices (closed automatically). For "path", give a raw list of line/arc PathSegs.',
       inputSchema: {
         shape: z.enum(['rect', 'polygon', 'path']).describe('Outline shape kind'),
-        width: z.number().optional().describe('Rect width in mm (required for shape="rect")'),
-        height: z.number().optional().describe('Rect height in mm (required for shape="rect")'),
-        cornerRadius: z.number().optional().describe('Rect corner radius in mm; 0 or omitted = square corners'),
+        width: z.number().positive().optional().describe('Rect width in mm (required for shape="rect")'),
+        height: z.number().positive().optional().describe('Rect height in mm (required for shape="rect")'),
+        cornerRadius: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe('Rect corner radius in mm; 0 or omitted = square corners'),
         points: z.array(pointSchema).min(3).optional().describe('Polygon vertices in mm (required for shape="polygon")'),
         segs: z.array(pathSegSchema).min(1).optional().describe('Raw PathSeg list (required for shape="path")'),
       },
@@ -898,10 +922,10 @@ export function createMcpServer(ctx: McpContext): McpServer {
         layer: layerIdSchema.describe('Copper layer for this zone'),
         net: z.string().describe('Net name this zone pours copper for'),
         polygon: z.array(pointSchema).min(3).describe('Zone outline vertices in mm'),
-        clearance: z.number().describe('Clearance from other copper in mm'),
-        minWidth: z.number().describe('Minimum copper width in mm'),
-        thermalGap: z.number().describe('Thermal relief gap in mm'),
-        thermalSpokeWidth: z.number().describe('Thermal relief spoke width in mm'),
+        clearance: z.number().positive().describe('Clearance from other copper in mm'),
+        minWidth: z.number().positive().describe('Minimum copper width in mm'),
+        thermalGap: z.number().nonnegative().describe('Thermal relief gap in mm'),
+        thermalSpokeWidth: z.number().positive().describe('Thermal relief spoke width in mm'),
       },
     },
     ({ layer, net, polygon, clearance, minWidth, thermalGap, thermalSpokeWidth }) => {
@@ -926,8 +950,8 @@ export function createMcpServer(ctx: McpContext): McpServer {
       inputSchema: {
         x: z.number().describe('X position in mm'),
         y: z.number().describe('Y position in mm'),
-        drill: z.number().describe('Drill diameter in mm (the slot swept width)'),
-        padDiameter: z.number().describe('Pad/annular ring diameter in mm (>= drill)'),
+        drill: z.number().positive().describe('Drill diameter in mm (the slot swept width)'),
+        padDiameter: z.number().positive().describe('Pad/annular ring diameter in mm (>= drill)'),
         plated: z.boolean().optional().describe('Plated (copper-lined) hole (default true)'),
         slotLength: z
           .number()
@@ -967,8 +991,8 @@ export function createMcpServer(ctx: McpContext): McpServer {
         layer: z.enum(['F.Silk', 'B.Silk']).describe('Silkscreen layer'),
         x: z.number().describe('X position in mm'),
         y: z.number().describe('Y position in mm'),
-        text: z.string().describe('Text content'),
-        height: z.number().describe('Text height in mm'),
+        text: z.string().min(1).describe('Text content'),
+        height: z.number().positive().describe('Text height in mm'),
         rotation: z.number().optional().describe('Rotation in degrees CCW (default 0)'),
       },
     },
@@ -997,7 +1021,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
           .array(silkPointSchema)
           .optional()
           .describe('Ordered points {x,y} in mm; creates N-1 connected segments (reference-outline form)'),
-        width: z.number().optional().describe('Line width in mm (default 0.15)'),
+        width: z.number().positive().optional().describe('Line width in mm (default 0.15)'),
       },
     },
     ({ layer, start, end, polyline, width }) => {
@@ -1017,16 +1041,22 @@ export function createMcpServer(ctx: McpContext): McpServer {
         }
         points = [start, end];
       }
-      // Each segment is its own removable SilkLine; apply them in sequence so
-      // the polyline form returns every created id in one tool call.
-      const ids: string[] = [];
+      // Each segment is its own removable SilkLine. Bundle them into a single
+      // `transaction` op (one addSilkLine sub-op per segment) so a polyline
+      // is one undo step and, on a mid-polyline failure, applies atomically
+      // instead of leaving the earlier segments committed.
+      const segmentOps: Op[] = [];
       for (let i = 0; i < points.length - 1; i++) {
         const line: Omit<SilkLine, 'id'> = { layer, start: points[i], end: points[i + 1], width: w };
-        const result = ctx.doc.apply({ op: 'addSilkLine', line });
-        if (!result.ok) return errorResult((result as OpError).error);
-        ids.push(result.createdIds[0]);
+        segmentOps.push({ op: 'addSilkLine', line });
       }
-      return textResult(`Added ${ids.length} silk line${ids.length === 1 ? '' : 's'} on ${layer}: ${ids.join(', ')}`);
+      const op: Op = segmentOps.length === 1 ? segmentOps[0]! : { op: 'transaction', ops: segmentOps };
+      return applyAndReport(
+        ctx,
+        op,
+        (result) =>
+          `Added ${result.createdIds.length} silk line${result.createdIds.length === 1 ? '' : 's'} on ${layer}: ${result.createdIds.join(', ')}`,
+      );
     },
   );
 
@@ -1051,6 +1081,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
         layer: layerIdSchema.describe('Copper layer for this track'),
         width: z
           .number()
+          .positive()
           .optional()
           .describe("Track width in mm (default: the net's class trackWidth)"),
         net: z.string().describe('Net name this track belongs to (must already exist)'),
@@ -1085,9 +1116,14 @@ export function createMcpServer(ctx: McpContext): McpServer {
         x: z.number().describe('X position in mm'),
         y: z.number().describe('Y position in mm'),
         net: z.string().describe('Net name this via belongs to (must already exist)'),
-        drill: z.number().optional().describe("Via drill diameter in mm (default: the net's class viaDrill)"),
+        drill: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Via drill diameter in mm (default: the net's class viaDrill)"),
         diameter: z
           .number()
+          .positive()
           .optional()
           .describe("Via pad diameter in mm (default: the net's class viaDiameter)"),
       },

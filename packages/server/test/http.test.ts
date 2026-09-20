@@ -7,6 +7,7 @@ import type { Board, ComponentInst, Footprint } from '@flamingo/engine';
 import { Doc } from '../src/document.js';
 import { startServer } from '../src/http.js';
 import type { StartedServer } from '../src/http.js';
+import type { PartsApi } from '../src/mcp.js';
 import type { RouteRunner } from '../src/route.js';
 
 describe('HTTP API', () => {
@@ -18,6 +19,11 @@ describe('HTTP API', () => {
   let missingUiDistDir: string;
 
   beforeEach(async () => {
+    // These tests don't inject a partsApi, so /api/drc + /api/export.fab's
+    // shared runDrcWithStock (mcp.ts) would otherwise hit the real network
+    // stock lookup for every test board's LCSC ids -- keep this suite on
+    // pure geometry DRC, like mcp.test.ts's mocked fetchStock does for MCP.
+    process.env.FLAMINGO_STOCK_CHECK = 'off';
     doc = new Doc(newBoard('httptest', 2));
     missingUiDistDir = join(tmpdir(), `flamingo-http-no-ui-dist-${process.pid}-${Math.random().toString(36).slice(2)}`);
     started = await startServer(doc, 0, { uiDistDir: missingUiDistDir }); // ephemeral port
@@ -26,6 +32,7 @@ describe('HTTP API', () => {
 
   afterEach(async () => {
     await started.close();
+    delete process.env.FLAMINGO_STOCK_CHECK;
   });
 
   it('binds to a real ephemeral port', () => {
@@ -93,6 +100,7 @@ describe('HTTP API', () => {
   it('POST /api/undo and /api/redo round-trip', async () => {
     await fetch(`${base}/api/op`, {
       method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ op: 'setBoardMeta', name: 'changed' }),
     });
 
@@ -441,6 +449,65 @@ describe('HTTP API', () => {
         expect(body.violations).toEqual([]);
       });
     });
+  });
+
+  it('GET /api/export.fab gates on JLCPCB stock too, not just geometry DRC (shared runDrcWithStock)', async () => {
+    delete process.env.FLAMINGO_STOCK_CHECK; // this suite's beforeEach turns it off; re-enable for this one test
+    const b = newBoard('stockfab', 2);
+    b.outline = [
+      { type: 'line', start: { x: 0, y: 0 }, end: { x: 20, y: 0 } },
+      { type: 'line', start: { x: 20, y: 0 }, end: { x: 20, y: 20 } },
+      { type: 'line', start: { x: 20, y: 20 }, end: { x: 0, y: 20 } },
+      { type: 'line', start: { x: 0, y: 20 }, end: { x: 0, y: 0 } },
+    ];
+    b.components = [
+      {
+        refdes: 'R1',
+        lcsc: 'C1',
+        footprint: { name: 'fp', lcsc: 'C1', pads: [], silk: [], courtyard: [] },
+        at: { x: 5, y: 5 },
+        rotation: 0,
+        side: 'top',
+        fields: {},
+      },
+    ];
+    const noStockPartsApi: PartsApi = {
+      fetchPart: async () => {
+        throw new Error('not used by this test');
+      },
+      searchParts: async () => [],
+      fetchStock: async (lcsc) => ({ lcsc, stock: 0, basic: false }),
+    };
+    const srv = await startServer(new Doc(b), 0, { uiDistDir: missingUiDistDir, partsApi: noStockPartsApi });
+    try {
+      const res = await fetch(`http://localhost:${srv.port}/api/export.fab`);
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.ok).toBe(false);
+      expect(body.violations.some((v: { rule: string }) => v.rule === 'stock-out')).toBe(true);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it('POST /api/op rejects a non-localhost Origin (CSRF guard)', async () => {
+    const res = await fetch(`${base}/api/op`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+      body: JSON.stringify({ op: 'setBoardMeta', name: 'pwned' }),
+    });
+    expect(res.status).toBe(403);
+    expect(doc.board.name).not.toBe('pwned');
+  });
+
+  it('POST /api/op rejects a non-JSON content-type (the text/plain CSRF form trick)', async () => {
+    const res = await fetch(`${base}/api/op`, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+      body: JSON.stringify({ op: 'setBoardMeta', name: 'pwned' }),
+    });
+    expect(res.status).toBe(400);
+    expect(doc.board.name).not.toBe('pwned');
   });
 
   it('returns 404 with {ok:false,error} for an unknown /api route', async () => {

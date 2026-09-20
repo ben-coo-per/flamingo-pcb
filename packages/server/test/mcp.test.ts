@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -178,6 +178,43 @@ describe('MCP endpoint', () => {
     const r2 = doc.board.components.find((c) => c.refdes === 'R2')!;
     expect(r1.at).toEqual({ x: 5, y: 5 });
     expect(r2.at).toEqual({ x: 10, y: 5 });
+  });
+
+  it('place_component defaults value to the bare MPN, never the long description', async () => {
+    const result = await client.callTool({
+      name: 'place_component',
+      arguments: { lcsc: 'C25804', refdes: 'R1', x: 0, y: 0 },
+    });
+    expect(result.isError).toBeFalsy();
+    const comp = doc.board.components.find((c) => c.refdes === 'R1')!;
+    expect(comp.fields.value).toBe(FIXTURE_INFO.mpn);
+    expect(comp.fields.value).not.toBe(FIXTURE_INFO.description);
+  });
+
+  it('rejects non-positive physical sizes on create_net_class, add_silk_text, set_board_outline, and add_mounting_hole', async () => {
+    const badNetClass = await client.callTool({
+      name: 'create_net_class',
+      arguments: { name: 'bad', trackWidth: 0, clearance: 0.2, viaDrill: 0.3, viaDiameter: 0.6 },
+    });
+    expect(badNetClass.isError).toBe(true);
+
+    const badSilkText = await client.callTool({
+      name: 'add_silk_text',
+      arguments: { layer: 'F.Silk', x: 0, y: 0, text: '', height: 1 },
+    });
+    expect(badSilkText.isError).toBe(true);
+
+    const badOutline = await client.callTool({
+      name: 'set_board_outline',
+      arguments: { shape: 'rect', width: -10, height: 10 },
+    });
+    expect(badOutline.isError).toBe(true);
+
+    const badHole = await client.callTool({
+      name: 'add_mounting_hole',
+      arguments: { x: 0, y: 0, drill: -1, padDiameter: 2 },
+    });
+    expect(badHole.isError).toBe(true);
   });
 
   it('connect_pins then describe_connections mentions the net', async () => {
@@ -369,6 +406,21 @@ describe('MCP endpoint', () => {
     expect(doc.board.silkLines).toHaveLength(4);
     expect(doc.board.silkLines.every((l) => l.width === 0.2)).toBe(true);
     expect(textOf(result as any)).toContain('4 silk lines');
+  });
+
+  it('add_silk_line (polyline) is a single undo step', async () => {
+    await client.callTool({
+      name: 'add_silk_line',
+      arguments: {
+        layer: 'F.Silk',
+        polyline: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 5 }],
+      },
+    });
+    expect(doc.board.silkLines).toHaveLength(2); // 3 points -> 2 segments
+
+    const undoResult = await client.callTool({ name: 'undo', arguments: {} });
+    expect(undoResult.isError).toBeFalsy();
+    expect(doc.board.silkLines).toHaveLength(0); // both segments gone in one undo
   });
 
   it('add_silk_line rejects a polyline with fewer than 2 points', async () => {
@@ -634,6 +686,38 @@ describe('MCP endpoint', () => {
     expect(doc.board.name).toBe('fresh');
     expect(doc.board.copperLayers).toBe(4);
     expect(doc.board.components).toHaveLength(0);
+  });
+
+  it('new_board refuses to overwrite an existing file unless overwrite:true', async () => {
+    await client.callTool({ name: 'new_board', arguments: { name: 'dup', copperLayers: 2 } });
+    await client.callTool({ name: 'place_component', arguments: { lcsc: 'C25804', refdes: 'R1', x: 0, y: 0 } });
+    await client.callTool({ name: 'save_board', arguments: {} });
+    expect(doc.board.components).toHaveLength(1);
+
+    const blocked = await client.callTool({ name: 'new_board', arguments: { name: 'dup', copperLayers: 2 } });
+    expect(blocked.isError).toBe(true);
+    expect(textOf(blocked as any)).toContain('already exists');
+    // Refused: the live doc (and its unsaved undo history) is untouched.
+    expect(doc.board.components).toHaveLength(1);
+
+    const forced = await client.callTool({
+      name: 'new_board',
+      arguments: { name: 'dup', copperLayers: 2, overwrite: true },
+    });
+    expect(forced.isError).toBeFalsy();
+    expect(doc.board.components).toHaveLength(0);
+  });
+
+  it('import_board refuses to overwrite an existing destination unless overwrite:true', async () => {
+    const dest = join(projectDir, 'imported.flamingo');
+    await writeFile(dest, serializeBoard(newBoard('preexisting', 2)), 'utf8');
+
+    const blocked = await client.callTool({
+      name: 'import_board',
+      arguments: { source: 'whatever.epro', path: 'imported.flamingo' },
+    });
+    expect(blocked.isError).toBe(true);
+    expect(textOf(blocked as any)).toContain('already exists');
   });
 
   it('open_board loads a board file written by new_board', async () => {
@@ -950,6 +1034,31 @@ describe('MCP endpoint — persistence edge cases', () => {
       expect(text).toContain('no file path set');
     } finally {
       await client.close();
+      await started.close();
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('get_board_state surfaces a failed debounced save instead of losing it silently', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'flamingo-mcp-saveerr-'));
+    const badDir = join(projectDir, 'does-not-exist-yet');
+    // Doc.save() doesn't mkdir -- a filePath under a missing directory fails
+    // every write until the directory shows up.
+    const doc = new Doc(newBoard('badsave', 2), join(badDir, 'board.flamingo'), 20);
+    const started = await startServer(doc, 0, { partsApi: mockPartsApi, projectDir, routeRunner: mockRouteRunner });
+    const client = new Client({ name: 'test-client', version: '0.0.0' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${started.port}/mcp`)));
+
+    try {
+      await client.callTool({ name: 'set_board_outline', arguments: { shape: 'rect', width: 5, height: 5 } });
+      // Let the 20ms debounce fire and fail.
+      await new Promise((r) => setTimeout(r, 200));
+
+      const state = await client.callTool({ name: 'get_board_state', arguments: {} });
+      expect(textOf(state as any).toLowerCase()).toContain('save');
+    } finally {
+      await client.close();
+      await mkdir(badDir, { recursive: true }); // let started.close()'s flush succeed
       await started.close();
       await rm(projectDir, { recursive: true, force: true });
     }
