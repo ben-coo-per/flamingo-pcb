@@ -8,7 +8,7 @@
 
 import type { Panel, PanelInstance, PanelSettings, PanelSource, Rotation } from './types.js';
 
-export const PANEL_EXTENSION = '.flamingo-panel';
+export const PANEL_EXTENSION = '.plamingo';
 
 /**
  * Settings a new panel starts with. The numbers mirror

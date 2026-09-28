@@ -66,13 +66,13 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
     'panel_new',
     {
       description:
-        'Create a new, empty panel (a .flamingo-panel file next to the boards), replacing whatever panel is loaded. A panel holds copies ("instances") of one or more board files for fabrication and assembly as one piece. The board currently open in the editor is not affected.',
+        'Create a new, empty panel (a .plamingo file next to the boards), replacing whatever panel is loaded. A panel holds copies ("instances") of one or more board files for fabrication and assembly as one piece. The board currently open in the editor is not affected.',
       inputSchema: {
         name: z.string().describe('Panel name; also the file name'),
         path: z
           .string()
           .optional()
-          .describe('File to create, absolute or relative to the project directory. Defaults to "<name>.flamingo-panel" in the project directory'),
+          .describe('File to create, absolute or relative to the project directory. Defaults to "<name>.plamingo" in the project directory'),
       },
     },
     async ({ name, path }) => {
@@ -86,7 +86,7 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
     {
       description: 'Open a panel file, replacing whatever panel is loaded.',
       inputSchema: {
-        path: z.string().describe('Path to a .flamingo-panel file, absolute or relative to the project directory'),
+        path: z.string().describe('Path to a .plamingo file, absolute or relative to the project directory'),
       },
     },
     async ({ path }) => {

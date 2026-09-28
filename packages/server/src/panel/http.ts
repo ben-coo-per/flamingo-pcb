@@ -192,7 +192,7 @@ export async function handlePanelApi(
     case 'open': {
       const path = str('path');
       if (!path) {
-        sendJSON(res, 400, { ok: false, error: 'body must be {"path": "<file.flamingo-panel>"}' });
+        sendJSON(res, 400, { ok: false, error: 'body must be {"path": "<file.plamingo>"}' });
         return true;
       }
       const r = await session.open(path);

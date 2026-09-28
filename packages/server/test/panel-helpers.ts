@@ -99,10 +99,15 @@ export function testSession(projectDir: string): PanelSession {
   return new PanelSession({ projectDir, priceLookup: async (lcsc) => PRICES[lcsc], debounceMs: 20 });
 }
 
-export async function startPanelServer(projectDir: string, uiDistDir?: string): Promise<StartedServer> {
+export async function startPanelServer(
+  projectDir: string,
+  uiDistDir?: string,
+  opts: { panelOnly?: boolean; session?: PanelSession } = {},
+): Promise<StartedServer> {
   return startServer(new Doc(newBoard('editor', 2)), 0, {
     projectDir,
-    panel: testSession(projectDir),
+    panel: opts.session ?? testSession(projectDir),
+    ...(opts.panelOnly ? { panelOnly: true } : {}),
     partsApi: {
       fetchPart: async () => {
         throw new Error('no network in tests');

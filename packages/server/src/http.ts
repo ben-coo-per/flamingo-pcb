@@ -755,6 +755,27 @@ function makeRequestListener(
           if (!handled) sendNotFound(res);
           return;
         }
+        if (ctx.panelOnly && ctx.panel) {
+          // Started on a panel file: the panel view is the page at '/', the
+          // way the editor is for a board file, and there is no board here.
+          req.resume();
+          if (pathname.startsWith('/api/') || pathname === '/3d') {
+            sendNotFound(res);
+            return;
+          }
+          if (method === 'GET' && (pathname === '/panel' || pathname === '/panel/')) {
+            // Where the view lives on a server started on a board.
+            res.writeHead(302, { location: '/' });
+            res.end();
+            return;
+          }
+          if (method === 'GET' || method === 'HEAD') {
+            const page = pathname === '/' || pathname === '/index.html' || !/\.[a-z0-9]+$/i.test(pathname);
+            if (await serveStatic(page ? '/panel.html' : pathname, res, uiDistDir)) return;
+          }
+          sendNotFound(res);
+          return;
+        }
         if (pathname.startsWith('/api/')) {
           const handled = await handleApi(ctx, method, pathname, url, req, res);
           if (!handled) sendNotFound(res);
@@ -882,6 +903,12 @@ export interface StartServerOptions {
    * true for a fresh session, or a session to use (e.g. one that opened a file).
    */
   panel?: boolean | PanelSession;
+  /**
+   * The server is started on a panel file, not on a board: the panel view is
+   * the page at '/', only the panel tools are served over MCP, and the board
+   * editor, its routes and its tools are not. Needs `panel`; `doc` is unused.
+   */
+  panelOnly?: boolean;
 }
 
 /**
@@ -910,6 +937,7 @@ export function startServer(
     partsApi,
     route: opts.routeRunner ?? defaultRouteRunner,
     ...(panel ? { panel } : {}),
+    ...(panel && opts.panelOnly ? { panelOnly: true } : {}),
   };
   const uiDistDir = opts.uiDistDir ?? UI_DIST;
   const server = http.createServer(makeRequestListener(ctx, uiDistDir));

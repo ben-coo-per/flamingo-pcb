@@ -2,7 +2,7 @@
  * Flamingo Panel - panel model types.
  * Units: mm. Coordinate system: y-up. Angles: degrees CCW (as in the engine).
  *
- * A panel is plain JSON (`.flamingo-panel`), diff-friendly like a board. It
+ * A panel is plain JSON (`.plamingo`), diff-friendly like a board. It
  * never embeds board content: source boards are referenced by path plus a
  * content hash, so editing a source board marks the panel stale instead of
  * silently fabricating an old copy.

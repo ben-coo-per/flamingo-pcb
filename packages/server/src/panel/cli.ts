@@ -1,5 +1,5 @@
 /**
- * `flamingo panel <command> <file.flamingo-panel> ...`
+ * `flamingo panel <command> <file.plamingo> ...`
  *
  * The panel MCP tools as shell commands. Each command opens the panel file,
  * does one thing through the same PanelSession the server uses, saves, and

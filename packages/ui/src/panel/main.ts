@@ -573,6 +573,11 @@ const renderSidebar = createSidebar(
 // A board made in the editor since this page loaded should be on offer.
 window.addEventListener('focus', () => refreshBoardFiles(store.get().view, true));
 
+// The editor is at '/' only on a server started on a board, where this view is
+// at /panel. On a server started on a panel file this view is the page at '/'.
+const editorLink = document.querySelector<HTMLElement>('a.bar-link');
+if (editorLink && !location.pathname.startsWith('/panel')) editorLink.hidden = true;
+
 const banner = $('plate-banner');
 function renderBanner(): void {
   const shown = previewed();

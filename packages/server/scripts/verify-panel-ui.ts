@@ -32,6 +32,8 @@
  *   - Delete, Ctrl+Z and Ctrl+Shift+Z work
  *   - an edit made outside the browser (as MCP would) shows up without a reload
  *   - Export offers a zip, and the zip holds the fab files
+ *   - a server started on a panel file has the same view at '/', without the
+ *     link to an editor that is not there
  *   - colour means "which board" and nothing else: every instance is filled
  *     with its board's tint, and every coloured pixel and style has the hue of
  *     a board colour
@@ -910,7 +912,39 @@ async function main(): Promise<void> {
     assert(editorErrors.length === 0, `the editor logged errors:\n${editorErrors.join('\n')}`);
     // The link in the panel view leads here.
     assert((await page.locator('a.bar-link').getAttribute('href')) === '/', 'the panel view does not link to the editor');
+    assert(await page.locator('a.bar-link').isVisible(), 'the link to the editor is hidden on a server that has one');
     await editor.close();
+
+    // --- a panel file served on its own ------------------------------------
+    step('a server started on a panel file has the view at the root');
+    const alone = await startServer(new Doc(newBoard('unused', 2)), 0, { projectDir, panel: true, panelOnly: true });
+    try {
+      const root = `http://127.0.0.1:${alone.port}`;
+      const made = await fetch(`${root}/api/panel/new`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'alone' }) });
+      assert(made.ok, 'a panel could not be started on the second server');
+      const solo = await context.newPage();
+      const soloErrors: string[] = [];
+      solo.on('pageerror', (e) => soloErrors.push(e.message));
+      await solo.goto(`${root}/`);
+      await solo.waitForFunction('window.flamingoPanel && window.flamingoPanel.state().view !== null');
+      await solo.waitForFunction("document.getElementById('status-conn').textContent === 'connected'");
+      assert((await solo.title()) === 'Flamingo — Panel', `the page at the root is titled "${await solo.title()}"`);
+      assert(((await solo.locator('#panel-file').textContent()) ?? '').endsWith('alone.plamingo'), `the panel file reads "${await solo.locator('#panel-file').textContent()}"`);
+      assert(!(await solo.locator('a.bar-link').isVisible()), 'there is a link to an editor this server does not have');
+      await solo.locator('#board-add button.add-board', { hasText: 'esp32-breakout' }).click();
+      await solo.waitForFunction('window.flamingoPanel.state().view.panel.sources.length === 1');
+      await solo.locator('#option-list [data-option]').first().waitFor();
+      await solo.goto(`${root}/panel`);
+      assert(new URL(solo.url()).pathname === '/', `/panel leads to ${new URL(solo.url()).pathname}`);
+      assert(soloErrors.length === 0, `the page logged errors:\n${soloErrors.join('\n')}`);
+      const png = await solo.screenshot({ path: join(SHOTS_DIR, '15-served-on-its-own.png') });
+      assert(png.length > 0, 'no screenshot');
+      shots.push(['15-served-on-its-own.png', 'A panel file served on its own (`flamingo serve alone.plamingo`): the same view, at the root of its own port, with no link to a board editor.']);
+      console.log('  screenshot 15-served-on-its-own.png');
+      await solo.close();
+    } finally {
+      await alone.close().catch(() => {});
+    }
 
     await writeFile(
       join(SHOTS_DIR, 'README.md'),
