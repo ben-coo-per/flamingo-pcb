@@ -13,12 +13,12 @@
 
 import './panel.css';
 import type { Point } from '@flamingo/engine';
-import type { PanelOp, PanelView } from '@flamingo/panel';
+import type { PanelOp, PanelView, Scenario } from '@flamingo/panel';
 import { fitToBoard, panBy, screenToWorld, worldToScreen, zoomAt } from '../view.js';
 import { addBoard, api, isError, listBoards } from './api.js';
 import { drawPlate } from './draw.js';
-import { mm, quoteKey } from './format.js';
-import { DRAG_THRESHOLD_PX, contentBox, dropPosition, hitInstance } from './hit.js';
+import { loadsOntoPanel, mm, previewLine, quoteKey } from './format.js';
+import { DRAG_THRESHOLD_PX, contentBox, dropPosition, hitInstance, platePlaces, platesBox } from './hit.js';
 import { createSidebar } from './sidebar.js';
 import { PanelStore } from './store.js';
 import { connectPanelWs } from './ws.js';
@@ -70,6 +70,20 @@ function fit(view: PanelView): void {
   });
 }
 
+/** The scenario shown on the plate in place of the panel, if one is. */
+function previewed(): Scenario | undefined {
+  const { preview, quote } = store.get();
+  return preview ? quote?.scenarios.find((s) => s.id === preview) : undefined;
+}
+
+/** Show the panel again. */
+function leavePreview(): void {
+  if (!store.get().preview) return;
+  store.set({ preview: null, scenario: null, scenarioMsg: null });
+  const view = store.get().view;
+  if (view) fit(view);
+}
+
 /**
  * Fit the plate to a layout that was just replaced wholesale (arrange, a
  * scenario). The view carrying it may have arrived before the reply that
@@ -112,7 +126,7 @@ function refreshQuote(view: PanelView): void {
       return;
     }
     const still = r.scenarios.some((s) => s.id === store.get().scenario);
-    store.set({ quote: r, quoteError: null, ...(still ? {} : { scenario: null, scenarioMsg: null }) });
+    store.set({ quote: r, quoteError: null, ...(still ? {} : { scenario: null, scenarioMsg: null, preview: null }) });
   })();
 }
 
@@ -129,7 +143,16 @@ const ws = connectPanelWs({
     const menu = state.menu && view.panel.instances.some((i) => i.id === state.menu!.id) ? state.menu : null;
     // Another panel was opened or started: look at it afresh.
     const swapped = state.view !== null && state.view.filePath !== view.filePath;
-    store.set({ view, drag, selection, menu, ...(swapped ? { hasFit: false, scenario: null, scenarioMsg: null, arrangeMsg: null, exportMsg: null } : {}) });
+    // The panel changed under a scenario that was being shown: show the panel.
+    const edited = state.preview !== null && state.view !== null && view.revision !== state.view.revision;
+    store.set({
+      view,
+      drag,
+      selection,
+      menu,
+      ...(swapped ? { hasFit: false, scenario: null, scenarioMsg: null, arrangeMsg: null, exportMsg: null, preview: null } : {}),
+      ...(edited ? { hasFit: false, preview: null, scenario: null, scenarioMsg: null } : {}),
+    });
     if (!store.get().hasFit && cssWidth > 0) fit(view);
     refreshQuote(view);
     refreshBoardFiles(view);
@@ -234,11 +257,19 @@ function removeSelected(): void {
 async function selectScenario(id: string): Promise<void> {
   const scenario = store.get().quote?.scenarios.find((s) => s.id === id);
   if (!scenario) return;
-  store.set({ scenario: id, scenarioMsg: null, arrangeMsg: null });
-  if (!scenario.layout) {
-    store.set({ scenarioMsg: { text: 'This scenario orders single boards: there is no panel to load. The plate is unchanged.', problem: false } });
+  store.set({ scenario: id, scenarioMsg: null, arrangeMsg: null, selection: null, menu: null, drag: null });
+  if (!loadsOntoPanel(scenario)) {
+    // Not one panel, so there is nothing to load: the plate shows the orders
+    // themselves, and the panel stays as it is underneath.
+    store.set({ preview: id });
+    const places = platePlaces(scenario.orders.map((o) => o.plate));
+    store.set({ transform: fitToBoard(store.get().transform, platesBox(places), cssWidth, cssHeight), hasFit: true });
     return;
   }
+  const layout = scenario.orders[0]!.layout!;
+  const wasPreview = store.get().preview !== null;
+  store.set({ preview: null });
+  if (wasPreview) store.set({ hasFit: false });
   const since = store.get().view?.revision ?? 0;
   const r = await api.applyScenario(id);
   if (isError(r)) {
@@ -247,7 +278,7 @@ async function selectScenario(id: string): Promise<void> {
   }
   store.set({
     selection: null,
-    scenarioMsg: { text: `Loaded onto the plate: ${scenario.layout.instances.length} instance${scenario.layout.instances.length === 1 ? '' : 's'}, ${mm(scenario.layout.width)} × ${mm(scenario.layout.height)} mm. Ctrl/Cmd+Z brings the previous panel back.`, problem: false },
+    scenarioMsg: { text: `Loaded onto the plate: ${layout.instances.length} instance${layout.instances.length === 1 ? '' : 's'}, ${mm(layout.width)} × ${mm(layout.height)} mm. Ctrl/Cmd+Z brings the previous panel back.`, problem: false },
   });
   fitNewLayout(since);
 }
@@ -360,7 +391,8 @@ canvas.addEventListener('mousedown', (ev) => {
   if (ev.button !== 0) return;
   const state = store.get();
   const at = plateXY(ev);
-  const hit = state.view ? hitInstance(state.view.geometry, screenToWorld(state.transform, at)) : null;
+  // A scenario on show is looked at, not edited: every press pans.
+  const hit = state.view && !state.preview ? hitInstance(state.view.geometry, screenToWorld(state.transform, at)) : null;
   press = { kind: hit ? 'instance' : 'plate', ...(hit ? { id: hit.id } : {}), start: at, last: at, moved: false };
   store.set({ selection: hit ? hit.id : null, menu: null });
 });
@@ -422,7 +454,7 @@ canvas.addEventListener('contextmenu', (ev) => {
   ev.preventDefault();
   const state = store.get();
   const at = plateXY(ev);
-  const hit = state.view ? hitInstance(state.view.geometry, screenToWorld(state.transform, at)) : null;
+  const hit = state.view && !state.preview ? hitInstance(state.view.geometry, screenToWorld(state.transform, at)) : null;
   store.set(hit ? { selection: hit.id, menu: { id: hit.id, x: at.x, y: at.y } } : { menu: null });
 });
 
@@ -447,6 +479,10 @@ function typing(ev: KeyboardEvent): boolean {
 }
 
 window.addEventListener('keydown', (ev) => {
+  if (ev.code === 'Escape' && store.get().preview) {
+    leavePreview();
+    return;
+  }
   if (ev.code === 'Escape') {
     if (press?.kind === 'instance') press = null;
     store.set({ menu: null, drag: null, selection: store.get().menu ? store.get().selection : null });
@@ -461,6 +497,9 @@ window.addEventListener('keydown', (ev) => {
     return;
   }
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+
+  // Arrange and Delete act on the panel, which is not what a scenario on show is.
+  if (store.get().preview) return;
 
   if (ev.code === 'KeyA') {
     ev.preventDefault();
@@ -513,6 +552,17 @@ const renderSidebar = createSidebar(
 // A board made in the editor since this page loaded should be on offer.
 window.addEventListener('focus', () => refreshBoardFiles(store.get().view, true));
 
+const banner = $('plate-banner');
+function renderBanner(): void {
+  const shown = previewed();
+  banner.hidden = !shown;
+  if (!shown) return;
+  const rank = (store.get().quote?.scenarios.findIndex((s) => s.id === shown.id) ?? 0) + 1;
+  $('banner-title').textContent = previewLine(shown, rank);
+  $('banner-note').textContent = 'Shown for comparison. Your panel is unchanged.';
+}
+$('banner-back').addEventListener('click', leavePreview);
+
 $('arrange-btn').addEventListener('click', () => void arrange());
 $('export-btn').addEventListener('click', () => void exportFab());
 
@@ -520,6 +570,7 @@ store.subscribe((state, previous) => {
   requestDraw();
   renderSidebar(state);
   if (state.menu !== previous.menu || state.view !== previous.view) renderMenu();
+  if (state.preview !== previous.preview || state.quote !== previous.quote) renderBanner();
 });
 
 new ResizeObserver(() => {

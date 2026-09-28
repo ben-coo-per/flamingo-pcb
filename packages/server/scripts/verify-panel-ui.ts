@@ -16,7 +16,10 @@
  *   - the right-click menu rotates, duplicates, toggles bare, unpins, deletes
  *   - A arranges, around a pinned instance, and explains a panel that cannot fit
  *   - the cost summary follows every change, and flags estimates
- *   - selecting a scenario shows its fee lines and loads its panel onto the plate
+ *   - a scenario row says what is on a panel, what is ordered and what you get
+ *   - selecting a scenario that is one panel loads it onto the plate
+ *   - selecting one that is not (separate orders) shows its orders on the
+ *     plate, says so in a banner, and leaves the panel alone
  *   - warnings from the check are listed
  *   - Delete, Ctrl+Z and Ctrl+Shift+Z work
  *   - an edit made outside the browser (as MCP would) shows up without a reload
@@ -203,10 +206,15 @@ async function main(): Promise<void> {
     await shot('00-start', 'A new panel: nothing on the plate, and the project\'s boards on offer under Boards.');
     await page.locator('#board-add button.add-board', { hasText: 'usbc-breakout' }).click();
     await until('v.panel.sources.length === 1 && v.panel.instances.length === 1', 'the first board on the panel, with one instance');
-    assert((await page.locator('#board-add button.add-board').count()) === 1, 'a board on the panel is still on offer');
+    // The list is fetched again once the panel has the board; give it the moment it needs.
+    await page.waitForFunction("document.querySelectorAll('#board-add button.add-board').length === 1", undefined, { timeout: 5000 }).catch(() => {
+      throw new Error('ASSERT FAILED: a board on the panel is still on offer');
+    });
     await page.locator('#board-add button.add-board', { hasText: 'esp32-breakout' }).click();
     await until('v.panel.sources.length === 2 && v.panel.instances.length === 2', 'both boards on the panel');
-    assert((await page.locator('#board-add button.add-board').count()) === 0, 'boards are on offer although all are on the panel');
+    await page.waitForFunction("document.querySelectorAll('#board-add button.add-board').length === 0", undefined, { timeout: 5000 }).catch(() => {
+      throw new Error('ASSERT FAILED: boards are on offer although all are on the panel');
+    });
     assert((await errorCodes()).length === 0, `starting a panel left errors: ${(await errorCodes()).join(', ')}`);
     const started0 = await getView();
     assert(started0.filePath !== null && started0.panel.sources.map((x) => x.path).sort().join() === 'esp32-breakout.flamingo,usbc-breakout.flamingo', 'the boards were not recorded by relative path');
@@ -447,15 +455,29 @@ async function main(): Promise<void> {
     for (const [key, g, need, met, over] of got) {
       assert(Number(met) === Number(need) && Number(over) === Number(g) - Number(need), `${key}: ${g} of ${need} drawn as ${met} + ${over} marks`);
     }
-    assert((await first.locator('.sc-warn').count()) === 1, 'a scenario row shows no count of warnings');
+    assert(/^\d+ notes?$/.test((await first.locator('.sc-warn').innerText()).trim()), 'a scenario row does not count its notes');
     assert((await first.locator('.sc-per .est').innerText()).trim() === 'est.', 'a scenario row shows no estimate mark');
-    assert((await first.locator('.sc-order .chip').count()) >= 2, 'a scenario row does not show what is on the panel');
+    assert((await first.locator('.sc-panel .chip').count()) >= 2, 'a scenario row does not show what is on the panel');
+    // Every fact on the row says what it is.
+    const labels = (await first.locator('.sc-facts dt').allInnerTexts()).map((t) => t.trim());
+    assert(JSON.stringify(labels) === JSON.stringify(['panel', 'order', 'you get']), `a scenario row is labelled ${JSON.stringify(labels)}`);
+    assert(/^5 panels\s*:\s*\d+ assembled/.test((await first.locator('.sc-qty').innerText()).replace(/\s+/g, ' ').trim()), `the order reads "${(await first.locator('.sc-qty').innerText()).trim()}"`);
+    const numbers = await first.locator('.sc-got .got').evaluateAll((els) => els.map((e) => [e.querySelector('.got-n')!.textContent, e.getAttribute('data-got')]));
+    assert(numbers.every(([shown, g]) => shown === g), `boards received are numbered ${JSON.stringify(numbers)}`);
+    assert((await text('#scenario-list .sc-legend')).replace(/\s+/g, ' ').includes('you get = assembled boards delivered'), 'the marks are not explained');
+    assert((await first.locator('svg.sc-icon').count()) === 1, 'a scenario row has no drawing of its kind');
+    // No fact runs over onto a second line.
+    const tall = await page.locator('#scenario-list .sc-facts dd.sc-qty').evaluateAll((els) => els.filter((e) => (e as HTMLElement).offsetHeight > 24).length);
+    assert(tall === 0, `${tall} order line(s) wrap`);
+    const separate = page.locator('#scenario-list [data-scenario="separate"]');
+    const sepLabels = (await separate.locator('.sc-facts dt').allInnerTexts()).map((t) => t.trim());
+    assert(JSON.stringify(sepLabels) === JSON.stringify(['order', 'order', 'you get']), `separate orders are labelled ${JSON.stringify(sepLabels)}`);
     // Cost as a length: the dearest scenario fills the bar, the cheapest is shortest.
     const meters = await page.locator('#scenario-list .scenario .sc-cost .meter i').evaluateAll((els) => els.map((e) => parseFloat((e as HTMLElement).style.width)));
     assert(meters[meters.length - 1] === 100 && meters[0]! < 100, `the cost bars are ${meters.join(', ')}`);
     // A row is a few words, not a paragraph.
     const words = (await first.innerText()).split(/\s+/).filter((w) => /[a-z]{3,}/i.test(w)).length;
-    assert(words <= 12, `a scenario row has ${words} words`);
+    assert(words <= 16, `a scenario row has ${words} words`);
 
     const target = 'merged-needed-x2';
     const want = await state<{ n: number; total: number; w: number; h: number }>(
@@ -484,10 +506,71 @@ async function main(): Promise<void> {
     assert(!(await detail()).includes('Different designs'), 'a silk-divided board is charged for different designs');
     await shot('10-scenario-silk-divider', 'The cheapest scenario: boards inside one outline, divided by silkscreen lines (dotted), no rails, no tabs.');
 
+    // --- a scenario that is not a panel ------------------------------------
+    step('separate orders are shown on the plate, not loaded');
+    const panelBefore = JSON.stringify((await getView()).panel);
+    const transformBefore = JSON.stringify(await state('s.transform'));
     await page.locator('#scenario-list [data-scenario="separate"]').click();
-    await page.locator('#scenario-lines .msg').waitFor();
-    assert((await text('#scenario-lines .msg')).includes('there is no panel to load'), 'a scenario of single boards does not say the plate is unchanged');
-    assert((await state<string>('s.view.panel.settings.separation')) === 'silk-divider', 'a scenario without a panel changed the plate');
+    await page.locator('#plate-banner:not([hidden])').waitFor();
+    assert((await state<string | null>('s.preview')) === 'separate', 'the scenario is not on show');
+    const bannerTitle = await text('#banner-title');
+    assert(/^Scenario \d, Separate orders: 2 orders of single boards, no panel$/.test(bannerTitle), `the banner reads "${bannerTitle}"`);
+    assert((await text('#banner-note')).includes('Your panel is unchanged'), 'the banner does not say the panel is unchanged');
+    assert(JSON.stringify((await getView()).panel) === panelBefore, 'showing a scenario changed the panel');
+    assert(JSON.stringify(await state('s.transform')) !== transformBefore, 'the plate did not move to show the orders');
+    assert((await text('#scenario-lines .meaning')).includes('ordered on its own'), 'the scenario is not explained');
+    // The plate shows two plates, one per order, each in its board's colour.
+    const shotSeparate = await shot('10b-scenario-separate', 'Separate orders selected: the plate shows the two orders side by side, each a stack of single boards with its quantity, under a banner saying the panel is unchanged.');
+    {
+      const spots = (await page.evaluate(`(() => {
+        const s = window.flamingoPanel.state();
+        const sc = s.quote.scenarios.find((x) => x.id === 'separate');
+        const r = document.getElementById('plate-canvas').getBoundingClientRect();
+        let x = 0;
+        return sc.orders.map((o) => {
+          const f = o.plate.frame.outer;
+          const c = window.flamingoPanel.toPlate({ x: x + (f.maxX - f.minX) * 0.8, y: (f.maxY - f.minY) * 0.2 });
+          x += (f.maxX - f.minX) + 18;
+          return { key: o.designs[0], x: r.left + c.x, y: r.top + c.y };
+        });
+      })()`)) as Array<{ key: string; x: number; y: number }>;
+      const img = new Resvg(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${VIEWPORT.width}" height="${VIEWPORT.height}"><image width="${VIEWPORT.width}" height="${VIEWPORT.height}" href="data:image/png;base64,${shotSeparate.toString('base64')}"/></svg>`,
+      ).render();
+      const boardKeys = await state<string[]>('s.view.panel.sources.map((x) => x.key)');
+      assert(spots.length === 2, `expected two plates, got ${spots.length}`);
+      for (const spot of spots) {
+        const i = (Math.round(spot.y) * img.width + Math.round(spot.x)) * 4;
+        const got = [img.pixels[i]!, img.pixels[i + 1]!, img.pixels[i + 2]!];
+        const hex = tint(boardColorAt(boardKeys.indexOf(spot.key)));
+        const want = [1, 3, 5].map((k) => parseInt(hex.slice(k, k + 2), 16));
+        assert(got.every((v, k) => Math.abs(v - want[k]!) <= 3), `the plate of ${spot.key} is rgb(${got.join(',')}) where its board colour rgb(${want.join(',')}) was expected`);
+      }
+    }
+    // Nothing on show can be edited.
+    await page.mouse.click(canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2, { button: 'right' });
+    assert(!(await page.locator('#context-menu').isVisible()), 'a scenario on show has an object menu');
+    await page.keyboard.press('Delete');
+    await page.keyboard.press('a');
+    await page.waitForTimeout(150);
+    assert(JSON.stringify((await getView()).panel) === panelBefore, 'a key changed the panel while a scenario was on show');
+    // Escape, or the button, brings the panel back.
+    await page.keyboard.press('Escape');
+    await page.locator('#plate-banner').waitFor({ state: 'hidden' });
+    assert((await state<string | null>('s.preview')) === null && (await state<string | null>('s.scenario')) === null, 'Escape did not bring the panel back');
+    assert(JSON.stringify(await state('s.transform')) === transformBefore, 'the plate did not return to the panel');
+    await page.locator('#scenario-list [data-scenario="separate"]').click();
+    await page.locator('#plate-banner:not([hidden])').waitFor();
+    await page.locator('#banner-back').click();
+    await page.locator('#plate-banner').waitFor({ state: 'hidden' });
+    assert((await state<string | null>('s.preview')) === null, 'the button did not bring the panel back');
+    // An edit to the panel from elsewhere ends the show too.
+    await page.locator('#scenario-list [data-scenario="separate"]').click();
+    await page.locator('#plate-banner:not([hidden])').waitFor();
+    await post('/api/panel/op', { op: 'setName', name: 'combo' });
+    await page.locator('#plate-banner').waitFor({ state: 'hidden' });
+    assert((await state<string>('s.view.panel.settings.separation')) === 'silk-divider', 'the panel is not the one that was there');
+    await post('/api/panel/undo');
 
     await page.locator(`#scenario-list [data-scenario="${target}"]`).click();
     await until(`v.panel.settings.separation === 'mouse-bite' && v.panel.instances.length === ${want.n}`, 'the mouse-bite scenario back on the plate');

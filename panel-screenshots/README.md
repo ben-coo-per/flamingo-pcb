@@ -15,6 +15,7 @@ Taken by `packages/server/scripts/verify-panel-ui.ts` in headless Chromium
 - `08-cost-follows-quantity.png` — Needed quantity of M raised to 12: more panels assembled, a new total, and new scenarios below.
 - `09-scenario-loaded.png` — Scenario "Mouse-bite panel" selected: its cost below the list with Boards unfolded, its 1 + 3 panel on the plate, and the live cost equal to its total.
 - `10-scenario-silk-divider.png` — The cheapest scenario: boards inside one outline, divided by silkscreen lines (dotted), no rails, no tabs.
+- `10b-scenario-separate.png` — Separate orders selected: the plate shows the two orders side by side, each a stack of single boards with its quantity, under a banner saying the panel is unchanged.
 - `11-exported.png` — Export fab files: the zip is ready and offered as a download link.
 - `12-export-refused.png` — Export on a panel with an overlap: refused, with the findings that stopped it.
 - `13-does-not-fit.png` — 44 + 3 instances: Arrange leaves the plate as it is and says why, with the smallest panel that would hold them.

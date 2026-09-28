@@ -4,8 +4,8 @@ Branch `panelize`, on top of `main` (487b6b0). Written 2026-09-28.
 All ten steps of the order of work are done and committed. The branch is pushed
 to the fork `ben-coo-per/flamingo-pcb`; see section 1.
 
-**Section 16 records changes made after Ben's first review of the panel view.
-Where it contradicts sections 7, 12 or 14, section 16 is current.**
+**Sections 16 and 17 record changes made after Ben's reviews of the panel view.
+Where they contradict sections 7, 12 or 14, the later section is current.**
 
 ## 1. Git remotes and what was pushed
 
@@ -542,11 +542,11 @@ edited, when its DRC runs once.
 | --- | --- | --- | --- | --- |
 | engine | 305 | 0 | 0 | 0 |
 | fab | 67 | 1 (baseline) | 0 | 0 |
-| panel | 219 | 0 | 0 | 219 |
+| panel | 220 | 0 | 0 | 220 |
 | parts | 41 | 0 | 0 | 0 |
 | server | 198 | 2 (baseline) | 2 | 51 |
-| ui | 60 | 0 | 0 | 19 |
-| **total** | **890** | **3 (all baseline)** | 2 | **289** |
+| ui | 64 | 0 | 0 | 23 |
+| **total** | **895** | **3 (all baseline)** | 2 | **294** |
 
 Where the brief's list of unit tests lives:
 
@@ -567,7 +567,7 @@ Scripts:
 | --- | --- |
 | `npx tsx packages/server/scripts/e2e-panel.ts` with Java | **PASS**, exit 0. Both boards routed and DRC-clean, panel check 0 errors, export not waived, 9 gerbers + 2 drill files parsed by tracespace, BOM 34 designators on 7 rows, CPL 34 rows. 11 s. |
 | same, without Java (this machine as it is) | **PASS**, exit 0, on unrouted boards. The only errors are each board's own unconnected nets, and only those are waived. 2 s. |
-| `npx tsx packages/server/scripts/verify-panel-ui.ts` | **PASS**, exit 0. 18 checks, 16 screenshots. |
+| `npx tsx packages/server/scripts/verify-panel-ui.ts` | **PASS**, exit 0. 19 checks, 17 screenshots. |
 | `npx tsx packages/server/scripts/e2e-esp32.ts` with Java, stock check off | **PASS**, exit 0. Unchanged script. It rewrites `docs/images/esp32-breakout.png`; I restored the file. |
 
 ## 12. UI screenshots
@@ -589,6 +589,7 @@ In `panel-screenshots/`, 1600 × 1000, headless Chromium, on the boards
 | `08-cost-follows-quantity.png` | Needed quantity of M raised to 12: more panels assembled, a new total. |
 | `09-scenario-loaded.png` | A scenario selected: its cost in three subtotals with Boards unfolded, its 1 + 3 panel on the plate. |
 | `10-scenario-silk-divider.png` | The cheapest scenario: boards in one outline divided by silkscreen lines, no rails, no tabs. |
+| `10b-scenario-separate.png` | Separate orders selected: the plate shows the two orders side by side, each a stack of single boards, under a banner saying the panel is unchanged. |
 | `11-exported.png` | Export: the zip is ready and offered as a link. |
 | `12-export-refused.png` | Export on a panel with an overlap: refused, with the findings. |
 | `13-does-not-fit.png` | 47 instances: Arrange leaves the plate alone and says why. |
@@ -785,7 +786,78 @@ folded into one line. The legend is one line; the long form is a tooltip.
 - Elements marked `hidden` that had a display set in CSS were shown anyway:
   the `estimate` tag appeared with no cost to flag.
 
+## 17. Changes after the second review (2026-09-28)
+
+Ben, on the reworked scenario list: "we still need to be clearer about what
+these scenarios mean. what are the squares for S & M in the scenario rows? we
+also need to make the separate orders scenario reflect somehow in the panel
+view UI. Currently it feels like a bug if you don't read the small text
+underneath that it doesn't change the panel."
+
+### Scenario rows say what each thing is
+
+Every fact on a row now has a label in front of it:
+
+| Label | What follows | Example |
+| --- | --- | --- |
+| `panel` | what one panel holds, as chips in the boards' colours | `S ×1` `M ×3` |
+| `order` | how many pieces are made, and of those how many are assembled and how many arrive bare | `5 panels: 2 assembled, 3 bare` |
+| `you get` | assembled boards delivered per design: the number, then one mark per board | `S 2 ■□` `M 6 ■■■■■□` |
+
+- The squares Ben asked about are the boards delivered: solid for one that is
+  needed, hollow for one more than needed. They now carry their number and sit
+  behind the label `you get`, and the legend above the list says the same.
+- The unlabelled `5 made · 2 assembled` is now `5 panels: 2 assembled, 3 bare`.
+  That the unassembled pieces are delivered too, bare, was not shown before.
+- The badge `6 !` is now `6 notes`.
+- Each kind of scenario has a small drawing of what is fabricated: boards with
+  gaps and tabs, one outline with printed lines, boards on their own.
+- The selected scenario's detail opens with two sentences on what the kind
+  means and what it costs or saves.
+- An order of single boards has no `panel` line: its `order` line starts with
+  the board's chip.
+
+### Every scenario shows on the plate
+
+Before, selecting a scenario that is not one panel left the plate as it was
+and said so in small text. Now:
+
+- A scenario that **is one panel** is loaded onto the plate, as before, and can
+  be edited. One undo step.
+- A scenario that **is not** (separate orders; a panel per design; split by
+  layers) is **shown** on the plate: one plate per order, side by side, each
+  drawn as a stack with its quantity (`× 5`) and a caption
+  (`Order 1 of 2: 5 boards, 2 assembled`).
+- A banner across the top of the plate names the scenario, says
+  "Shown for comparison. Your panel is unchanged.", and has a button
+  **Back to my panel**.
+- While a scenario is on show nothing on the plate can be edited: no drag, no
+  object menu, and A and Delete do nothing. Dragging pans, scrolling zooms.
+- Escape, the button, selecting another scenario, or any change to the panel
+  from anywhere brings the panel back.
+- The panel on the plate now also says what ordering it means, under its size:
+  `to meet the need: 5 panels, 2 assembled`.
+
+This replaces decisions 29 and 30 of section 7.
+
+To make this possible every order of a scenario now carries the shape of one
+piece of it (`ScenarioOrder.plate`), computed by the optimizer. `quote_order`
+and the CLI print the same text as before; `quote --json` has the new field.
+
+### Decisions in this round that are mine
+
+1. Scenarios that are not one panel are shown, not loaded, and the panel
+   underneath is kept. The alternative, emptying the panel, would lose work.
+2. The plates of a scenario stand side by side, 18 mm apart, bottoms aligned.
+3. A stack of three outlines stands for "several of these", whatever the
+   quantity; the number is written beside it.
+4. The labels are `panel`, `order`, `you get`.
+5. The sidebar is 440 px wide, from 420, so that an order line fits on one line.
+6. The estimated cost in the sidebar stays that of the panel while a scenario
+   is on show; the scenario's own cost is in its detail below the list.
+
 ### Not pushed
 
-This commit is local. The fork has `panelize` as of 9c50dfa.
+The commits of sections 16 and 17 are local. The fork has `panelize` as of
+9c50dfa.
 

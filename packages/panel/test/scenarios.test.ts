@@ -93,6 +93,26 @@ describe('quoteOrder: 1 sensor + 5 minis', () => {
     expect(silk.total).toBeLessThan(byId(result, 'merged-needed-x2').total);
   });
 
+  it('every order comes with the shape of one piece of it', () => {
+    for (const sc of result.scenarios) {
+      for (const o of sc.orders) {
+        expect(o.plate.frame, `${sc.id} ${o.label}`).not.toBeNull();
+        expect(o.plate.instances.length, `${sc.id} ${o.label}`).toBe(o.counts.reduce((n, c) => n + c.total, 0));
+        expect(o.plate.frame!.width, `${sc.id} ${o.label}`).toBeCloseTo(o.priced.order.piece.width, 6);
+        expect(o.plate.frame!.height, `${sc.id} ${o.label}`).toBeCloseTo(o.priced.order.piece.height, 6);
+      }
+    }
+    // A single board is just the board: nothing around it, nothing holding it.
+    const [sensor, mini] = byId(result, 'separate').orders;
+    expect(sensor!.plate).toMatchObject({ rails: [], tabs: [], fiducials: [], toolingHoles: [] });
+    expect(sensor!.plate.instances.map((i) => i.id)).toEqual(['S1']);
+    expect(mini!.plate.frame).toMatchObject({ width: 18, height: 12 });
+    // A panel is the panel that would be loaded.
+    const merged = byId(result, 'merged-needed-x2').orders[0]!;
+    expect(merged.plate.instances.map((i) => i.id).sort()).toEqual(merged.layout!.instances.map((i) => i.id).sort());
+    expect(merged.plate.tabs.length).toBeGreaterThan(0);
+  });
+
   it('every scenario delivers what is needed', () => {
     for (const sc of result.scenarios) {
       for (const r of sc.received) {

@@ -59,3 +59,48 @@ export function contentBox(geometry: PanelGeometry): { minX: number; minY: numbe
   }
   return box;
 }
+
+/** Gap between the plates of a scenario shown side by side, mm. */
+export const PLATE_GAP_MM = 18;
+
+export interface PlateSpot {
+  /** Added to every point of the plate's geometry to put it in its place. */
+  offset: Point;
+  /** Where the plate's outline ends up. */
+  box: { minX: number; minY: number; maxX: number; maxY: number };
+}
+
+/**
+ * Places for the plates of a scenario: left to right in order, bottoms on one
+ * line, the first with its corner at the origin.
+ */
+export function platePlaces(plates: Array<Pick<PanelGeometry, 'frame'>>, gap: number = PLATE_GAP_MM): PlateSpot[] {
+  const out: PlateSpot[] = [];
+  let x = 0;
+  for (const p of plates) {
+    const f = p.frame?.outer ?? { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+    const w = f.maxX - f.minX;
+    const h = f.maxY - f.minY;
+    out.push({ offset: { x: x - f.minX, y: -f.minY }, box: { minX: x, minY: 0, maxX: x + w, maxY: h } });
+    x += w + gap;
+  }
+  return out;
+}
+
+/**
+ * Box around every plate, with room under each for its caption and above for
+ * its quantity and the banner.
+ */
+export function platesBox(
+  spots: PlateSpot[],
+  below = 10,
+  above = 22,
+): { minX: number; minY: number; maxX: number; maxY: number } {
+  if (spots.length === 0) return { minX: 0, minY: 0, maxX: 100, maxY: 70 };
+  return {
+    minX: Math.min(...spots.map((s) => s.box.minX)),
+    minY: Math.min(...spots.map((s) => s.box.minY)) - below,
+    maxX: Math.max(...spots.map((s) => s.box.maxX)) + 4,
+    maxY: Math.max(...spots.map((s) => s.box.maxY)) + above,
+  };
+}
