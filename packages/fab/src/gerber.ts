@@ -50,6 +50,35 @@ export interface FabFiles {
   files: Map<string, string>;
 }
 
+/** A refdes label drawn somewhere other than where the board's own solver would put it. */
+export interface RefdesLabel {
+  text: string;
+  at: Point;
+  height: number;
+  rotation: number;
+}
+
+/**
+ * Optional additions for boards that are assembled from other boards (panels).
+ * Every field is optional and an empty object changes nothing, so
+ * `generateGerbers(board)` behaves exactly as it always has.
+ */
+export interface GerberExtras {
+  /** The zones of `b` already carry their fill: use it instead of pouring again. */
+  prefilled?: boolean;
+  /**
+   * Closed contours drawn on the profile layer in place of `board.outline`
+   * (a panel's frame, boards and tabs as routed).
+   */
+  profile?: Point[][];
+  /** Bare copper dots with a mask opening and no paste (panel fiducials). */
+  fiducials?: Array<{ at: Point; side: 'top' | 'bottom'; copperDiameter: number; maskDiameter: number }>;
+  /** Components whose pads get no solder paste (boards shipped bare). */
+  noPaste?: (refdes: string) => boolean;
+  /** Silkscreen label per component refdes, replacing the computed one. */
+  labels?: Map<string, RefdesLabel>;
+}
+
 // ---------------------------------------------------------------------------
 // Number / coordinate formatting
 // ---------------------------------------------------------------------------
@@ -255,7 +284,13 @@ function emitPad(g: GerberBuilder, comp: ComponentInst, pad: Pad, expansion: num
 // Per-file builders
 // ---------------------------------------------------------------------------
 
-function buildCopper(b: Board, filled: Board, layer: LayerId, fileFunction: string): string {
+function buildCopper(
+  b: Board,
+  filled: Board,
+  layer: LayerId,
+  fileFunction: string,
+  extras: GerberExtras,
+): string {
   const g = new GerberBuilder();
   const cu = copperLayersOf(b);
 
@@ -295,10 +330,16 @@ function buildCopper(b: Board, filled: Board, layer: LayerId, fileFunction: stri
     }
   }
 
+  for (const f of extras.fiducials ?? []) {
+    if (layer !== (f.side === 'top' ? 'F.Cu' : 'B.Cu')) continue;
+    g.select(g.aperture(`C,${ap(f.copperDiameter)}`));
+    g.flash(f.at);
+  }
+
   return g.assemble(fileFunction, 'Positive');
 }
 
-function buildMask(b: Board, side: 'F' | 'B'): string {
+function buildMask(b: Board, side: 'F' | 'B', extras: GerberExtras): string {
   const layer: LayerId = side === 'F' ? 'F.Cu' : 'B.Cu';
   const g = new GerberBuilder();
   const cu = copperLayersOf(b);
@@ -320,15 +361,21 @@ function buildMask(b: Board, side: 'F' | 'B'): string {
       g.flash(h.at);
     }
   }
+  for (const f of extras.fiducials ?? []) {
+    if ((f.side === 'top') !== (side === 'F')) continue;
+    g.select(g.aperture(`C,${ap(f.maskDiameter)}`));
+    g.flash(f.at);
+  }
   const fn = side === 'F' ? 'Soldermask,Top' : 'Soldermask,Bot';
   return g.assemble(fn, 'Negative');
 }
 
-function buildPaste(b: Board, side: 'F' | 'B'): string {
+function buildPaste(b: Board, side: 'F' | 'B', extras: GerberExtras): string {
   const layer: LayerId = side === 'F' ? 'F.Cu' : 'B.Cu';
   const g = new GerberBuilder();
   const cu = copperLayersOf(b);
   for (const comp of b.components) {
+    if (extras.noPaste?.(comp.refdes)) continue;
     for (const pad of comp.footprint.pads) {
       if (pad.layer === 'through') continue;
       if (!padCopperLayers(pad, comp.side, cu).includes(layer)) continue;
@@ -339,7 +386,7 @@ function buildPaste(b: Board, side: 'F' | 'B'): string {
   return g.assemble(fn, 'Positive');
 }
 
-function buildSilk(b: Board, side: 'F' | 'B'): string {
+function buildSilk(b: Board, side: 'F' | 'B', extras: GerberExtras): string {
   const silkLayer: LayerId = side === 'F' ? 'F.Silk' : 'B.Silk';
   const compSide: 'top' | 'bottom' = side === 'F' ? 'top' : 'bottom';
   const g = new GerberBuilder();
@@ -390,8 +437,9 @@ function buildSilk(b: Board, side: 'F' | 'B'): string {
     }
     // refdes label (upright, adjacent to the component body, pad-avoiding —
     // anchor shared with the SVG/canvas renderers and DRC)
-    const lp = componentLabelPlacement(b, comp);
-    strokes(strokeText(comp.refdes, lp.at, lp.height, lp.rotation, mirror), 0.15);
+    const given = extras.labels?.get(comp.refdes);
+    const lp = given ?? { ...componentLabelPlacement(b, comp), text: comp.refdes };
+    strokes(strokeText(lp.text, lp.at, lp.height, lp.rotation, mirror), 0.15);
   }
 
   // Board-level silk text. B.Silk text is mirrored (x -> -x about its anchor,
@@ -433,10 +481,16 @@ function buildSilk(b: Board, side: 'F' | 'B'): string {
  * The contour radius is `drill / 2` -- the milled opening, matching the Excellon
  * tool diameter -- not `padDiameter / 2`, which is the copper annulus.
  */
-function buildEdge(b: Board): string {
+function buildEdge(b: Board, extras: GerberExtras): string {
   const g = new GerberBuilder();
   g.select(g.aperture('C,0.1'));
-  for (const seg of b.outline) g.drawSeg(seg);
+  if (extras.profile) {
+    for (const ring of extras.profile) {
+      if (ring.length >= 3) g.drawPolyline([...ring, ring[0]]);
+    }
+  } else {
+    for (const seg of b.outline) g.drawSeg(seg);
+  }
   for (const h of allHoles(b)) {
     if (h.plated || !isSlot(h)) continue;
     const { start, end } = holeSlotCenterline(h);
@@ -470,9 +524,12 @@ function fileStem(name: string): string {
   return name.replace(/[^\w.-]+/g, '_') || 'board';
 }
 
-/** Render `b` to a complete Gerber X2 + Excellon fileset keyed by filename. */
-export function generateGerbers(b: Board): FabFiles {
-  const filled = fillAllZones(b);
+/**
+ * Render `b` to a complete Gerber X2 + Excellon fileset keyed by filename.
+ * `extras` is for panels (see GerberExtras); leave it out for a single board.
+ */
+export function generateGerbers(b: Board, extras: GerberExtras = {}): FabFiles {
+  const filled = extras.prefilled ? b : fillAllZones(b);
   const name = fileStem(b.name);
   const files = new Map<string, string>();
 
@@ -481,16 +538,16 @@ export function generateGerbers(b: Board): FabFiles {
     const layer = cu[i];
     const pos = i === 0 ? 'Top' : i === cu.length - 1 ? 'Bot' : 'Inner';
     const fileFunction = `Copper,L${i + 1},${pos}`;
-    files.set(copperFilename(name, layer, i), buildCopper(b, filled, layer, fileFunction));
+    files.set(copperFilename(name, layer, i), buildCopper(b, filled, layer, fileFunction, extras));
   }
 
-  files.set(`${name}.GTS`, buildMask(b, 'F'));
-  files.set(`${name}.GBS`, buildMask(b, 'B'));
-  files.set(`${name}.GTO`, buildSilk(b, 'F'));
-  files.set(`${name}.GBO`, buildSilk(b, 'B'));
-  files.set(`${name}.GTP`, buildPaste(b, 'F'));
-  files.set(`${name}.GBP`, buildPaste(b, 'B'));
-  if (b.outline.length > 0) files.set(`${name}.GKO`, buildEdge(b));
+  files.set(`${name}.GTS`, buildMask(b, 'F', extras));
+  files.set(`${name}.GBS`, buildMask(b, 'B', extras));
+  files.set(`${name}.GTO`, buildSilk(b, 'F', extras));
+  files.set(`${name}.GBO`, buildSilk(b, 'B', extras));
+  files.set(`${name}.GTP`, buildPaste(b, 'F', extras));
+  files.set(`${name}.GBP`, buildPaste(b, 'B', extras));
+  if (b.outline.length > 0 || extras.profile) files.set(`${name}.GKO`, buildEdge(b, extras));
 
   const drills = buildDrills(b);
   if (drills.plated) files.set(`${name}-PTH.DRL`, drills.plated);
