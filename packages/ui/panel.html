@@ -30,37 +30,43 @@
       </main>
 
       <aside class="side">
-        <section class="block">
-          <h2>Boards</h2>
+        <section class="block step" id="step-need">
+          <h2><span class="step-n">1</span>Boards you need</h2>
           <div id="board-list"></div>
           <div id="board-add" class="board-add"></div>
           <div id="board-msg" class="msg" hidden></div>
         </section>
 
-        <section class="block">
-          <button id="arrange-btn" class="btn" type="button">Arrange <kbd>A</kbd></button>
-          <div id="arrange-msg" class="msg" hidden></div>
+        <section class="block step" id="step-ways">
+          <h2><span class="step-n">2</span>Ways to order them</h2>
+          <div id="option-list"></div>
         </section>
 
-        <section class="block">
-          <h2>Estimated cost <span id="cost-flag" class="tag" hidden>estimate</span></h2>
-          <div id="cost-summary"></div>
-        </section>
+        <section class="block step" id="step-plate">
+          <h2><span class="step-n">3</span><span id="plate-title">On the plate</span></h2>
+          <p id="plate-meaning" class="meaning"></p>
 
-        <section class="block">
-          <h2>Compare scenarios</h2>
-          <div id="scenario-list"></div>
-          <div id="scenario-detail"></div>
-        </section>
+          <div id="plate-edit" class="sub">
+            <h3>Change it</h3>
+            <div id="plate-counts" class="plate-counts"></div>
+            <button id="arrange-btn" class="btn" type="button">Arrange <kbd>A</kbd></button>
+            <div id="arrange-msg" class="msg" hidden></div>
+          </div>
 
-        <section class="block">
-          <h2>Checks <span id="issue-count" class="count"></span></h2>
-          <div id="issue-list"></div>
-        </section>
+          <div class="sub">
+            <h3>Cost <span id="cost-flag" class="tag" hidden>estimate</span></h3>
+            <div id="cost-summary"></div>
+          </div>
 
-        <section class="block">
-          <button id="export-btn" class="btn" type="button">Export fab files</button>
-          <div id="export-msg" class="msg" hidden></div>
+          <div id="checks" class="sub">
+            <h3>Checks <span id="issue-count" class="count"></span></h3>
+            <div id="issue-list"></div>
+          </div>
+
+          <div class="sub">
+            <button id="export-btn" class="btn" type="button">Export fab files</button>
+            <div id="export-msg" class="msg" hidden></div>
+          </div>
         </section>
       </aside>
 

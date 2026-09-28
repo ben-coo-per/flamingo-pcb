@@ -252,5 +252,5 @@ export function previewLine(s: Pick<Scenario, 'kind' | 'orders'>, rank: number):
       : singles === 0
         ? `${panels} panels, each its own order`
         : `${s.orders.length} orders: ${panels} panel${panels === 1 ? '' : 's'} and ${singles} of single boards`;
-  return `Scenario ${rank}, ${SCENARIO_LABEL[s.kind]}: ${what}`;
+  return `Option ${rank}, ${SCENARIO_LABEL[s.kind]}: ${what}`;
 }

@@ -18,6 +18,7 @@ import { fitToBoard, panBy, screenToWorld, worldToScreen, zoomAt } from '../view
 import { addBoard, api, isError, listBoards } from './api.js';
 import { drawPlate } from './draw.js';
 import { loadsOntoPanel, mm, previewLine, quoteKey } from './format.js';
+import { OWN, buildOptions, rankOf, scenarioOnPlate } from './options.js';
 import { DRAG_THRESHOLD_PX, contentBox, dropPosition, hitInstance, platePlaces, platesBox } from './hit.js';
 import { createSidebar } from './sidebar.js';
 import { PanelStore } from './store.js';
@@ -79,7 +80,7 @@ function previewed(): Scenario | undefined {
 /** Show the panel again. */
 function leavePreview(): void {
   if (!store.get().preview) return;
-  store.set({ preview: null, scenario: null, scenarioMsg: null });
+  store.set({ preview: null });
   const view = store.get().view;
   if (view) fit(view);
 }
@@ -122,11 +123,15 @@ function refreshQuote(view: PanelView): void {
     const r = await api.quote();
     if (seq !== quoteSeq) return; // a newer request is on its way
     if (isError(r)) {
-      store.set({ quote: null, quoteError: r.error });
+      store.set({ quote: null, quoteError: r.error, quoteRev: store.get().quoteRev + 1, preview: null });
       return;
     }
-    const still = r.scenarios.some((s) => s.id === store.get().scenario);
-    store.set({ quote: r, quoteError: null, ...(still ? {} : { scenario: null, scenarioMsg: null, preview: null }) });
+    // What was shown for comparison may not be among the new answers.
+    const still = r.scenarios.some((s) => s.id === store.get().preview);
+    const left = !still && store.get().preview !== null;
+    store.set({ quote: r, quoteError: null, quoteRev: store.get().quoteRev + 1, ...(still ? {} : { preview: null }) });
+    const view = store.get().view;
+    if (left && view) fit(view);
   })();
 }
 
@@ -143,15 +148,20 @@ const ws = connectPanelWs({
     const menu = state.menu && view.panel.instances.some((i) => i.id === state.menu!.id) ? state.menu : null;
     // Another panel was opened or started: look at it afresh.
     const swapped = state.view !== null && state.view.filePath !== view.filePath;
-    // The panel changed under a scenario that was being shown: show the panel.
-    const edited = state.preview !== null && state.view !== null && view.revision !== state.view.revision;
+    // The panel itself changed under a scenario that was being shown: show the
+    // panel. A change to what is needed leaves the plate alone, and the list of
+    // answers is worked out again.
+    const edited =
+      state.preview !== null &&
+      state.view !== null &&
+      JSON.stringify([view.panel.instances, view.panel.settings]) !== JSON.stringify([state.view.panel.instances, state.view.panel.settings]);
     store.set({
       view,
       drag,
       selection,
       menu,
-      ...(swapped ? { hasFit: false, scenario: null, scenarioMsg: null, arrangeMsg: null, exportMsg: null, preview: null } : {}),
-      ...(edited ? { hasFit: false, preview: null, scenario: null, scenarioMsg: null } : {}),
+      ...(swapped ? { hasFit: false, arrangeMsg: null, exportMsg: null, preview: null } : {}),
+      ...(edited ? { hasFit: false, preview: null } : {}),
     });
     if (!store.get().hasFit && cssWidth > 0) fit(view);
     refreshQuote(view);
@@ -229,22 +239,15 @@ async function setCount(board: string, count: number): Promise<void> {
   }
 }
 
-/** Put a board file on the panel, with one instance of it on the plate. */
+/**
+ * Add a board file to what is needed. Nothing is put on the plate: how the
+ * board gets made is the next step's question, and its answers appear there.
+ */
 async function addBoardToPanel(path: string): Promise<void> {
   if (store.get().busy) return;
   store.set({ busy: true, boardMsg: null });
-  const since = store.get().view?.revision ?? 0;
   const added = await addBoard(path);
-  if (isError(added)) {
-    store.set({ busy: false, boardMsg: { text: added.error, problem: true } });
-    return;
-  }
-  const placed = await api.count(added.key, 1);
-  store.set({
-    busy: false,
-    boardMsg: isError(placed) ? { text: `${added.name} was added, but could not be placed: ${placed.error}`, problem: true } : null,
-  });
-  fitNewLayout(since);
+  store.set({ busy: false, boardMsg: isError(added) ? { text: added.error, problem: true } : null });
 }
 
 function removeSelected(): void {
@@ -254,10 +257,18 @@ function removeSelected(): void {
   store.set({ selection: null, menu: null });
 }
 
-async function selectScenario(id: string): Promise<void> {
-  const scenario = store.get().quote?.scenarios.find((s) => s.id === id);
+/** Pick one of the ways to order: it goes on the plate, or is shown there if it is not one panel. */
+async function selectOption(id: string): Promise<void> {
+  const { view, quote } = store.get();
+  if (!view) return;
+  store.set({ arrangeMsg: null, selection: null, menu: null, drag: null });
+  // The panel that is already on the plate: look at it.
+  if (id === OWN || scenarioOnPlate(view, quote)?.id === id) {
+    leavePreview();
+    return;
+  }
+  const scenario = quote?.scenarios.find((s) => s.id === id);
   if (!scenario) return;
-  store.set({ scenario: id, scenarioMsg: null, arrangeMsg: null, selection: null, menu: null, drag: null });
   if (!loadsOntoPanel(scenario)) {
     // Not one panel, so there is nothing to load: the plate shows the orders
     // themselves, and the panel stays as it is underneath.
@@ -267,18 +278,24 @@ async function selectScenario(id: string): Promise<void> {
     return;
   }
   const layout = scenario.orders[0]!.layout!;
+  const hadPanel = view.panel.instances.length > 0;
   const wasPreview = store.get().preview !== null;
   store.set({ preview: null });
   if (wasPreview) store.set({ hasFit: false });
-  const since = store.get().view?.revision ?? 0;
+  const since = view.revision;
   const r = await api.applyScenario(id);
   if (isError(r)) {
-    store.set({ scenarioMsg: { text: r.error, problem: true } });
+    store.set({ arrangeMsg: { text: r.error, problem: true } });
     return;
   }
   store.set({
     selection: null,
-    scenarioMsg: { text: `Loaded onto the plate: ${layout.instances.length} instance${layout.instances.length === 1 ? '' : 's'}, ${mm(layout.width)} × ${mm(layout.height)} mm. Ctrl/Cmd+Z brings the previous panel back.`, problem: false },
+    arrangeMsg: {
+      text:
+        `Put on the plate: ${layout.instances.length} instance${layout.instances.length === 1 ? '' : 's'}, ${mm(layout.width)} × ${mm(layout.height)} mm.` +
+        (hadPanel ? ' Ctrl/Cmd+Z brings the previous panel back.' : ''),
+      problem: false,
+    },
   });
   fitNewLayout(since);
 }
@@ -523,12 +540,16 @@ const renderSidebar = createSidebar(
     boardList: $('board-list'),
     boardAdd: $('board-add'),
     boardMsg: $('board-msg'),
+    optionList: $('option-list'),
+    plateTitle: $('plate-title'),
+    plateMeaning: $('plate-meaning'),
+    plateEdit: $('plate-edit'),
+    plateCounts: $('plate-counts'),
     arrangeBtn: $<HTMLButtonElement>('arrange-btn'),
     arrangeMsg: $('arrange-msg'),
     costFlag: $('cost-flag'),
     costSummary: $('cost-summary'),
-    scenarioList: $('scenario-list'),
-    scenarioDetail: $('scenario-detail'),
+    checks: $('checks'),
     issueCount: $('issue-count'),
     issueList: $('issue-list'),
     exportBtn: $<HTMLButtonElement>('export-btn'),
@@ -543,7 +564,7 @@ const renderSidebar = createSidebar(
   {
     setCount: (board, count) => void setCount(board, count),
     setQuantity: (board, field, value) => send({ op: 'setQuantity', key: board, [field]: value }),
-    selectScenario: (id) => void selectScenario(id),
+    selectOption: (id) => void selectOption(id),
     selectInstance: (id) => store.set({ selection: id, menu: null }),
     addBoard: (path) => void addBoardToPanel(path),
   },
@@ -557,7 +578,8 @@ function renderBanner(): void {
   const shown = previewed();
   banner.hidden = !shown;
   if (!shown) return;
-  const rank = (store.get().quote?.scenarios.findIndex((s) => s.id === shown.id) ?? 0) + 1;
+  const { view, quote, preview } = store.get();
+  const rank = view ? rankOf(buildOptions(view, quote, preview), shown.id) : 0;
   $('banner-title').textContent = previewLine(shown, rank);
   $('banner-note').textContent = 'Shown for comparison. Your panel is unchanged.';
 }
@@ -570,7 +592,7 @@ store.subscribe((state, previous) => {
   requestDraw();
   renderSidebar(state);
   if (state.menu !== previous.menu || state.view !== previous.view) renderMenu();
-  if (state.preview !== previous.preview || state.quote !== previous.quote) renderBanner();
+  if (state.preview !== previous.preview || state.quote !== previous.quote || state.view !== previous.view) renderBanner();
 });
 
 new ResizeObserver(() => {

@@ -301,13 +301,13 @@ describe('panel view: a scenario on the plate', () => {
 
   it('says in one line what is on show', () => {
     expect(previewLine({ kind: 'separate', orders: [order(false, false), order(false, false)] }, 5)).toBe(
-      'Scenario 5, Separate orders: 2 orders of single boards, no panel',
+      'Option 5, Separate orders: 2 orders of single boards, no panel',
     );
     expect(previewLine({ kind: 'own-panels', orders: [order(true, true), order(true, true)] }, 2)).toBe(
-      'Scenario 2, A panel per design: 2 panels, each its own order',
+      'Option 2, A panel per design: 2 panels, each its own order',
     );
     expect(previewLine({ kind: 'split', orders: [order(true, true), order(false, false)] }, 3)).toBe(
-      'Scenario 3, Split by layers: 2 orders: 1 panel and 1 of single boards',
+      'Option 3, Split by layers: 2 orders: 1 panel and 1 of single boards',
     );
   });
 });
