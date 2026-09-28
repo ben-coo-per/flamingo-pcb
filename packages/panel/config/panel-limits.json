@@ -1,0 +1,341 @@
+{
+  "$comment": "Panel size limits and panelization geometry. Every entry is {value, source, verified, date?, note?}. verified:true means the value was read from the cited JLCPCB page with WebFetch on the given date. verified:false means it is an estimate or a Flamingo design choice; source 'design-choice' marks the latter.",
+  "asOf": "2026-09-28",
+  "fab": {
+    "maxSize": {
+      "2": {
+        "value": {
+          "width": 670,
+          "height": 600
+        },
+        "source": "https://jlcpcb.com/capabilities/pcb-capabilities",
+        "verified": true,
+        "date": "2026-09-28",
+        "note": "FR4 2-layer maximum dimensions. Official capabilities page, not a /help/ article."
+      },
+      "4": {
+        "value": {
+          "width": 663,
+          "height": 593
+        },
+        "source": "https://jlcpcb.com/capabilities/pcb-capabilities",
+        "verified": true,
+        "date": "2026-09-28",
+        "note": "FR4 4-layer maximum dimensions. Official capabilities page, not a /help/ article."
+      },
+      "6": {
+        "value": {
+          "width": 656,
+          "height": 586
+        },
+        "source": "https://jlcpcb.com/capabilities/pcb-capabilities",
+        "verified": true,
+        "date": "2026-09-28",
+        "note": "FR4 6-layer and above. Official capabilities page, not a /help/ article."
+      }
+    },
+    "minSize": {
+      "value": {
+        "width": 3,
+        "height": 3
+      },
+      "source": "https://jlcpcb.com/capabilities/pcb-capabilities",
+      "verified": true,
+      "date": "2026-09-28"
+    },
+    "minSpacing": {
+      "value": 1.6,
+      "source": "https://jlcpcb.com/capabilities/pcb-capabilities",
+      "verified": true,
+      "date": "2026-09-28",
+      "note": "Mouse-bite panels: 'Panel board spacing: 1.6 or 2 mm'. The same page also says spacing should be >= 2 mm in general, so 2 mm is the default and 1.6 mm the floor."
+    },
+    "minNpthDiameter": {
+      "value": 0.5,
+      "source": "https://jlcpcb.com/capabilities/pcb-capabilities",
+      "verified": true,
+      "date": "2026-09-28"
+    }
+  },
+  "assembly": {
+    "economic": {
+      "singleSize": {
+        "value": {
+          "minWidth": 10,
+          "minHeight": 10,
+          "maxWidth": 470,
+          "maxHeight": 500
+        },
+        "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
+        "verified": true,
+        "date": "2026-09-28",
+        "note": "Official capabilities page, not a /help/ article."
+      },
+      "panelSize": {
+        "value": {
+          "minWidth": 10,
+          "minHeight": 10,
+          "maxWidth": 250,
+          "maxHeight": 250
+        },
+        "source": "https://jlcpcb.com/help/article/pcb-assembly-faqs",
+        "verified": true,
+        "date": "2026-09-28",
+        "note": "FAQ: 'panel size limit of not bigger than 250x250mm'. Minimum from the capabilities page."
+      },
+      "quantity": {
+        "value": {
+          "min": 2,
+          "max": 50
+        },
+        "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
+        "verified": true,
+        "date": "2026-09-28",
+        "note": "Official capabilities page, not a /help/ article."
+      },
+      "layers": {
+        "value": [
+          2,
+          4,
+          6
+        ],
+        "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
+        "verified": true,
+        "date": "2026-09-28"
+      },
+      "sides": {
+        "value": 1,
+        "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
+        "verified": true,
+        "date": "2026-09-28",
+        "note": "Single sided placement only."
+      },
+      "separations": {
+        "value": [
+          "mouse-bite"
+        ],
+        "source": "https://jlcpcb.com/help/article/pcb-assembly-faqs",
+        "verified": true,
+        "date": "2026-09-28",
+        "note": "'for Economic assembly, please panelize your boards with mouse-bites'. V-cut is not supported."
+      },
+      "railsRequired": {
+        "value": false,
+        "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
+        "verified": true,
+        "date": "2026-09-28"
+      }
+    },
+    "standard": {
+      "singleSize": {
+        "value": {
+          "minWidth": 70,
+          "minHeight": 70,
+          "maxWidth": 460,
+          "maxHeight": 500
+        },
+        "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
+        "verified": true,
+        "date": "2026-09-28",
+        "note": "Official capabilities page, not a /help/ article."
+      },
+      "panelSize": {
+        "value": {
+          "minWidth": 70,
+          "minHeight": 70,
+          "maxWidth": 250,
+          "maxHeight": 250
+        },
+        "source": "https://jlcpcb.com/help/article/pcb-assembly-faqs",
+        "verified": true,
+        "date": "2026-09-28",
+        "note": "FAQ: 'panel size limit of not bigger than 250x250mm'. Minimum from the capabilities page."
+      },
+      "quantity": {
+        "value": {
+          "min": 2,
+          "max": 80000
+        },
+        "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
+        "verified": true,
+        "date": "2026-09-28",
+        "note": "Official capabilities page, not a /help/ article."
+      },
+      "layers": {
+        "value": [
+          2,
+          4,
+          6
+        ],
+        "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
+        "verified": true,
+        "date": "2026-09-28",
+        "note": "JLCPCB lists 1-32 layers; Flamingo boards are 2, 4 or 6."
+      },
+      "sides": {
+        "value": 2,
+        "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
+        "verified": true,
+        "date": "2026-09-28"
+      },
+      "separations": {
+        "value": [
+          "mouse-bite"
+        ],
+        "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
+        "verified": true,
+        "date": "2026-09-28",
+        "note": "Standard also accepts V-cut panels; Flamingo does not generate V-cut panels."
+      },
+      "railsRequired": {
+        "value": true,
+        "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
+        "verified": true,
+        "date": "2026-09-28",
+        "note": "Edge rails and fiducials are both listed as necessary for Standard PCBA."
+      }
+    }
+  },
+  "rails": {
+    "width": {
+      "value": 5,
+      "source": "https://jlcpcb.com/help/article/specifications-for-adding-process-edges-and-positioning-holes",
+      "verified": true,
+      "date": "2026-09-28"
+    },
+    "toolingHoleDiameter": {
+      "value": 2,
+      "source": "https://jlcpcb.com/help/article/specifications-for-adding-process-edges-and-positioning-holes",
+      "verified": true,
+      "date": "2026-09-28"
+    },
+    "toolingHoleCornerOffset": {
+      "value": 5,
+      "source": "design-choice",
+      "verified": false,
+      "note": "Distance from the panel corner along the rail. JLCPCB publishes no figure."
+    },
+    "fiducialCopperDiameter": {
+      "value": 1,
+      "source": "https://jlcpcb.com/help/article/specifications-for-adding-process-edges-and-positioning-holes",
+      "verified": true,
+      "date": "2026-09-28"
+    },
+    "fiducialMaskDiameter": {
+      "value": 2,
+      "source": "design-choice",
+      "verified": false,
+      "note": "Common practice is a mask opening twice the copper diameter. JLCPCB's page gives no figure."
+    },
+    "fiducialEdgeDistance": {
+      "value": 3.85,
+      "source": "https://jlcpcb.com/help/article/specifications-for-adding-process-edges-and-positioning-holes",
+      "verified": true,
+      "date": "2026-09-28",
+      "note": "Minimum from the fiducial centre to the panel edge, so the conveyor rails do not cover it."
+    },
+    "fiducialCornerOffset": {
+      "value": 10,
+      "source": "design-choice",
+      "verified": false,
+      "note": "Distance from the panel corner along the rail; keeps the fiducial clear of the tooling hole."
+    }
+  },
+  "tabs": {
+    "width": {
+      "value": 5,
+      "source": "https://jlcpcb.com/blog/technical-guidance-mouse-bite-panelization-guide",
+      "verified": false,
+      "note": "Derived: 5 holes of 0.6 mm at 1.0 mm pitch span 4.6 mm. The page gives hole counts, not a tab width. Blog post, not a /help/ article."
+    },
+    "pitch": {
+      "value": 50,
+      "source": "https://jlcpcb.com/blog/technical-guidance-mouse-bite-panelization-guide",
+      "verified": false,
+      "note": "'add a set of mouse bites every 50-60 mm'. Blog post, not a /help/ article."
+    },
+    "maxLength": {
+      "value": 8,
+      "source": "design-choice",
+      "verified": false,
+      "note": "Longest gap a tab is allowed to bridge."
+    },
+    "holeDiameter": {
+      "value": 0.6,
+      "source": "https://jlcpcb.com/blog/technical-guidance-mouse-bite-panelization-guide",
+      "verified": false,
+      "note": "Blog post, not a /help/ article."
+    },
+    "holePitch": {
+      "value": 1.0,
+      "source": "https://jlcpcb.com/blog/technical-guidance-mouse-bite-panelization-guide",
+      "verified": false,
+      "note": "0.6 mm holes with 0.35-0.4 mm edge-to-edge spacing (minimum 0.3 mm). Blog post, not a /help/ article."
+    },
+    "holeOverlap": {
+      "value": 0.3333,
+      "source": "https://jlcpcb.com/blog/technical-guidance-mouse-bite-panelization-guide",
+      "verified": false,
+      "note": "'in the centerline of the board frame or extending one-third into the board'. Blog post, not a /help/ article."
+    },
+    "minPerInstance": {
+      "value": 2,
+      "source": "https://jlcpcb.com/blog/technical-guidance-mouse-bite-panelization-guide",
+      "verified": false,
+      "note": "'At least 2 symmetrically placed sets are needed'. Blog post, not a /help/ article."
+    },
+    "copperClearance": {
+      "value": 0.5,
+      "source": "design-choice",
+      "verified": false,
+      "note": "Warn when a mouse-bite hole comes closer than this to copper or a drill on the board."
+    }
+  },
+  "blockedEdges": {
+    "overhangMargin": {
+      "value": 1.0,
+      "source": "design-choice",
+      "verified": false,
+      "note": "Clearance kept beyond the tip of a part that overhangs the board edge."
+    },
+    "keepoutClearance": {
+      "value": 3.0,
+      "source": "design-choice",
+      "verified": false,
+      "note": "Clearance kept from an edge that carries a keepout (for example an antenna region)."
+    },
+    "keepoutEdgeTolerance": {
+      "value": 0.5,
+      "source": "design-choice",
+      "verified": false,
+      "note": "A keepout counts as a board-edge keepout when it comes within this distance of the edge."
+    }
+  },
+  "silkDivider": {
+    "maxDesigns": {
+      "value": 10,
+      "source": "https://jlcpcb.com/help/article/pcb-panelization",
+      "verified": true,
+      "date": "2026-09-28",
+      "note": "'The number of the designs shall not exceed 10 designs on one board'."
+    },
+    "freeDesigns": {
+      "value": 5,
+      "source": "https://jlcpcb.com/help/article/different-design-in-your-pcb-files",
+      "verified": false,
+      "note": "A search-result summary of this page says more than 5 designs are still charged as different designs. The page text fetched on 2026-09-28 did not contain that sentence, so this is unverified."
+    },
+    "lineWidth": {
+      "value": 0.15,
+      "source": "design-choice",
+      "verified": false,
+      "note": "Minimum silkscreen line width on every JLCPCB tier (engine RULESETS.minSilkWidth)."
+    },
+    "minFillRatio": {
+      "value": 0.98,
+      "source": "design-choice",
+      "verified": false,
+      "note": "A board qualifies for the silkscreen-divider approach when its outline fills at least this fraction of its bounding box, i.e. it can be cut out with straight cuts."
+    }
+  }
+}
