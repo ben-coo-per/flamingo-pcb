@@ -488,11 +488,12 @@ function improveSupport(
       return pl ? { ...inst, at: pl.at, rotation: pl.rotation ?? inst.rotation } : inst;
     }),
   });
-  const score = (p: Panel): { weak: number; tabs: Map<string, number>; errors: number } => {
+  const score = (p: Panel): { missing: number; tabs: Map<string, number>; errors: number } => {
     const g = computeGeometry(p, sources);
     const tabs = tabCounts(g);
     return {
-      weak: [...tabs.values()].filter((n) => n < min).length,
+      // Tabs short of the minimum, summed over the panel.
+      missing: [...tabs.values()].reduce((n, t) => n + Math.max(0, min - t), 0),
       tabs,
       errors: checkPanel(p, sources, limits, g).filter((i) => i.severity === 'error').length,
     };
@@ -500,7 +501,7 @@ function improveSupport(
 
   let placements = start.placements.map((p) => ({ ...p, at: { ...p.at } }));
   let current = score(apply(placements));
-  if (current.weak === 0) return start;
+  if (current.missing === 0) return start;
 
   for (const pl of placements) {
     if ((current.tabs.get(pl.id) ?? 0) >= min) continue;
@@ -518,8 +519,7 @@ function improveSupport(
         : q,
     );
     const next = score(apply(trial));
-    const held = next.tabs.get(pl.id) ?? 0;
-    if (held > (current.tabs.get(pl.id) ?? 0) && next.weak < current.weak && next.errors <= current.errors) {
+    if (next.missing < current.missing && next.errors <= current.errors) {
       placements = trial;
       current = next;
     }
