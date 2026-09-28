@@ -228,6 +228,7 @@ export class PanelSession extends EventEmitter {
       issues,
       quote,
       limits: this.limitViews(panel, sources),
+      minimums: this.minimums(),
       layers: targetLayers(panel, sources),
       derivedMs: Math.round((performance.now() - t0) * 10) / 10,
       revision,
@@ -235,6 +236,17 @@ export class PanelSession extends EventEmitter {
     // Only keep it if nothing changed while the sources were being read.
     if (this.panel === panel) this.cached = { panel, view, sources };
     return view;
+  }
+
+  /** The smallest order the fee table knows of, for a client to explain a quantity with. */
+  private minimums(): PanelView['minimums'] {
+    const { pcb, assembly } = this.fees;
+    const steps = [assembly.economic.qtySteps, assembly.standard.qtySteps];
+    return {
+      made: Math.min(...pcb.qtySteps.value),
+      assembled: Math.min(...steps.flatMap((s) => s.value)),
+      verified: pcb.qtySteps.verified && steps.every((s) => s.verified),
+    };
   }
 
   private limitViews(panel: Panel, sources: ResolvedSource[]): LimitView[] {

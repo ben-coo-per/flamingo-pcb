@@ -119,7 +119,10 @@ function chip(key: string, colour: string, text: string, opts: { bare?: boolean;
   return `<${tag} ${attrs} data-board="${escapeHtml(key)}">${escapeHtml(text)}</${opts.instance ? 'button' : 'span'}>`;
 }
 
-/** Boards received against needed: one mark per board, in the board's colour. */
+/**
+ * Boards received against needed: one mark per assembled board, in the board's
+ * colour, and the bare boards that come with them as a count.
+ */
 function receivedMarks(r: Received, colour: string): string {
   const p = pips(r);
   const body = p.asText
@@ -131,7 +134,9 @@ function receivedMarks(r: Received, colour: string): string {
       '</span>';
   return (
     `<span class="got" style="--board:${colour}" title="${escapeHtml(receivedLong(r))}" data-board="${escapeHtml(r.key)}" data-got="${r.assembled}" data-need="${r.needed}">` +
-    `<b>${escapeHtml(r.key)}</b><span class="got-n">${r.assembled}</span>${body}</span>`
+    `<b>${escapeHtml(r.key)}</b><span class="got-n">${r.assembled}</span>${body}` +
+    (r.bare > 0 ? `<span class="got-bare" data-bare="${r.bare}">+ ${r.bare} bare</span>` : '') +
+    `</span>`
   );
 }
 
@@ -336,18 +341,21 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
       .join('');
   }
 
-  function orderFacts(o: Option, keys: string[]): string {
+  function orderFacts(o: Option, keys: string[], min: PanelView['minimums']): string {
     return o.orders
       .map((order) => {
         const spare = order.made - order.assembled;
         const what = compositionChips(order.counts, keys, order.panel);
+        const piece = order.panel ? 'panel' : 'board';
+        const least = (n: number, does: string): string =>
+          ` <span class="min" title="${escapeHtml(`JLCPCB ${does} no fewer than ${n} in one order${min.verified ? '' : ' (estimate)'}. The need alone asks for fewer.`)}">min</span>`;
         // Of the pieces made, some are assembled and the rest arrive bare.
         const qty =
           order.made === 0
             ? 'not ready to order'
-            : `<b>${order.made}</b> ${order.panel ? 'panel' : 'board'}${order.made === 1 ? '' : 's'}<span class="sep">:</span>` +
-              (order.assembled > 0 ? `<b>${order.assembled}</b> assembled` : 'all bare') +
-              (spare > 0 && order.assembled > 0 ? `<span class="sep">,</span><b>${spare}</b> bare` : '');
+            : `<b>${order.made}</b> ${piece}${order.made === 1 ? '' : 's'}${order.minMade ? least(min.made, 'makes') : ''}: ` +
+              (order.assembled > 0 ? `<b>${order.assembled}</b> assembled${order.minAssembled ? least(min.assembled, 'assembles') : ''}` : 'all bare') +
+              (spare > 0 && order.assembled > 0 ? ` + <b>${spare}</b> bare` : '');
         return order.panel
           ? `<dt>panel</dt><dd class="sc-panel">${what}</dd><dt>order</dt><dd class="sc-qty">${qty}</dd>`
           : `<dt>order</dt><dd class="sc-qty">${what}${qty}</dd>`;
@@ -360,6 +368,7 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
     const quote = state.quote;
     once('ways', `${optionsFor}/${state.quoteError}/${opened('ways/')}`, () => {
       const keys = view.panel.sources.map((s) => s.key);
+      const min = view.minimums;
       if (view.sources.length === 0) {
         els.optionList.innerHTML = '<div class="hint">Add a board in step 1 and the ways to order it appear here.</div>';
         return;
@@ -401,29 +410,30 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
           return (
             `<div class="scenario${inView ? ' selected' : ''}" data-option="${escapeHtml(o.id)}" data-scenario="${escapeHtml(o.id)}" role="button" tabindex="0" title="${escapeHtml(`${o.meaning}\n${does}.`)}">` +
             `<span class="sc-rank">${i + 1}</span>` +
-            `<div class="sc-main">` +
             `<div class="sc-name">${icon(o.kind)}<span>${escapeHtml(o.label)}</span>${tags}${where}</div>` +
-            `<dl class="sc-facts">${orderFacts(o, keys)}` +
+            `<div class="sc-total">${o.total === null ? '—' : `${money(o.total)} ${flag(o.estimate)}`}</div>` +
+            // The facts run the full width of the row, under the name and the total.
+            `<dl class="sc-facts">${orderFacts(o, keys, min)}` +
             `<dt>you get</dt><dd class="sc-got">${o.received.map((r) => receivedMarks(r, boardColor(keys, r.key))).join('')}</dd></dl>` +
-            `</div>` +
-            `<div class="sc-cost">` +
+            `<div class="sc-foot">` +
             (o.total === null
-              ? `<div class="sc-total">—</div><div class="sc-per">no price yet</div>`
-              : `<div class="sc-total">${money(o.total)}</div>` +
-                `<div class="sc-per">${money(o.perBoard ?? o.total)} / board ${flag(o.estimate)}</div>` +
-                `<span class="meter"><i style="width:${Math.round((o.total / dearest) * 100)}%"></i></span>`) +
+              ? `<span class="sc-per">no price yet</span>`
+              : `<span class="meter"><i style="width:${Math.round((o.total / dearest) * 100)}%"></i></span>` +
+                `<span class="sc-per">${money(o.perBoard ?? o.total)} / board</span>`) +
             (o.notes.length > 0
-              ? `<div class="sc-warn" title="${escapeHtml(o.notes.join('\n'))}">${o.notes.length} note${o.notes.length === 1 ? '' : 's'}</div>`
+              ? `<span class="sc-warn" title="${escapeHtml(o.notes.join('\n'))}">${o.notes.length} note${o.notes.length === 1 ? '' : 's'}</span>`
               : '') +
             `</div></div>`
           );
         })
         .join('');
-      const anyBare = list.some((o) => o.orders.some((x) => x.counts.some((c) => c.populated > 0 && c.populated < c.total)));
+      const anyBare = list.some((o) => o.received.some((r) => r.bare > 0));
+      const anyMin = list.some((o) => o.orders.some((x) => x.minMade || x.minAssembled));
       els.optionList.innerHTML =
-        `<div class="sc-legend"><b>you get</b> = assembled boards delivered:` +
-        `<span><i class="pip pip-met"></i> one you need</span><span><i class="pip pip-over"></i> one extra</span>` +
-        (anyBare ? `<span><span class="chip chip-key chip-bare">S ×1</span> left bare</span>` : '') +
+        `<div class="sc-legend">` +
+        `<span><i class="pip pip-met"></i> assembled, needed</span><span><i class="pip pip-over"></i> assembled, extra</span>` +
+        (anyBare ? `<span><b>bare</b> = delivered without parts</span>` : '') +
+        (anyMin ? `<span><span class="min">min</span> = the smallest order JLCPCB takes</span>` : '') +
         `</div>` +
         `<div class="scenarios">${rows}</div>${rejected}`;
     });

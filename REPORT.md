@@ -965,7 +965,81 @@ Folding the rows that are not in view to one line each would fix it, at the
 price of hiding the labelled facts asked for in the second review. Left for
 Ben to decide.
 
+## 19. Changes after the fourth review (2026-09-28)
+
+Ben, on a row reading `order 5 panels: 2 assembled, 3 bare` and `you get S 2,
+M 2`: "if I'm ordering 5 panels, why does the 'you get' only say S 2 and M 2?"
+And: "please clean up the UI issues you can see on this section - overlapping
+text & whatnot".
+
+### What the row meant, and what it left out
+
+With 1 S and 2 M needed and one of each on a panel: 2 panels have to be
+assembled to get 2 M. JLCPCB fabricates no fewer than 5 pieces per order, so 5
+panels are made, and the 3 that are not assembled arrive bare. Delivered: 2 S
+and 2 M assembled, 3 S and 3 M bare. "You get" counted the assembled boards
+only, so 6 of the 10 boards were nowhere on the row. The numbers were right;
+the row did not add up to the eye.
+
+### The row now adds up
+
+```
+order    5 panels [min]: 2 assembled + 3 bare
+you get  S 2 ■□ + 3 bare    M 2 ■■ + 3 bare
+```
+
+- "You get" lists every board delivered: assembled ones as marks, bare ones
+  as a count after them.
+- `min` follows a quantity that is larger than the need asks for because no
+  smaller order exists. It is worked out per order: 2 assembled carries it when
+  1 was needed, not when 2 were.
+- The legend says what the two marks, `bare` and `min` mean, and lists only
+  the ones that occur in the list.
+- The text is written with its spaces, so a row copied out of the page reads
+  `5 panels min: 2 assembled + 3 bare` and not `5 panels:2 assembled,3 bare`.
+
+### Overlapping text
+
+The cause: the price column was as wide as its widest text, the facts had what
+was left, and the order line was forbidden to wrap. With a price like
+`$17.41 / board est.` and a scrollbar taking 15 px of the sidebar, the order
+line ran into the price. My screenshots never showed it because headless
+Chromium draws no scrollbar.
+
+- A row is now: name and total on the first line; the facts below at the full
+  width of the row; then one line with the cost bar, the cost per board and
+  the notes. Nothing sits beside the facts any more.
+- The sidebar reserves the room of a scrollbar at all times
+  (`scrollbar-gutter: stable`), so the layout is the same with and without one.
+- `verify-panel-ui.ts` has a check for it: every piece of text in the sidebar
+  is measured, and none may lie over another or run out of the sidebar. It
+  runs on three states of the page, each at full width and with 17 px less.
+  It also checks, for every way listed, that boards made = assembled + bare
+  and that the row shows that number of bare boards.
+
+### Added to what the server sends
+
+`PanelView.minimums` (`made`, `assembled`, `verified`): the smallest order in
+the fee table, so the page can say why a quantity is what it is. Both numbers
+are unverified (the order form was not opened), and the tooltip on `min` says
+"estimate". Additive; MCP tools and CLI output are unchanged.
+
+### Decisions in this round that are mine
+
+1. Bare boards are a count (`+ 3 bare`), not marks: 9 hollow squares beside 6
+   filled ones were harder to read than the number.
+2. The word `min`, in a dashed box, with the rule in its tooltip and the
+   legend.
+3. The estimate mark moved from the cost per board to the total.
+4. A row is one line taller (about 20 px). With five rows, step 3 starts
+   further below the fold than it did (see the known limit in section 18).
+
+### Checked
+
+`verify-panel-ui.ts`: 19 checks pass, 17 screenshots refreshed. `npm test`:
+915 pass, and the same 3 failures as on `main`.
+
 ### Not pushed
 
-The commits of sections 16 to 18 are local. The fork has `panelize` as of
+The commits of sections 16 to 19 are local. The fork has `panelize` as of
 9c50dfa.

@@ -127,6 +127,6 @@ export type {
 } from './scenarios.js';
 export { quoteOrder, layoutMatches, OBJECTIVES } from './scenarios.js';
 
-export type { SourceView, LimitView, PanelView } from './view.js';
+export type { SourceView, LimitView, OrderMinimums, PanelView } from './view.js';
 
 export { BOARD_COLORS, BOARD_TINT, boardColorAt, boardColor, tint } from './colors.js';

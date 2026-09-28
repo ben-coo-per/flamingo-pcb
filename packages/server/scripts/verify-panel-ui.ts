@@ -21,7 +21,10 @@
  *   - the right-click menu rotates, duplicates, toggles bare, unpins, deletes
  *   - A arranges, around a pinned instance, and explains a panel that cannot fit
  *   - the cost summary follows every change, and flags estimates
- *   - a row says what is on a panel, what is ordered and what you get
+ *   - a row says what is on a panel, what is ordered and what you get, and
+ *     the boards it delivers add up to the boards it orders
+ *   - no text in the sidebar lies over other text or runs out of it, with and
+ *     without a scrollbar taking room
  *   - selecting a way that is one panel puts it on the plate, and its row says so
  *   - selecting one that is not (separate orders) shows its orders on the
  *     plate, says so in a banner, and leaves the panel alone
@@ -187,6 +190,53 @@ async function main(): Promise<void> {
     const text = async (selector: string): Promise<string> => (await page.locator(selector).innerText()).trim();
     /** The heading of step 3 as written: the page shows headings in capitals. */
     const plateTitle = async (): Promise<string> => ((await page.locator('#plate-title').textContent()) ?? '').trim();
+    /**
+     * Text in the sidebar that lies over other text, or runs out of the
+     * sidebar. Compared on the middle 70% of each line's height: lines set
+     * close together touch at their edges without being over one another.
+     */
+    const textTrouble = (): Promise<string[]> =>
+      page.evaluate(`(() => {
+        const side = document.querySelector('.side');
+        const bounds = side.getBoundingClientRect();
+        const right = bounds.left + side.clientWidth;
+        const clipped = (el) => { for (let e = el; e && e !== side; e = e.parentElement) { if (getComputedStyle(e).textOverflow === 'ellipsis') return true; } return false; };
+        const rects = [];
+        const walker = document.createTreeWalker(side, NodeFilter.SHOW_TEXT);
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+          const text = n.textContent.trim();
+          const el = n.parentElement;
+          if (!text || !el.checkVisibility() || clipped(el)) continue;
+          const range = document.createRange();
+          range.selectNodeContents(n);
+          for (const r of range.getClientRects()) {
+            if (r.width < 1 || r.height < 1) continue;
+            const inset = r.height * 0.15;
+            rects.push({ text: text.slice(0, 40), el, l: r.left, r: r.right, t: r.top + inset, b: r.bottom - inset });
+          }
+        }
+        const out = [];
+        for (const a of rects) if (a.r > right + 0.5 || a.l < bounds.left - 0.5) out.push('runs out of the sidebar: "' + a.text + '"');
+        for (let i = 0; i < rects.length; i++) {
+          for (let j = i + 1; j < rects.length; j++) {
+            const a = rects[i], b = rects[j];
+            if (a.el === b.el) continue;
+            const w = Math.min(a.r, b.r) - Math.max(a.l, b.l);
+            const h = Math.min(a.b, b.b) - Math.max(a.t, b.t);
+            if (w > 1 && h > 1) out.push('"' + a.text + '" lies over "' + b.text + '"');
+          }
+        }
+        return [...new Set(out)];
+      })()`) as Promise<string[]>;
+    /** The same with 17 px less room, as when the browser draws a scrollbar that takes it. */
+    const tidy = async (where: string): Promise<void> => {
+      const wide = await textTrouble();
+      assert(wide.length === 0, `${where}: ${wide.join('; ')}`);
+      const style = await page.addStyleTag({ content: '.side { box-sizing: border-box; padding-right: 17px; }' });
+      const narrow = await textTrouble();
+      await style.evaluate((e) => (e as HTMLElement).remove());
+      assert(narrow.length === 0, `${where}, with a scrollbar: ${narrow.join('; ')}`);
+    };
     const errorCodes = (): Promise<string[]> => state("s.view.issues.filter((i) => i.severity === 'error').map((i) => i.code)");
     const menu = async (id: string, item: string): Promise<void> => {
       const c = await centreOf(id);
@@ -296,15 +346,16 @@ async function main(): Promise<void> {
     await own.waitFor();
     assert((await own.locator('.sc-name span').first().innerText()).trim() === 'Your panel', 'the panel made by hand is not called "Your panel"');
     assert((await own.locator('.where-plate').innerText()).trim() === 'on the plate', 'the panel made by hand is not marked as on the plate');
-    assert((await own.locator('.sc-total').innerText()).trim() === costAll, 'the row of the panel and the cost in step 3 disagree');
+    assert((await own.locator('.sc-total').innerText()).trim().split(/\s/)[0] === costAll, 'the row of the panel and the cost in step 3 disagree');
     assert((await page.locator('#option-list .where-plate').count()) === 1, 'more than one way is marked as on the plate');
     assert((await plateTitle()) === 'On the plate: Your panel', `step 3 is headed "${await plateTitle()}"`);
     {
-      const ranked = await page.locator('#option-list .scenario .sc-total').evaluateAll((els) => els.map((e) => Number((e.textContent ?? '').replace('$', ''))));
+      const ranked = await page.locator('#option-list .scenario .sc-total').evaluateAll((els) => els.map((e) => parseFloat((e.textContent ?? '').replace('$', ''))));
       assert(ranked.every((t, i) => i === 0 || t >= ranked[i - 1]!), `your panel is not ranked with the rest: ${ranked.join(', ')}`);
       const ranks = (await page.locator('#option-list .scenario .sc-rank').allInnerTexts()).map((t) => Number(t));
       assert(ranks.every((r, i) => r === i + 1), `the ranks read ${ranks.join(', ')}`);
     }
+    await tidy('with a panel made by hand');
     await shot('02-one-plus-five', 'After pressing + once for S and five times for M in step 3: 1 + 5 on the plate, listed in step 2 as \"Your panel\", ranked by its cost among the computed ways.');
 
     step('- takes one away, and the cost follows');
@@ -481,7 +532,7 @@ async function main(): Promise<void> {
     await page.waitForFunction("window.flamingoPanel.state().quote.scenarios.every((s) => s.received.find((r) => r.key === 'M').needed === 12)");
     await page.waitForFunction("[...document.querySelectorAll('#option-list .got[data-board=\"M\"]')].every((e) => e.getAttribute('data-need') === '12')");
     assert((await page.locator('#option-list [data-option="own"] .where-plate').count()) === 1, 'your panel left the list when the need changed');
-    assert((await page.locator('#option-list [data-option="own"] .sc-total').innerText()).trim() === totalAfter, 'the row of your panel did not follow the need');
+    assert((await page.locator('#option-list [data-option="own"] .sc-total').innerText()).trim().split(/\s/)[0] === totalAfter, 'the row of your panel did not follow the need');
     const derived = await state<number>('s.view.derivedMs');
     console.log(`  the server derived this view, checks and cost included, in ${derived} ms`);
     await shot('08-cost-follows-quantity', 'Needed quantity of M raised to 12 in step 1: the ways to order are worked out again, your panel among them, with more panels assembled and a new total.');
@@ -504,15 +555,35 @@ async function main(): Promise<void> {
       assert(Number(met) === Number(need) && Number(over) === Number(g) - Number(need), `${key}: ${g} of ${need} drawn as ${met} + ${over} marks`);
     }
     assert(/^\d+ notes?$/.test((await first.locator('.sc-warn').innerText()).trim()), 'a scenario row does not count its notes');
-    assert((await first.locator('.sc-per .est').innerText()).trim() === 'est.', 'a scenario row shows no estimate mark');
+    assert((await first.locator('.sc-total .est').innerText()).trim() === 'est.', 'a scenario row shows no estimate mark');
     assert((await first.locator('.sc-panel .chip').count()) >= 2, 'a scenario row does not show what is on the panel');
     // Every fact on the row says what it is.
     const labels = (await first.locator('.sc-facts dt').allInnerTexts()).map((t) => t.trim());
     assert(JSON.stringify(labels) === JSON.stringify(['panel', 'order', 'you get']), `a scenario row is labelled ${JSON.stringify(labels)}`);
-    assert(/^5 panels\s*:\s*\d+ assembled/.test((await first.locator('.sc-qty').innerText()).replace(/\s+/g, ' ').trim()), `the order reads "${(await first.locator('.sc-qty').innerText()).trim()}"`);
+    assert(/^5 panels min\s*:\s*\d+ assembled \+ \d+ bare$/.test((await first.locator('.sc-qty').innerText()).replace(/\s+/g, ' ').trim()), `the order reads "${(await first.locator('.sc-qty').innerText()).trim()}"`);
     const numbers = await first.locator('.sc-got .got').evaluateAll((els) => els.map((e) => [e.querySelector('.got-n')!.textContent, e.getAttribute('data-got')]));
     assert(numbers.every(([shown, g]) => shown === g), `boards received are numbered ${JSON.stringify(numbers)}`);
-    assert((await text('#option-list .sc-legend')).replace(/\s+/g, ' ').includes('you get = assembled boards delivered'), 'the marks are not explained');
+    const legend = (await text('#option-list .sc-legend')).replace(/\s+/g, ' ');
+    for (const part of ['assembled, needed', 'assembled, extra', 'bare = delivered without parts', 'min = the smallest order JLCPCB takes']) {
+      assert(legend.includes(part), `the legend does not say "${part}": ${legend}`);
+    }
+    // What is delivered adds up to what is ordered: every board of every panel made
+    // is either assembled or bare, and the row says how many of each.
+    {
+      const sums = await state<Array<{ id: string; key: string; made: number; assembled: number; bare: number }>>(
+        `s.quote.scenarios.flatMap((x) => x.received.map((r) => ({ id: x.id, key: r.key, assembled: r.assembled, bare: r.bare,
+          made: x.orders.reduce((n, o) => n + o.priced.order.pcbQty * ((o.counts.find((c) => c.key === r.key) || { total: 0 }).total), 0) })))`,
+      );
+      for (const x of sums) assert(x.assembled + x.bare === x.made, `${x.id}: ${x.made} ${x.key} are made, ${x.assembled} + ${x.bare} delivered`);
+      const shown = await page.locator('#option-list .scenario:not([data-option="own"]) .sc-got .got').evaluateAll((els) =>
+        els.map((e) => ({ id: e.closest('.scenario')!.getAttribute('data-option'), key: e.getAttribute('data-board'), bare: Number(e.querySelector('.got-bare')?.getAttribute('data-bare') ?? 0), text: (e.querySelector('.got-bare')?.textContent ?? '').trim() })),
+      );
+      for (const x of shown) {
+        const want = sums.find((y) => y.id === x.id && y.key === x.key)!;
+        assert(x.bare === want.bare && (want.bare === 0 || x.text === `+ ${want.bare} bare`), `${x.id}: ${want.bare} bare ${x.key} are delivered, the row says "${x.text}"`);
+      }
+    }
+    await tidy('the ways to order');
     assert((await first.locator('svg.sc-icon').count()) === 1, 'a scenario row has no drawing of its kind');
     // No fact runs over onto a second line.
     const tall = await page.locator('#option-list .sc-facts dd.sc-qty').evaluateAll((els) => els.filter((e) => (e as HTMLElement).offsetHeight > 24).length);
@@ -521,11 +592,11 @@ async function main(): Promise<void> {
     const sepLabels = (await separate.locator('.sc-facts dt').allInnerTexts()).map((t) => t.trim());
     assert(JSON.stringify(sepLabels) === JSON.stringify(['order', 'order', 'you get']), `separate orders are labelled ${JSON.stringify(sepLabels)}`);
     // Cost as a length: the dearest scenario fills the bar, the cheapest is shortest.
-    const meters = await page.locator('#option-list .scenario .sc-cost .meter i').evaluateAll((els) => els.map((e) => parseFloat((e as HTMLElement).style.width)));
+    const meters = await page.locator('#option-list .scenario .sc-foot .meter i').evaluateAll((els) => els.map((e) => parseFloat((e as HTMLElement).style.width)));
     assert(meters[meters.length - 1] === 100 && meters[0]! < 100, `the cost bars are ${meters.join(', ')}`);
     // A row is a few words, not a paragraph.
     const words = (await first.innerText()).split(/\s+/).filter((w) => /[a-z]{3,}/i.test(w)).length;
-    assert(words <= 16, `a scenario row has ${words} words`);
+    assert(words <= 20, `a scenario row has ${words} words`);
 
     // Each row says what picking it does.
     assert(((await separate.getAttribute('title')) ?? '').includes('Shows these orders on the plate'), 'a way that is not a panel does not say it is only shown');
@@ -591,6 +662,7 @@ async function main(): Promise<void> {
     assert((await text('#cost-total')) === `$${sepTotal.toFixed(2)}`, 'step 3 does not show the cost of what is shown');
     assert(!(await page.locator('#plate-edit').isVisible()) && !(await page.locator('#checks').isVisible()), 'what is only shown has tools or checks');
     assert(await page.locator('#export-btn').isDisabled(), 'what is only shown can be exported');
+    await tidy('with separate orders shown');
     // The plate shows two plates, one per order, each in its board's colour.
     const shotSeparate = await shot('10b-scenario-separate', 'Separate orders selected: the plate shows the two orders side by side, each a stack of single boards with its quantity, under a banner saying the panel is unchanged.');
     {
