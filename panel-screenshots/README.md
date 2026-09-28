@@ -3,18 +3,18 @@
 Taken by `packages/server/scripts/verify-panel-ui.ts` in headless Chromium
 (1600 x 1000), on the boards `e2e-panel.ts` builds.
 
-- `00-start.png` — A new panel: nothing on the plate, and the project's boards on offer under Boards.
-- `00b-started.png` — Both boards added from the list: one instance of each on the plate, each in its board's colour.
-- `01-loaded-empty.png` — The view as it opens: both boards listed with needed 1 and 5, nothing on the plate yet.
-- `02-one-plus-five.png` — After pressing + once for S and five times for M: 1 + 5 on the plate, arranged as they were added, with the live cost.
+- `00-start.png` — A new panel: three steps, nothing on the plate, and the project's boards on offer under step 1.
+- `00b-started.png` — Both boards added in step 1 and a way to order picked in step 2: its panel is on the plate, each board in its colour, and its row says "on the plate".
+- `01-loaded-empty.png` — The view as it opens: both boards listed with needed 1 and 5, the ways to order them, nothing on the plate yet.
+- `02-one-plus-five.png` — After pressing + once for S and five times for M in step 3: 1 + 5 on the plate, listed in step 2 as "Your panel", ranked by its cost among the computed ways.
 - `03-dragging.png` — M3 picked up and on its way: drawn where the pointer has it, with its position beside it.
 - `04-dropped-pinned-overlap.png` — M3 dropped on S1: pinned (filled corner square, PINNED), both marked with a second outline and ERROR, and the overlap listed under Checks with a chip per board involved.
 - `05-arranged-around-pinned.png` — After A: five instances packed, M3 left where it was pinned, and the message saying so.
 - `06-context-menu.png` — Right-click on M3: rotate 90°, duplicate, delete, make bare, unpin.
 - `07-bare-instances.png` — M3 turned and made bare, then duplicated as M6: bare instances are hatched with a dashed outline and read BARE.
-- `08-cost-follows-quantity.png` — Needed quantity of M raised to 12: more panels assembled, a new total, and new scenarios below.
-- `09-scenario-loaded.png` — Scenario "Mouse-bite panel" selected: its cost below the list with Boards unfolded, its 1 + 3 panel on the plate, and the live cost equal to its total.
-- `10-scenario-silk-divider.png` — The cheapest scenario: boards inside one outline, divided by silkscreen lines (dotted), no rails, no tabs.
+- `08-cost-follows-quantity.png` — Needed quantity of M raised to 12 in step 1: the ways to order are worked out again, your panel among them, with more panels assembled and a new total.
+- `09-scenario-loaded.png` — "Mouse-bite panel" picked in step 2: its row reads "on the plate", its 1 + 3 panel is on the plate, and step 3 has its cost with Boards unfolded.
+- `10-scenario-silk-divider.png` — The cheapest way: boards inside one outline, divided by silkscreen lines (dotted), no rails, no tabs.
 - `10b-scenario-separate.png` — Separate orders selected: the plate shows the two orders side by side, each a stack of single boards with its quantity, under a banner saying the panel is unchanged.
 - `11-exported.png` — Export fab files: the zip is ready and offered as a download link.
 - `12-export-refused.png` — Export on a panel with an overlap: refused, with the findings that stopped it.

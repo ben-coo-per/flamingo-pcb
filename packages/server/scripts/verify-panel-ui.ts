@@ -10,14 +10,19 @@
  * Chromium, and checks, in the page itself:
  *
  *   - the view loads and connects
- *   - a panel can be started from the page: boards are added from a list
- *   - + and - change what is on the plate
+ *   - the sidebar is three steps: boards you need, ways to order them, and
+ *     what is on the plate
+ *   - a panel can be started from the page: boards are added from a list, and
+ *     a way to order them is picked from the next
+ *   - + and - change what is on the plate, and a panel made by hand is listed
+ *     among the ways to order, priced and ranked with the rest
+ *   - the ways to order are worked out again when what is needed changes
  *   - dragging an instance moves it and pins it
  *   - the right-click menu rotates, duplicates, toggles bare, unpins, deletes
  *   - A arranges, around a pinned instance, and explains a panel that cannot fit
  *   - the cost summary follows every change, and flags estimates
- *   - a scenario row says what is on a panel, what is ordered and what you get
- *   - selecting a scenario that is one panel loads it onto the plate
+ *   - a row says what is on a panel, what is ordered and what you get
+ *   - selecting a way that is one panel puts it on the plate, and its row says so
  *   - selecting one that is not (separate orders) shows its orders on the
  *     plate, says so in a banner, and leaves the panel alone
  *   - warnings from the check are listed
@@ -180,6 +185,8 @@ async function main(): Promise<void> {
       return p;
     };
     const text = async (selector: string): Promise<string> => (await page.locator(selector).innerText()).trim();
+    /** The heading of step 3 as written: the page shows headings in capitals. */
+    const plateTitle = async (): Promise<string> => ((await page.locator('#plate-title').textContent()) ?? '').trim();
     const errorCodes = (): Promise<string[]> => state("s.view.issues.filter((i) => i.severity === 'error').map((i) => i.code)");
     const menu = async (id: string, item: string): Promise<void> => {
       const c = await centreOf(id);
@@ -198,27 +205,44 @@ async function main(): Promise<void> {
 
     // --- starting a panel --------------------------------------------------
     step('a panel is started from the page');
-    assert((await text('#plate-empty')).includes('Pick one under Boards'), 'an empty panel does not say how to start');
+    const steps = (await page.locator('.side .step h2').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim());
+    assert(
+      JSON.stringify(steps) === JSON.stringify(['1 BOARDS YOU NEED', '2 WAYS TO ORDER THEM', '3 ON THE PLATE: NOTHING YET']),
+      `the steps read ${JSON.stringify(steps)}`,
+    );
+    assert((await text('#plate-empty')).includes('Boards you need'), 'an empty panel does not say how to start');
+    assert((await text('#option-list')).includes('Add a board in step 1'), 'step 2 does not say what it waits for');
+    assert(!(await page.locator('#plate-edit').isVisible()), 'there are tools to change a panel that has no boards');
+    assert(await page.locator('#export-btn').isDisabled(), 'an empty panel can be exported');
     await page.locator('#board-add button.add-board').first().waitFor();
     const offered = (await page.locator('#board-add button.add-board').allInnerTexts()).map((t) => t.replace(/^\+\s*/, '').trim()).sort();
     assert(JSON.stringify(offered) === JSON.stringify(['esp32-breakout', 'usbc-breakout']), `the boards on offer are ${JSON.stringify(offered)}`);
     assert((await text('#board-add .add-title')) === 'Add a board to start', 'the list of boards has no heading');
-    await shot('00-start', 'A new panel: nothing on the plate, and the project\'s boards on offer under Boards.');
+    await shot('00-start', 'A new panel: three steps, nothing on the plate, and the project\'s boards on offer under step 1.');
     await page.locator('#board-add button.add-board', { hasText: 'usbc-breakout' }).click();
-    await until('v.panel.sources.length === 1 && v.panel.instances.length === 1', 'the first board on the panel, with one instance');
+    // A board is something needed. How it gets made is the next step's question.
+    await until('v.panel.sources.length === 1 && v.panel.instances.length === 0', 'the first board needed, and nothing on the plate');
     // The list is fetched again once the panel has the board; give it the moment it needs.
     await page.waitForFunction("document.querySelectorAll('#board-add button.add-board').length === 1", undefined, { timeout: 5000 }).catch(() => {
       throw new Error('ASSERT FAILED: a board on the panel is still on offer');
     });
     await page.locator('#board-add button.add-board', { hasText: 'esp32-breakout' }).click();
-    await until('v.panel.sources.length === 2 && v.panel.instances.length === 2', 'both boards on the panel');
+    await until('v.panel.sources.length === 2 && v.panel.instances.length === 0', 'both boards needed');
     await page.waitForFunction("document.querySelectorAll('#board-add button.add-board').length === 0", undefined, { timeout: 5000 }).catch(() => {
       throw new Error('ASSERT FAILED: boards are on offer although all are on the panel');
     });
+    assert((await text('#plate-empty')).includes('Step 2: pick a way to order'), 'the empty plate does not point at step 2');
+    // Step 2 has the answers; one that is a panel goes on the plate when picked.
+    await page.locator('#option-list [data-option]').first().waitFor();
+    assert((await page.locator('#option-list .where').count()) === 0, 'a way to order is marked as on the plate while the plate is empty');
+    const firstPanel = await state<string>('s.quote.scenarios.find((x) => x.orders.length === 1 && x.orders[0].panel && x.layout).id');
+    await page.locator(`#option-list [data-option="${firstPanel}"]`).click();
+    await until('v.panel.instances.length >= 2', 'a panel on the plate');
+    await page.locator(`#option-list [data-option="${firstPanel}"] .where-plate`).waitFor();
     assert((await errorCodes()).length === 0, `starting a panel left errors: ${(await errorCodes()).join(', ')}`);
     const started0 = await getView();
     assert(started0.filePath !== null && started0.panel.sources.map((x) => x.path).sort().join() === 'esp32-breakout.flamingo,usbc-breakout.flamingo', 'the boards were not recorded by relative path');
-    await shot('00b-started', 'Both boards added from the list: one instance of each on the plate, each in its board\'s colour.');
+    await shot('00b-started', 'Both boards added in step 1 and a way to order picked in step 2: its panel is on the plate, each board in its colour, and its row says \"on the plate\".');
 
     // The rest runs on the panel of the brief: S and M, 1 + 5 needed, nothing placed.
     await post('/api/panel/new', { name: 'combo' });
@@ -232,19 +256,23 @@ async function main(): Promise<void> {
     assert((await text('#board-list .board[data-key="S"] .board-name')) === 'esp32-breakout', 'board S is not listed by name');
     assert((await page.locator('#board-list .board[data-key="M"] input[data-field="needed"]').inputValue()) === '5', 'needed quantity of M is not shown');
     assert(await page.locator('#plate-empty').isVisible(), 'the empty plate does not say it is empty');
+    assert((await plateTitle()) === 'On the plate: nothing yet', `step 3 is headed "${await plateTitle()}"`);
+    await page.waitForFunction("document.querySelectorAll('#option-list [data-option]').length >= 4");
+    assert((await page.locator('#option-list [data-option="own"]').count()) === 0, 'an empty plate is listed as a way to order');
     const canvasBox = await page.locator('#plate-canvas').boundingBox();
     assert(canvasBox && canvasBox.width > VIEWPORT.width * 0.7 && canvasBox.height > VIEWPORT.height * 0.9, 'the canvas does not take most of the screen');
-    await shot('01-loaded-empty', 'The view as it opens: both boards listed with needed 1 and 5, nothing on the plate yet.');
+    await shot('01-loaded-empty', 'The view as it opens: both boards listed with needed 1 and 5, the ways to order them, nothing on the plate yet.');
 
     // --- object list: + and - ----------------------------------------------
     step('+ puts instances on the plate');
-    await page.locator('#board-list .board[data-key="S"] button[aria-label="one more S"]').click();
+    await page.locator('#plate-counts button[aria-label="one more S"]').click();
     await until('v.panel.instances.length === 1', 'S1 on the plate');
     for (let n = 1; n <= 5; n++) {
-      await page.locator('#board-list .board[data-key="M"] button[aria-label="one more M"]').click();
+      await page.locator('#plate-counts button[aria-label="one more M"]').click();
       await until(`v.panel.instances.filter((i) => i.source === 'M').length === ${n}`, `${n} M instances`);
     }
-    assert((await text('#board-list .board[data-key="M"] output')) === '5', 'the count of M does not read 5');
+    assert((await text('#plate-counts .count-control[data-key="M"] output')) === '5', 'the count of M does not read 5');
+    assert((await page.locator('#board-list button, #board-list output').count()) === 0, 'step 1 still has the tools that change the plate');
     assert((await errorCodes()).length === 0, `adding instances left errors: ${(await errorCodes()).join(', ')}`);
     assert(!(await page.locator('#plate-empty').isVisible()), 'the empty-plate note is still showing');
     const costAll = await text('#cost-total');
@@ -263,16 +291,30 @@ async function main(): Promise<void> {
     assert(await page.locator('#cost-summary .cost-group[open] table.lines td', { hasText: 'Economic PCBA setup' }).isVisible(), 'unfolding Assembly does not show its lines');
     const assemblyFlag = (await text('#cost-summary .cost-group[open] summary .flag'));
     assert(assemblyFlag === '', 'the Assembly subtotal is marked as an estimate although every line in it is verified');
-    await shot('02-one-plus-five', 'After pressing + once for S and five times for M: 1 + 5 on the plate, arranged as they were added, with the live cost.');
+    // A panel made by hand is a way to order like the others: listed, priced, ranked.
+    const own = page.locator('#option-list [data-option="own"]');
+    await own.waitFor();
+    assert((await own.locator('.sc-name span').first().innerText()).trim() === 'Your panel', 'the panel made by hand is not called "Your panel"');
+    assert((await own.locator('.where-plate').innerText()).trim() === 'on the plate', 'the panel made by hand is not marked as on the plate');
+    assert((await own.locator('.sc-total').innerText()).trim() === costAll, 'the row of the panel and the cost in step 3 disagree');
+    assert((await page.locator('#option-list .where-plate').count()) === 1, 'more than one way is marked as on the plate');
+    assert((await plateTitle()) === 'On the plate: Your panel', `step 3 is headed "${await plateTitle()}"`);
+    {
+      const ranked = await page.locator('#option-list .scenario .sc-total').evaluateAll((els) => els.map((e) => Number((e.textContent ?? '').replace('$', ''))));
+      assert(ranked.every((t, i) => i === 0 || t >= ranked[i - 1]!), `your panel is not ranked with the rest: ${ranked.join(', ')}`);
+      const ranks = (await page.locator('#option-list .scenario .sc-rank').allInnerTexts()).map((t) => Number(t));
+      assert(ranks.every((r, i) => r === i + 1), `the ranks read ${ranks.join(', ')}`);
+    }
+    await shot('02-one-plus-five', 'After pressing + once for S and five times for M in step 3: 1 + 5 on the plate, listed in step 2 as \"Your panel\", ranked by its cost among the computed ways.');
 
     step('- takes one away, and the cost follows');
-    await page.locator('#board-list .board[data-key="M"] button[aria-label="one fewer M"]').click();
+    await page.locator('#plate-counts button[aria-label="one fewer M"]').click();
     await until("v.panel.instances.filter((i) => i.source === 'M').length === 4", '4 M instances');
     await page.waitForFunction(`document.getElementById('cost-total').textContent !== ${JSON.stringify(costAll)}`);
     const costFour = await text('#cost-total');
     console.log(`  cost with 5 M: ${costAll}; with 4 M: ${costFour}`);
     assert(costFour !== costAll, 'the cost did not change when an instance was removed');
-    await page.locator('#board-list .board[data-key="M"] button[aria-label="one more M"]').click();
+    await page.locator('#plate-counts button[aria-label="one more M"]').click();
     await until("v.panel.instances.filter((i) => i.source === 'M').length === 5", '5 M instances again');
 
     // --- drag pins ---------------------------------------------------------
@@ -355,7 +397,7 @@ async function main(): Promise<void> {
     await until("v.panel.instances.find((i) => i.id === 'M3').rotation !== " + kept.rotation, 'M3 rotated');
     await menu('M3', 'Make bare');
     await until("v.panel.instances.find((i) => i.id === 'M3').populate === false", 'M3 bare');
-    assert((await text('#board-list .board[data-key="M"] .board-meta')).includes('1 bare'), 'the board list does not count the bare instance');
+    assert((await text('#plate-counts .count-control[data-key="M"] .bare-n')) === '1 bare', 'the counts do not show the bare instance');
     await menu('M3', 'Duplicate');
     await until("v.panel.instances.filter((i) => i.source === 'M').length === 6", 'a sixth M');
     const copy = (await instances()).find((i) => i.id === 'M6')!;
@@ -435,20 +477,26 @@ async function main(): Promise<void> {
     const gotS = page.locator('#cost-summary .received .got[data-board="S"]');
     assert((await gotS.locator('.pip-met').count()) === 1, 'the need for S is not drawn one mark per board');
     assert((await gotS.locator('.pip-over').count()) === Number(await gotS.getAttribute('data-got')) - 1, 'the extra boards of S are not drawn one mark each');
+    // The ways to order are answers to what is needed: a new need, new answers.
+    await page.waitForFunction("window.flamingoPanel.state().quote.scenarios.every((s) => s.received.find((r) => r.key === 'M').needed === 12)");
+    await page.waitForFunction("[...document.querySelectorAll('#option-list .got[data-board=\"M\"]')].every((e) => e.getAttribute('data-need') === '12')");
+    assert((await page.locator('#option-list [data-option="own"] .where-plate').count()) === 1, 'your panel left the list when the need changed');
+    assert((await page.locator('#option-list [data-option="own"] .sc-total').innerText()).trim() === totalAfter, 'the row of your panel did not follow the need');
     const derived = await state<number>('s.view.derivedMs');
     console.log(`  the server derived this view, checks and cost included, in ${derived} ms`);
-    await shot('08-cost-follows-quantity', 'Needed quantity of M raised to 12: more panels assembled, a new total, and new scenarios below.');
+    await shot('08-cost-follows-quantity', 'Needed quantity of M raised to 12 in step 1: the ways to order are worked out again, your panel among them, with more panels assembled and a new total.');
     await needed.fill('5');
     await needed.press('Enter');
     await until("v.panel.sources.find((s) => s.key === 'M').needed === 5", 'needed 5 for M');
 
     // --- scenarios ---------------------------------------------------------
-    step('selecting a scenario shows its fees and loads its panel');
-    await page.waitForFunction("document.querySelectorAll('#scenario-list [data-scenario]').length >= 4");
+    step('picking a way to order puts its panel on the plate, with its cost');
+    await page.waitForFunction("document.querySelectorAll('#option-list [data-option]').length >= 5");
+    await page.waitForFunction("[...document.querySelectorAll('#option-list .got[data-board=\"M\"]')].every((e) => e.getAttribute('data-need') === '5')");
     await page.waitForFunction("window.flamingoPanel.state().quote.scenarios.every((s) => s.received.find((r) => r.key === 'M').needed === 5)");
-    const totals = (await page.locator('#scenario-list .scenario .sc-total').allInnerTexts()).map((t) => Number(/\$([\d.]+)/.exec(t)![1]));
+    const totals = (await page.locator('#option-list .scenario .sc-total').allInnerTexts()).map((t) => Number(/\$([\d.]+)/.exec(t)![1]));
     assert(totals.every((t, i) => i === 0 || t >= totals[i - 1]!), `the scenarios are not ranked by total: ${totals.join(', ')}`);
-    const first = page.locator('#scenario-list .scenario').first();
+    const first = page.locator('#option-list .scenario:not([data-option="own"])').first();
     // Boards received against needed, per design, one mark per board.
     const got = await first.locator('.sc-got .got').evaluateAll((els) => els.map((e) => [e.getAttribute('data-board'), e.getAttribute('data-got'), e.getAttribute('data-need'), e.querySelectorAll('.pip-met').length, e.querySelectorAll('.pip-over').length]));
     assert(got.length === 2 && got[0]![0] === 'S' && got[0]![2] === '1' && got[1]![0] === 'M' && got[1]![2] === '5', `a scenario row shows boards received as ${JSON.stringify(got)}`);
@@ -464,61 +512,85 @@ async function main(): Promise<void> {
     assert(/^5 panels\s*:\s*\d+ assembled/.test((await first.locator('.sc-qty').innerText()).replace(/\s+/g, ' ').trim()), `the order reads "${(await first.locator('.sc-qty').innerText()).trim()}"`);
     const numbers = await first.locator('.sc-got .got').evaluateAll((els) => els.map((e) => [e.querySelector('.got-n')!.textContent, e.getAttribute('data-got')]));
     assert(numbers.every(([shown, g]) => shown === g), `boards received are numbered ${JSON.stringify(numbers)}`);
-    assert((await text('#scenario-list .sc-legend')).replace(/\s+/g, ' ').includes('you get = assembled boards delivered'), 'the marks are not explained');
+    assert((await text('#option-list .sc-legend')).replace(/\s+/g, ' ').includes('you get = assembled boards delivered'), 'the marks are not explained');
     assert((await first.locator('svg.sc-icon').count()) === 1, 'a scenario row has no drawing of its kind');
     // No fact runs over onto a second line.
-    const tall = await page.locator('#scenario-list .sc-facts dd.sc-qty').evaluateAll((els) => els.filter((e) => (e as HTMLElement).offsetHeight > 24).length);
+    const tall = await page.locator('#option-list .sc-facts dd.sc-qty').evaluateAll((els) => els.filter((e) => (e as HTMLElement).offsetHeight > 24).length);
     assert(tall === 0, `${tall} order line(s) wrap`);
-    const separate = page.locator('#scenario-list [data-scenario="separate"]');
+    const separate = page.locator('#option-list [data-scenario="separate"]');
     const sepLabels = (await separate.locator('.sc-facts dt').allInnerTexts()).map((t) => t.trim());
     assert(JSON.stringify(sepLabels) === JSON.stringify(['order', 'order', 'you get']), `separate orders are labelled ${JSON.stringify(sepLabels)}`);
     // Cost as a length: the dearest scenario fills the bar, the cheapest is shortest.
-    const meters = await page.locator('#scenario-list .scenario .sc-cost .meter i').evaluateAll((els) => els.map((e) => parseFloat((e as HTMLElement).style.width)));
+    const meters = await page.locator('#option-list .scenario .sc-cost .meter i').evaluateAll((els) => els.map((e) => parseFloat((e as HTMLElement).style.width)));
     assert(meters[meters.length - 1] === 100 && meters[0]! < 100, `the cost bars are ${meters.join(', ')}`);
     // A row is a few words, not a paragraph.
     const words = (await first.innerText()).split(/\s+/).filter((w) => /[a-z]{3,}/i.test(w)).length;
     assert(words <= 16, `a scenario row has ${words} words`);
 
+    // Each row says what picking it does.
+    assert(((await separate.getAttribute('title')) ?? '').includes('Shows these orders on the plate'), 'a way that is not a panel does not say it is only shown');
+    assert(((await first.getAttribute('title')) ?? '').includes('Puts this panel on the plate'), 'a way that is a panel does not say it goes on the plate');
+
     const target = 'merged-needed-x2';
     const want = await state<{ n: number; total: number; w: number; h: number }>(
       `(() => { const q = s.quote.scenarios.find((x) => x.id === '${target}'); return { n: q.layout.instances.length, total: q.total, w: q.layout.width, h: q.layout.height }; })()`,
     );
-    await page.locator(`#scenario-list [data-scenario="${target}"]`).click();
-    await page.locator('#scenario-lines').waitFor();
+    await page.locator(`#option-list [data-scenario="${target}"]`).click();
     await until(`v.panel.instances.length === ${want.n}`, `${want.n} instances from the scenario`);
-    const lines = await page.locator('#scenario-lines table.lines tr').count();
-    assert(lines >= 8, `the scenario has ${lines} fee lines`);
-    const detail = async (): Promise<string> => (await page.locator('#scenario-lines').evaluate((e) => e.textContent)) ?? '';
+    await page.locator(`#option-list [data-option="${target}"] .where-plate`).waitFor();
+    // The panel on the plate is now one of the computed ways, so it is not listed twice.
+    assert((await page.locator('#option-list [data-option="own"]').count()) === 0, '"Your panel" is listed although the plate holds a computed way');
+    assert((await page.locator('#option-list .where-plate').count()) === 1, 'more than one way is marked as on the plate');
+    assert((await plateTitle()) === 'On the plate: Mouse-bite panel', `step 3 is headed "${await plateTitle()}"`);
+    assert((await text('#arrange-msg')).startsWith('Put on the plate:'), `the message reads "${await text('#arrange-msg')}"`);
+    const lines = await page.locator('#cost-summary table.lines tr').count();
+    assert(lines >= 8, `the way on the plate has ${lines} fee lines`);
+    const detail = async (): Promise<string> => (await page.locator('#cost-summary').evaluate((e) => e.textContent)) ?? '';
     assert((await detail()).includes('Different designs: 2 in one file'), 'the different-designs fee is not itemized');
-    assert((await text('#scenario-lines .cost-total .amount')) === `$${want.total.toFixed(2)}`, 'the scenario detail does not total to the scenario');
-    await page.locator('#scenario-lines .cost-group summary', { hasText: 'Boards' }).click();
-    assert(await page.locator('#scenario-lines td', { hasText: 'Different designs: 2 in one file' }).isVisible(), 'unfolding Boards does not show the fee');
+    assert((await text('#cost-summary .cost-total .amount')) === `$${want.total.toFixed(2)}`, 'the cost in step 3 does not total to the way picked');
+    if (!(await page.locator('#cost-summary .cost-group[open] summary', { hasText: 'Boards' }).count())) {
+      await page.locator('#cost-summary .cost-group summary', { hasText: 'Boards' }).click();
+    }
+    assert(await page.locator('#cost-summary td', { hasText: 'Different designs: 2 in one file' }).isVisible(), 'unfolding Boards does not show the fee');
     const loaded = await state<{ w: number; h: number; sep: string }>('({ w: s.view.geometry.frame.width, h: s.view.geometry.frame.height, sep: s.view.panel.settings.separation })');
     assert(Math.abs(loaded.w - want.w) < 0.01 && Math.abs(loaded.h - want.h) < 0.01, `the plate is ${loaded.w} x ${loaded.h}, the scenario ${want.w} x ${want.h}`);
     await page.waitForFunction(`document.getElementById('cost-total').textContent === '$${want.total.toFixed(2)}'`);
-    assert(await page.locator(`#scenario-list [data-scenario="${target}"].selected`).isVisible(), 'the selected scenario is not marked');
+    assert(await page.locator(`#option-list [data-option="${target}"].selected`).isVisible(), 'the way on the plate is not marked');
     assert((await errorCodes()).length === 0, `the loaded scenario has errors: ${(await errorCodes()).join(', ')}`);
-    await shot('09-scenario-loaded', 'Scenario "Mouse-bite panel" selected: its cost below the list with Boards unfolded, its 1 + 3 panel on the plate, and the live cost equal to its total.');
+    await shot('09-scenario-loaded', '"Mouse-bite panel" picked in step 2: its row reads "on the plate", its 1 + 3 panel is on the plate, and step 3 has its cost with Boards unfolded.');
 
-    await page.locator('#scenario-list [data-scenario^="silk-divider"]').first().click();
+    await page.locator('#option-list [data-scenario^="silk-divider"]').first().click();
     await until("v.panel.settings.separation === 'silk-divider'", 'a silk-divider panel on the plate');
     assert((await state<number>('s.view.geometry.tabs.length')) === 0, 'a silk-divider panel has tabs');
+    await page.locator('#option-list [data-scenario^="silk-divider"] .where-plate').first().waitFor();
+    await page.waitForFunction("document.getElementById('plate-title').textContent.startsWith('On the plate: ') && !document.getElementById('cost-summary').textContent.includes('Different designs')");
+    assert((await page.locator('#option-list .where-plate').count()) === 1 && (await page.locator('#option-list [data-option="own"]').count()) === 0, 'the silk-divider panel is not the one way on the plate');
     assert(!(await detail()).includes('Different designs'), 'a silk-divided board is charged for different designs');
-    await shot('10-scenario-silk-divider', 'The cheapest scenario: boards inside one outline, divided by silkscreen lines (dotted), no rails, no tabs.');
+    await shot('10-scenario-silk-divider', 'The cheapest way: boards inside one outline, divided by silkscreen lines (dotted), no rails, no tabs.');
 
     // --- a scenario that is not a panel ------------------------------------
     step('separate orders are shown on the plate, not loaded');
     const panelBefore = JSON.stringify((await getView()).panel);
     const transformBefore = JSON.stringify(await state('s.transform'));
-    await page.locator('#scenario-list [data-scenario="separate"]').click();
+    await page.locator('#option-list [data-scenario="separate"]').click();
     await page.locator('#plate-banner:not([hidden])').waitFor();
     assert((await state<string | null>('s.preview')) === 'separate', 'the scenario is not on show');
     const bannerTitle = await text('#banner-title');
-    assert(/^Scenario \d, Separate orders: 2 orders of single boards, no panel$/.test(bannerTitle), `the banner reads "${bannerTitle}"`);
+    assert(/^Option \d, Separate orders: 2 orders of single boards, no panel$/.test(bannerTitle), `the banner reads "${bannerTitle}"`);
     assert((await text('#banner-note')).includes('Your panel is unchanged'), 'the banner does not say the panel is unchanged');
     assert(JSON.stringify((await getView()).panel) === panelBefore, 'showing a scenario changed the panel');
     assert(JSON.stringify(await state('s.transform')) !== transformBefore, 'the plate did not move to show the orders');
-    assert((await text('#scenario-lines .meaning')).includes('ordered on its own'), 'the scenario is not explained');
+    assert((await text('#plate-meaning')).includes('ordered on its own'), 'the way shown is not explained');
+    assert((await plateTitle()) === 'Shown: Separate orders', `step 3 is headed "${await plateTitle()}"`);
+    // Both are marked: the one shown, and the one that is still the panel.
+    assert((await separate.locator('.where-shown').innerText()).trim() === 'shown', 'the way shown is not marked');
+    assert((await page.locator('#option-list .where-plate').count()) === 1, 'the panel on the plate lost its mark while another way is shown');
+    assert((await page.locator('#option-list .scenario.selected').count()) === 1 && (await separate.getAttribute('class'))!.includes('selected'), 'the way in view is not the one framed');
+    // Step 3 is about what is shown: its cost, and nothing to change, check or export.
+    const sepTotal = await state<number>("s.quote.scenarios.find((x) => x.id === 'separate').total");
+    assert((await text('#cost-total')) === `$${sepTotal.toFixed(2)}`, 'step 3 does not show the cost of what is shown');
+    assert(!(await page.locator('#plate-edit').isVisible()) && !(await page.locator('#checks').isVisible()), 'what is only shown has tools or checks');
+    assert(await page.locator('#export-btn').isDisabled(), 'what is only shown can be exported');
     // The plate shows two plates, one per order, each in its board's colour.
     const shotSeparate = await shot('10b-scenario-separate', 'Separate orders selected: the plate shows the two orders side by side, each a stack of single boards with its quantity, under a banner saying the panel is unchanged.');
     {
@@ -557,22 +629,29 @@ async function main(): Promise<void> {
     // Escape, or the button, brings the panel back.
     await page.keyboard.press('Escape');
     await page.locator('#plate-banner').waitFor({ state: 'hidden' });
-    assert((await state<string | null>('s.preview')) === null && (await state<string | null>('s.scenario')) === null, 'Escape did not bring the panel back');
+    assert((await state<string | null>('s.preview')) === null, 'Escape did not bring the panel back');
+    assert((await plateTitle()).startsWith('On the plate: ') && (await page.locator('#plate-edit').isVisible()), 'step 3 did not return to the panel');
     assert(JSON.stringify(await state('s.transform')) === transformBefore, 'the plate did not return to the panel');
-    await page.locator('#scenario-list [data-scenario="separate"]').click();
+    await page.locator('#option-list [data-scenario="separate"]').click();
     await page.locator('#plate-banner:not([hidden])').waitFor();
     await page.locator('#banner-back').click();
     await page.locator('#plate-banner').waitFor({ state: 'hidden' });
     assert((await state<string | null>('s.preview')) === null, 'the button did not bring the panel back');
-    // An edit to the panel from elsewhere ends the show too.
-    await page.locator('#scenario-list [data-scenario="separate"]').click();
+    // So does picking the way that is on the plate.
+    await page.locator('#option-list [data-scenario="separate"]').click();
     await page.locator('#plate-banner:not([hidden])').waitFor();
-    await post('/api/panel/op', { op: 'setName', name: 'combo' });
+    await page.locator('#option-list .scenario:has(.where-plate)').click();
+    await page.locator('#plate-banner').waitFor({ state: 'hidden' });
+    assert(JSON.stringify((await getView()).panel) === panelBefore, 'picking the way that is on the plate changed the panel');
+    // An edit to the panel from elsewhere ends the show too.
+    await page.locator('#option-list [data-scenario="separate"]').click();
+    await page.locator('#plate-banner:not([hidden])').waitFor();
+    await post('/api/panel/op', { op: 'setPopulate', id: 'M1', populate: false });
     await page.locator('#plate-banner').waitFor({ state: 'hidden' });
     assert((await state<string>('s.view.panel.settings.separation')) === 'silk-divider', 'the panel is not the one that was there');
     await post('/api/panel/undo');
 
-    await page.locator(`#scenario-list [data-scenario="${target}"]`).click();
+    await page.locator(`#option-list [data-scenario="${target}"]`).click();
     await until(`v.panel.settings.separation === 'mouse-bite' && v.panel.instances.length === ${want.n}`, 'the mouse-bite scenario back on the plate');
 
     // --- sync --------------------------------------------------------------
@@ -580,9 +659,14 @@ async function main(): Promise<void> {
     const r = await post('/api/panel/op', { op: 'setPopulate', id: 'M2', populate: false });
     assert(r.ok === true, `the outside edit was rejected: ${JSON.stringify(r)}`);
     await until("v.panel.instances.find((i) => i.id === 'M2').populate === false", 'M2 bare in the page');
-    await page.waitForFunction("document.querySelector('#board-list .board[data-key=\"M\"] .board-meta').textContent.includes('1 bare')");
+    await page.waitForFunction("(document.querySelector('#plate-counts .count-control[data-key=\"M\"] .bare-n') || {}).textContent === '1 bare'");
+    // The panel is no longer the computed way it was: it is listed as your own.
+    await page.locator('#option-list [data-option="own"] .where-plate').waitFor();
+    assert((await plateTitle()) === 'On the plate: Your panel', 'an edited panel is not called your panel');
     await post('/api/panel/undo');
     await until("v.panel.instances.find((i) => i.id === 'M2').populate === true", 'M2 populated again');
+    await page.locator(`#option-list [data-option="${target}"] .where-plate`).waitFor();
+    assert((await page.locator('#option-list [data-option="own"]').count()) === 0, 'undoing the edit did not make the panel the computed way again');
 
     // --- export ------------------------------------------------------------
     step('Export offers the zip');

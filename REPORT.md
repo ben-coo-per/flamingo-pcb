@@ -360,6 +360,7 @@ Everything here is mine to have made only because the brief left it open.
 **Sidebar**
 
 24. Order: Boards, Arrange, Estimated cost, Compare scenarios, Warnings, Export.
+    (Replaced by the three steps of section 18.)
 25. 420 px wide, scrolls on its own.
 26. Estimates are marked `est.` after the amount, with a legend under the cost.
     (Reports for agents mark them `~`.)
@@ -856,8 +857,115 @@ and the CLI print the same text as before; `quote --json` has the new field.
 6. The estimated cost in the sidebar stays that of the panel while a scenario
    is on show; the scenario's own cost is in its detail below the list.
 
+
+
+## 18. Changes after the third review (2026-09-28)
+
+Ben, on the sidebar: "what is the relationship between the Boards config and
+the compare scenarios? they seem to be disconnected. I think we need to
+simplify/step out the flows a bit first. Like if the board setup and arrange
+button is one option amongst the scenarios, we should have it recalculate the
+scenarios based on the new preferences for the board choices".
+
+He was right that they were disconnected. `needed` and `nice to have` fed the
+scenarios; `on panel` and Arrange built a panel by hand that was priced in its
+own section and never compared with anything.
+
+### The sidebar is three steps
+
+| Step | Holds | Was |
+| --- | --- | --- |
+| 1 Boards you need | the boards, `needed`, `nice to have`, add a board | Boards |
+| 2 Ways to order them | every way to get those boards, cheapest first | Compare scenarios |
+| 3 On the plate: *name* | what is in view: the tools to change it, its cost, its checks, export | Boards (the `on panel` counts), Arrange, Estimated cost, scenario detail, Checks, Export |
+
+Each step feeds the next. Change a quantity in step 1 and step 2 is worked out
+again. Pick a row in step 2 and step 3 is about that row.
+
+### The panel on the plate is one of the ways to order
+
+- When the plate holds a panel the optimizer did not compute, it is listed in
+  step 2 as **Your panel**, priced the same way and ranked by its total among
+  the others. If it cannot be priced (a needed board is missing from it) it is
+  listed last with the reason in place of a price.
+- When the plate holds exactly what a computed way would put there, that row
+  is the one marked, and there is no "Your panel" row: nothing is listed twice.
+  "Exactly" is the same instances at the same places (within 5 µm) with the
+  same rotation and populate flag, and the settings that way sets
+  (`layoutMatches` in `packages/panel/src/scenarios.ts`).
+- One row carries `on the plate` (filled tag). A way shown for comparison
+  carries `shown` (outlined tag), and the panel keeps its own tag meanwhile.
+  The framed row is the one step 3 is about.
+- Moving, adding, removing or toggling an instance turns a computed way into
+  Your panel. Undo turns it back.
+
+### Step 3 follows what is in view
+
+- Heading: `On the plate: Mouse-bite panel`, `On the plate: Your panel`,
+  `Shown: Separate orders`, or `On the plate: nothing yet`.
+- One cost block, for the way in view. The separate "scenario detail" box under
+  the list is gone, and so is the case where the sidebar showed the cost of one
+  thing while the plate showed another (decision 6 of section 17).
+- While a way is only shown, the counts, Arrange and Checks are hidden and
+  Export is disabled: they belong to the panel, and it is not in view.
+
+### Adding a board no longer places it
+
+Adding a board in step 1 adds it to what is needed, with `needed` 1, and puts
+nothing on the plate. The answers appear in step 2; picking one puts a panel on
+the plate. The `+` and `-` counts in step 3 still build a panel by hand. This
+replaces the behaviour of section 16, where adding a board also placed one
+instance of it.
+
+### Decisions in this round that are mine
+
+1. Three steps, numbered, in one scrolling sidebar. No wizard, no tabs: every
+   step stays visible and editable at any time.
+2. Nothing is put on the plate automatically, not even the cheapest way. The
+   plate changes only when Ben picks a row or edits it. On an empty plate the
+   hint says "Step 2: pick a way to order".
+3. The name "Your panel", and the banner reading `Option 5, ...` where it read
+   `Scenario 5, ...`: the list now holds things that are not scenarios.
+4. A change to `needed` or `nice to have` while a way is shown for comparison
+   keeps it shown, if the new answers still include it. Only a change to the
+   panel itself (instances, settings) ends the comparison. Before, any change
+   did.
+5. The message after picking a way ("Put on the plate: 4 instances, 64.7 × 62
+   mm. Ctrl/Cmd+Z brings the previous panel back.") sits under Arrange in
+   step 3, where the panel's other messages are.
+6. A board row in step 1 is two lines, not three: size and layer count moved
+   up beside the name.
+7. "Per board" for Your panel is its total over the boards delivered that were
+   asked for, the same rule the optimizer uses for its own rows.
+
+### Not changed
+
+The optimizer, the cost model, the server and the MCP tools are as they were.
+`layoutMatches` is the one addition to `@flamingo/panel`; it is pure and has
+its own tests. `add_board` over MCP and HTTP behaves as before.
+
+### Checked
+
+- `verify-panel-ui.ts`: 19 checks pass in headless Chromium, 17 screenshots
+  refreshed. New in it: the three headings; an added board puts nothing on the
+  plate; picking a way marks its row; Your panel appears after an edit by hand,
+  with the same total as step 3, ranked in order; it leaves the list when a
+  computed way is loaded and comes back after an outside edit; the ways follow
+  a change of `needed`; step 3 shows the cost of what is shown and hides the
+  tools.
+- `npm test`: 914 pass, and the same 3 failures as on `main` (section 3).
+  New: 8 tests in `packages/ui/test/panel-options.test.ts`, 3 for
+  `layoutMatches` in `packages/panel/test/scenarios.test.ts`.
+
+### Known limit
+
+With five or more ways listed, step 3 starts below the fold on a 1000 px high
+window, so picking a row changes the plate at once but its cost needs a scroll.
+Folding the rows that are not in view to one line each would fix it, at the
+price of hiding the labelled facts asked for in the second review. Left for
+Ben to decide.
+
 ### Not pushed
 
-The commits of sections 16 and 17 are local. The fork has `panelize` as of
+The commits of sections 16 to 18 are local. The fork has `panelize` as of
 9c50dfa.
-

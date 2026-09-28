@@ -3,12 +3,20 @@
  * what a section shows has changed, so typing in a field is never interrupted
  * by a view arriving from the server.
  *
+ * Three steps, top to bottom, each feeding the next:
+ *
+ *   1  Boards you need      what has to be delivered
+ *   2  Ways to order them   every option for that need, cheapest first; the
+ *                           panel on the plate is one of them
+ *   3  On the plate         the option in view: the tools to change it, what
+ *                           it costs, what is wrong with it, and the export
+ *
  * The lists say things with shapes first and words second: a board is a
  * coloured chip, boards received are one mark each, cost is a bar. The full
  * sentence is behind a disclosure, never in the row.
  */
 
-import type { CostLine, PanelView, PieceCount, Received, Scenario, ScenarioKind, ScenarioLine } from '@flamingo/panel';
+import type { CostLine, PanelView, PieceCount, Received, ScenarioKind, ScenarioLine } from '@flamingo/panel';
 import { boardColor } from '@flamingo/panel';
 import type { BoardFile } from './api.js';
 import {
@@ -16,19 +24,17 @@ import {
   ESTIMATE_LEGEND_LONG,
   ESTIMATE_MARK,
   LEVEL_LABEL,
-  SCENARIO_LABEL,
-  SCENARIO_MEANING,
   composition,
   escapeHtml,
   groupCost,
   groupIssues,
-  loadsOntoPanel,
   mm,
   money,
   pips,
   receivedLong,
-  scenarioTags,
 } from './format.js';
+import type { Option } from './options.js';
+import { buildOptions, optionInView } from './options.js';
 import type { Message, PanelState } from './store.js';
 
 export interface SidebarEls {
@@ -37,12 +43,16 @@ export interface SidebarEls {
   boardList: HTMLElement;
   boardAdd: HTMLElement;
   boardMsg: HTMLElement;
+  optionList: HTMLElement;
+  plateTitle: HTMLElement;
+  plateMeaning: HTMLElement;
+  plateEdit: HTMLElement;
+  plateCounts: HTMLElement;
   arrangeBtn: HTMLButtonElement;
   arrangeMsg: HTMLElement;
   costFlag: HTMLElement;
   costSummary: HTMLElement;
-  scenarioList: HTMLElement;
-  scenarioDetail: HTMLElement;
+  checks: HTMLElement;
   issueCount: HTMLElement;
   issueList: HTMLElement;
   exportBtn: HTMLButtonElement;
@@ -58,7 +68,7 @@ export interface SidebarEls {
 export interface SidebarActions {
   setCount(board: string, count: number): void;
   setQuantity(board: string, field: 'needed' | 'niceToHave', value: number): void;
-  selectScenario(id: string): void;
+  selectOption(id: string): void;
   selectInstance(id: string): void;
   addBoard(path: string): void;
 }
@@ -162,11 +172,11 @@ function costGroups(lines: Array<CostLine | ScenarioLine>, total: number, estima
   );
 }
 
-function notesBlock(items: string[], label: string, id: string, open: Set<string>): string {
+function notesBlock(items: string[], label: string, id: string, open: Set<string>, plural = `${label}s`): string {
   if (items.length === 0) return '';
   return (
     `<details class="notes-block" data-open="${escapeHtml(id)}"${open.has(id) ? ' open' : ''}>` +
-    `<summary>${items.length} ${label}${items.length === 1 ? '' : 's'}</summary>` +
+    `<summary>${items.length} ${items.length === 1 ? label : plural}</summary>` +
     `<ul class="notes">${items.map((n) => `<li>${escapeHtml(n)}</li>`).join('')}</ul></details>`
   );
 }
@@ -201,6 +211,7 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
   };
   /** Disclosures the user has opened; a rebuilt section reopens them. */
   const open = new Set<string>();
+  const opened = (prefix: string): string => [...open].filter((o) => o.startsWith(prefix)).join('|');
   document.addEventListener(
     'toggle',
     (ev) => {
@@ -213,7 +224,7 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
     true,
   );
 
-  els.boardList.addEventListener('click', (ev) => {
+  els.plateCounts.addEventListener('click', (ev) => {
     const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-count]');
     if (!btn || btn.disabled) return;
     actions.setCount(btn.dataset.board!, Number(btn.dataset.count));
@@ -229,16 +240,16 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
     const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-path]');
     if (btn && !btn.disabled) actions.addBoard(btn.dataset.path!);
   });
-  els.scenarioList.addEventListener('click', (ev) => {
-    const row = (ev.target as HTMLElement).closest<HTMLElement>('[data-scenario]');
-    if (row) actions.selectScenario(row.dataset.scenario!);
+  els.optionList.addEventListener('click', (ev) => {
+    const row = (ev.target as HTMLElement).closest<HTMLElement>('[data-option]');
+    if (row) actions.selectOption(row.dataset.option!);
   });
-  els.scenarioList.addEventListener('keydown', (ev) => {
+  els.optionList.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Enter' && ev.key !== ' ') return;
-    const row = (ev.target as HTMLElement).closest<HTMLElement>('[data-scenario]');
+    const row = (ev.target as HTMLElement).closest<HTMLElement>('[data-option]');
     if (!row) return;
     ev.preventDefault();
-    actions.selectScenario(row.dataset.scenario!);
+    actions.selectOption(row.dataset.option!);
   });
   els.issueList.addEventListener('click', (ev) => {
     const c = (ev.target as HTMLElement).closest<HTMLElement>('[data-instance]');
@@ -248,8 +259,22 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
     actions.selectInstance(c.dataset.instance!);
   });
 
+  // The options are worked out once per change of what they depend on.
+  let optionsFor = '';
+  let options: Option[] = [];
+  function optionsOf(state: PanelState): Option[] {
+    const key = `${state.view?.revision}/${state.quoteRev}/${state.preview}`;
+    if (key !== optionsFor && state.view) {
+      optionsFor = key;
+      options = buildOptions(state.view, state.quote, state.preview);
+    }
+    return options;
+  }
+
+  // --- 1: boards you need ----------------------------------------------------
+
   function boards(view: PanelView): void {
-    const key = JSON.stringify(view.sources.map((s) => [s.key, s.name, s.stale, s.error, s.needed, s.niceToHave, s.instances, s.populated, s.geometry?.width, s.geometry?.height, s.geometry?.copperLayers]));
+    const key = JSON.stringify(view.sources.map((s) => [s.key, s.name, s.stale, s.error, s.needed, s.niceToHave, s.geometry?.width, s.geometry?.height, s.geometry?.copperLayers]));
     once('boards', key, () => {
       const keys = view.sources.map((s) => s.key);
       els.boardList.innerHTML = view.sources
@@ -258,20 +283,13 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
             ? `${mm(s.geometry.width)} × ${mm(s.geometry.height)} mm · ${s.geometry.copperLayers}-layer`
             : escapeHtml(s.error ?? 'not resolved');
           const tags = [s.stale ? '<span class="tag">stale</span>' : '', s.error ? '<span class="tag">missing</span>' : ''].join(' ');
-          const bare = s.instances - s.populated;
           const k = escapeHtml(s.key);
           return (
             `<div class="board" data-key="${k}" style="--board:${boardColor(keys, s.key)}">` +
-            `<div class="board-head"><span class="swatch">${k}</span><span class="board-name" title="${escapeHtml(s.path)}">${escapeHtml(s.name)}</span>${tags}</div>` +
-            `<div class="board-meta">${size}${bare > 0 ? ` · ${bare} bare` : ''}</div>` +
+            `<div class="board-head"><span class="swatch">${k}</span><span class="board-name" title="${escapeHtml(s.path)}">${escapeHtml(s.name)}</span>${tags}<span class="board-meta">${size}</span></div>` +
             `<div class="board-controls">` +
-            `<label class="count-control">on panel <span class="stepper">` +
-            `<button type="button" data-board="${k}" data-count="${s.instances - 1}" ${s.instances === 0 ? 'disabled' : ''} aria-label="one fewer ${k}">−</button>` +
-            `<output>${s.instances}</output>` +
-            `<button type="button" data-board="${k}" data-count="${s.instances + 1}" ${s.geometry ? '' : 'disabled'} aria-label="one more ${k}">+</button>` +
-            `</span></label>` +
-            `<label>needed <input class="qty" type="number" min="0" step="1" value="${s.needed}" data-board="${k}" data-field="needed" /></label>` +
-            `<label>nice to have <input class="qty" type="number" min="0" step="1" value="${s.niceToHave}" data-board="${k}" data-field="niceToHave" /></label>` +
+            `<label title="Assembled boards of this design that you must end up with">needed <input class="qty" type="number" min="0" step="1" value="${s.needed}" data-board="${k}" data-field="needed" /></label>` +
+            `<label title="Boards of this design you would welcome if they come cheap, assembled or bare. 0 = no wish beyond needed">nice to have <input class="qty" type="number" min="0" step="1" value="${s.niceToHave}" data-board="${k}" data-field="niceToHave" /></label>` +
             `</div></div>`
           );
         })
@@ -301,33 +319,7 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
     });
   }
 
-  function cost(view: PanelView): void {
-    const q = view.quote;
-    once('cost', JSON.stringify([q, [...open].filter((o) => o.startsWith('cost/'))]), () => {
-      const keys = view.sources.map((s) => s.key);
-      els.costFlag.hidden = !(q.cost?.estimate ?? false);
-      if (!q.order || !q.cost) {
-        els.costSummary.innerHTML =
-          `<div class="hint">Not available yet.</div>` +
-          `<ul class="notes">${q.problems.map((p) => `<li>${escapeHtml(p)}</li>`).join('')}</ul>`;
-        return;
-      }
-      const asm = q.order.assembly;
-      const what = q.order.piece.boards > 1 ? 'panel' : 'board';
-      const order =
-        `<span class="qty-made">${q.order.pcbQty} ${what}${q.order.pcbQty === 1 ? '' : 's'}</span>` +
-        (asm
-          ? `<span class="qty-asm">${asm.qty} assembled</span><span class="qty-service">${asm.type === 'economic' ? 'Economic' : 'Standard'} PCBA</span>`
-          : '<span class="qty-asm">bare</span>');
-      els.costSummary.innerHTML =
-        `<div class="total"><span id="cost-total" class="total-amount">${money(q.cost.total)}</span>${flag(q.cost.estimate)}</div>` +
-        `<div class="order-line">${order}</div>` +
-        costGroups(q.cost.lines, q.cost.total, q.cost.estimate, 'cost', open) +
-        `<div class="received">${q.received.map((r) => receivedMarks(r, boardColor(keys, r.key))).join('')}</div>` +
-        notesBlock([...q.problems.map((p) => `Problem: ${p}`), ...q.notes], 'note', 'cost/notes', open) +
-        `<div class="legend" title="${escapeHtml(ESTIMATE_LEGEND_LONG)}">${escapeHtml(ESTIMATE_LEGEND)}</div>`;
-    });
-  }
+  // --- 2: ways to order them -------------------------------------------------
 
   function compositionChips(counts: PieceCount[], keys: string[], isPanel: boolean): string {
     return counts
@@ -344,104 +336,173 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
       .join('');
   }
 
-  function scenarios(state: PanelState): void {
-    const quote = state.quote;
-    const keys = state.view?.panel.sources.map((s) => s.key) ?? [];
-    once(
-      'scenarios',
-      JSON.stringify([quote?.scenarios.map((s) => [s.id, s.total]), quote?.rejected, state.scenario, state.quoteError, keys, open.has('scenarios/rejected')]),
-      () => {
-        if (state.quoteError) {
-          els.scenarioList.innerHTML = `<div class="hint">${escapeHtml(state.quoteError)}</div>`;
-          return;
-        }
-        if (!quote) {
-          els.scenarioList.innerHTML = '<div class="hint">Working…</div>';
-          return;
-        }
-        const rejected = notesBlock(
-          quote.rejected.map((r) => `${r.title}: ${r.reason}`),
-          'way not possible',
-          'scenarios/rejected',
-          open,
-        ).replace(/(\d+) way not possibles/, '$1 ways not possible');
-        if (quote.scenarios.length === 0) {
-          // With no board on the panel there is nothing that could have been possible.
-          const nothingAsked = (state.view?.panel.sources.length ?? 0) === 0;
-          els.scenarioList.innerHTML = `<div class="hint">Nothing to compare yet.</div>${nothingAsked ? '' : rejected}`;
-          return;
-        }
-        const dearest = Math.max(...quote.scenarios.map((s) => s.total));
-        const rows = quote.scenarios
-          .map((s, i) => {
-            const tags = scenarioTags(s)
-              .map((t) => `<span class="tag">${escapeHtml(t)}</span>`)
-              .join('');
-            // What is on one piece, and how many pieces: a pair of lines per order.
-            const orders = s.orders
-              .map((o) => {
-                const made = o.priced.order.pcbQty;
-                const asm = o.priced.order.assembly?.qty ?? 0;
-                const spare = made - asm;
-                const what = compositionChips(o.counts, keys, o.panel);
-                // Of the pieces made, some are assembled and the rest arrive bare.
-                const qty =
-                  `<b>${made}</b> ${o.panel ? 'panel' : 'board'}${made === 1 ? '' : 's'}<span class="sep">:</span>` +
-                  (asm > 0 ? `<b>${asm}</b> assembled` : 'all bare') +
-                  (spare > 0 && asm > 0 ? `<span class="sep">,</span><b>${spare}</b> bare` : '');
-                return o.panel
-                  ? `<dt>panel</dt><dd class="sc-panel">${what}</dd><dt>order</dt><dd class="sc-qty">${qty}</dd>`
-                  : `<dt>order</dt><dd class="sc-qty">${what}${qty}</dd>`;
-              })
-              .join('');
-            const shows = loadsOntoPanel(s) ? 'Loads this panel onto the plate' : 'Shows these orders on the plate; your panel stays as it is';
-            return (
-              `<div class="scenario${s.id === state.scenario ? ' selected' : ''}" data-scenario="${escapeHtml(s.id)}" role="button" tabindex="0" title="${escapeHtml(`${SCENARIO_MEANING[s.kind]}\n${shows}.`)}">` +
-              `<span class="sc-rank">${i + 1}</span>` +
-              `<div class="sc-main">` +
-              `<div class="sc-name">${icon(s.kind)}<span>${SCENARIO_LABEL[s.kind]}</span>${tags}</div>` +
-              `<dl class="sc-facts">${orders}` +
-              `<dt>you get</dt><dd class="sc-got">${s.received.map((r) => receivedMarks(r, boardColor(keys, r.key))).join('')}</dd></dl>` +
-              `</div>` +
-              `<div class="sc-cost"><div class="sc-total">${money(s.total)}</div>` +
-              `<div class="sc-per">${money(s.costPerNeededBoard)} / board ${flag(s.estimate)}</div>` +
-              `<span class="meter"><i style="width:${Math.round((s.total / dearest) * 100)}%"></i></span>` +
-              (s.warnings.length > 0
-                ? `<div class="sc-warn" title="${escapeHtml(s.warnings.join('\n'))}">${s.warnings.length} note${s.warnings.length === 1 ? '' : 's'}</div>`
-                : '') +
-              `</div></div>`
-            );
-          })
-          .join('');
-        const anyBare = quote.scenarios.some((s) => s.orders.some((o) => o.counts.some((c) => c.populated > 0 && c.populated < c.total)));
-        els.scenarioList.innerHTML =
-          `<div class="sc-legend"><b>you get</b> = assembled boards delivered:` +
-          `<span><i class="pip pip-met"></i> one you need</span><span><i class="pip pip-over"></i> one extra</span>` +
-          (anyBare ? `<span><span class="chip chip-key chip-bare">S ×1</span> left bare</span>` : '') +
-          `</div>` +
-          `<div class="scenarios">${rows}</div>${rejected}`;
-      },
-    );
+  function orderFacts(o: Option, keys: string[]): string {
+    return o.orders
+      .map((order) => {
+        const spare = order.made - order.assembled;
+        const what = compositionChips(order.counts, keys, order.panel);
+        // Of the pieces made, some are assembled and the rest arrive bare.
+        const qty =
+          order.made === 0
+            ? 'not ready to order'
+            : `<b>${order.made}</b> ${order.panel ? 'panel' : 'board'}${order.made === 1 ? '' : 's'}<span class="sep">:</span>` +
+              (order.assembled > 0 ? `<b>${order.assembled}</b> assembled` : 'all bare') +
+              (spare > 0 && order.assembled > 0 ? `<span class="sep">,</span><b>${spare}</b> bare` : '');
+        return order.panel
+          ? `<dt>panel</dt><dd class="sc-panel">${what}</dd><dt>order</dt><dd class="sc-qty">${qty}</dd>`
+          : `<dt>order</dt><dd class="sc-qty">${what}${qty}</dd>`;
+      })
+      .join('');
+  }
 
-    const selected: Scenario | undefined = quote?.scenarios.find((s) => s.id === state.scenario);
-    once('scenario-detail', JSON.stringify([selected?.id, selected?.total, state.scenarioMsg, [...open].filter((o) => o.startsWith('scenario/'))]), () => {
-      if (!selected) {
-        els.scenarioDetail.innerHTML = '';
+  function ways(state: PanelState, list: Option[]): void {
+    const view = state.view!;
+    const quote = state.quote;
+    once('ways', `${optionsFor}/${state.quoteError}/${opened('ways/')}`, () => {
+      const keys = view.panel.sources.map((s) => s.key);
+      if (view.sources.length === 0) {
+        els.optionList.innerHTML = '<div class="hint">Add a board in step 1 and the ways to order it appear here.</div>';
         return;
       }
-      els.scenarioDetail.innerHTML =
-        `<div class="detail" id="scenario-lines">` +
-        `<h3>${icon(selected.kind)}${SCENARIO_LABEL[selected.kind]}</h3>` +
-        `<p class="meaning">${escapeHtml(SCENARIO_MEANING[selected.kind])}</p>` +
-        (state.scenarioMsg ? `<div class="msg${state.scenarioMsg.problem ? ' msg-problem' : ''}">${escapeHtml(state.scenarioMsg.text)}</div>` : '') +
-        costGroups(selected.lines, selected.total, selected.estimate, 'scenario', open) +
-        notesBlock(selected.warnings, 'note', 'scenario/notes', open) +
-        `</div>`;
+      if (state.quoteError) {
+        els.optionList.innerHTML = `<div class="hint">${escapeHtml(state.quoteError)}</div>`;
+        return;
+      }
+      if (!quote) {
+        els.optionList.innerHTML = '<div class="hint">Working…</div>';
+        return;
+      }
+      const rejected = notesBlock(
+        quote.rejected.map((r) => `${r.title}: ${r.reason}`),
+        'way not possible',
+        'ways/rejected',
+        open,
+        'ways not possible',
+      );
+      if (list.length === 0) {
+        els.optionList.innerHTML = `<div class="hint">Nothing to compare yet: no board has a needed quantity.</div>${rejected}`;
+        return;
+      }
+      const dearest = Math.max(...list.map((o) => o.total ?? 0), 0.01);
+      const rows = list
+        .map((o, i) => {
+          const tags = o.tags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join('');
+          const where = o.shown
+            ? '<span class="where where-shown">shown</span>'
+            : o.onPlate
+              ? '<span class="where where-plate">on the plate</span>'
+              : '';
+          const inView = o.shown || (o.onPlate && !list.some((x) => x.shown));
+          const does = o.onPlate
+            ? 'This is the panel on the plate'
+            : o.loads
+              ? 'Puts this panel on the plate, in place of the one there'
+              : 'Shows these orders on the plate; the panel stays as it is';
+          return (
+            `<div class="scenario${inView ? ' selected' : ''}" data-option="${escapeHtml(o.id)}" data-scenario="${escapeHtml(o.id)}" role="button" tabindex="0" title="${escapeHtml(`${o.meaning}\n${does}.`)}">` +
+            `<span class="sc-rank">${i + 1}</span>` +
+            `<div class="sc-main">` +
+            `<div class="sc-name">${icon(o.kind)}<span>${escapeHtml(o.label)}</span>${tags}${where}</div>` +
+            `<dl class="sc-facts">${orderFacts(o, keys)}` +
+            `<dt>you get</dt><dd class="sc-got">${o.received.map((r) => receivedMarks(r, boardColor(keys, r.key))).join('')}</dd></dl>` +
+            `</div>` +
+            `<div class="sc-cost">` +
+            (o.total === null
+              ? `<div class="sc-total">—</div><div class="sc-per">no price yet</div>`
+              : `<div class="sc-total">${money(o.total)}</div>` +
+                `<div class="sc-per">${money(o.perBoard ?? o.total)} / board ${flag(o.estimate)}</div>` +
+                `<span class="meter"><i style="width:${Math.round((o.total / dearest) * 100)}%"></i></span>`) +
+            (o.notes.length > 0
+              ? `<div class="sc-warn" title="${escapeHtml(o.notes.join('\n'))}">${o.notes.length} note${o.notes.length === 1 ? '' : 's'}</div>`
+              : '') +
+            `</div></div>`
+          );
+        })
+        .join('');
+      const anyBare = list.some((o) => o.orders.some((x) => x.counts.some((c) => c.populated > 0 && c.populated < c.total)));
+      els.optionList.innerHTML =
+        `<div class="sc-legend"><b>you get</b> = assembled boards delivered:` +
+        `<span><i class="pip pip-met"></i> one you need</span><span><i class="pip pip-over"></i> one extra</span>` +
+        (anyBare ? `<span><span class="chip chip-key chip-bare">S ×1</span> left bare</span>` : '') +
+        `</div>` +
+        `<div class="scenarios">${rows}</div>${rejected}`;
+    });
+  }
+
+  // --- 3: on the plate -------------------------------------------------------
+
+  function plate(state: PanelState, list: Option[]): void {
+    const view = state.view!;
+    const inView = optionInView(list);
+    const showing = inView?.shown === true;
+    const empty = view.panel.instances.length === 0;
+
+    els.plateTitle.textContent = showing ? `Shown: ${inView!.label}` : inView ? `On the plate: ${inView.label}` : 'On the plate: nothing yet';
+    els.plateMeaning.textContent = inView
+      ? inView.meaning
+      : view.sources.length === 0
+        ? ''
+        : 'Pick a way to order in step 2, or build a panel yourself with the counts below.';
+    // What is shown for comparison is not the panel: it has nothing to edit, check or export.
+    els.plateEdit.hidden = showing || view.sources.length === 0;
+    els.checks.hidden = showing;
+    els.arrangeBtn.disabled = state.busy || empty || showing;
+    els.exportBtn.disabled = state.busy || empty || showing;
+    els.exportBtn.title = showing
+      ? 'What is shown is ordered board by board: export each from the board editor. Go back to your panel to export that.'
+      : '';
+
+    once('counts', JSON.stringify([view.sources.map((s) => [s.key, s.instances, s.populated, !!s.geometry]), state.busy]), () => {
+      const keys = view.sources.map((s) => s.key);
+      els.plateCounts.innerHTML = view.sources
+        .map((s) => {
+          const k = escapeHtml(s.key);
+          const bare = s.instances - s.populated;
+          return (
+            `<span class="count-control" data-key="${k}" style="--board:${boardColor(keys, s.key)}">` +
+            `<span class="swatch">${k}</span><span class="stepper">` +
+            `<button type="button" data-board="${k}" data-count="${s.instances - 1}" ${s.instances === 0 ? 'disabled' : ''} aria-label="one fewer ${k}">−</button>` +
+            `<output>${s.instances}</output>` +
+            `<button type="button" data-board="${k}" data-count="${s.instances + 1}" ${s.geometry ? '' : 'disabled'} aria-label="one more ${k}">+</button>` +
+            `</span>${bare > 0 ? `<span class="bare-n">${bare} bare</span>` : ''}</span>`
+          );
+        })
+        .join('');
+    });
+
+    once('cost', `${optionsFor}/${inView?.id}/${opened('cost/')}`, () => {
+      const keys = view.sources.map((s) => s.key);
+      els.costFlag.hidden = !(inView?.estimate ?? false);
+      if (!inView) {
+        els.costSummary.innerHTML = '<div class="hint">Nothing to price yet.</div>';
+        return;
+      }
+      if (inView.total === null) {
+        els.costSummary.innerHTML =
+          `<div class="hint">No price yet.</div>` +
+          `<ul class="notes">${inView.notes.map((p) => `<li>${escapeHtml(p)}</li>`).join('')}</ul>`;
+        return;
+      }
+      const service = showing ? undefined : view.quote.order?.assembly?.type;
+      const order = inView.orders
+        .map(
+          (o) =>
+            `<span class="qty-made">${o.made} ${o.panel ? 'panel' : 'board'}${o.made === 1 ? '' : 's'}</span>` +
+            `<span class="qty-asm">${o.assembled > 0 ? `${o.assembled} assembled` : 'bare'}</span>`,
+        )
+        .join('<span class="qty-and">and</span>');
+      els.costSummary.innerHTML =
+        `<div class="total"><span id="cost-total" class="total-amount">${money(inView.total)}</span>${flag(inView.estimate)}</div>` +
+        `<div class="order-line">${order}${service ? `<span class="qty-service">${service === 'economic' ? 'Economic' : 'Standard'} PCBA</span>` : ''}</div>` +
+        costGroups(inView.lines, inView.total, inView.estimate, 'cost', open) +
+        `<div class="received">${inView.received.map((r) => receivedMarks(r, boardColor(keys, r.key))).join('')}</div>` +
+        notesBlock(inView.notes, 'note', 'cost/notes', open) +
+        `<div class="legend" title="${escapeHtml(ESTIMATE_LEGEND_LONG)}">${escapeHtml(ESTIMATE_LEGEND)}</div>`;
     });
   }
 
   function issues(view: PanelView): void {
-    once('issues', JSON.stringify([view.issues, view.panel.sources.map((s) => s.key), [...open].filter((o) => o.startsWith('issue/'))]), () => {
+    once('issues', `${view.revision}/${opened('issue/')}`, () => {
       const keys = view.sources.map((s) => s.key);
       const sourceOf = new Map(view.panel.instances.map((i) => [i.id, i.source]));
       const n = (sev: string): number => view.issues.filter((i) => i.severity === sev).length;
@@ -477,8 +538,6 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
     els.statusConn.textContent = state.connected ? 'connected' : 'disconnected — retrying';
     els.statusCursor.textContent = state.cursorMm ? `x: ${state.cursorMm.x.toFixed(2)} y: ${state.cursorMm.y.toFixed(2)} mm` : 'x: -- y: --';
     els.statusZoom.textContent = `zoom: ${state.transform.scale.toFixed(1)} px/mm`;
-    els.arrangeBtn.disabled = state.busy || !state.view || state.view.panel.instances.length === 0;
-    els.exportBtn.disabled = state.busy || !state.view || state.view.panel.instances.length === 0;
     renderMessage(els.arrangeMsg, state.arrangeMsg);
     renderMessage(els.exportMsg, state.exportMsg);
     renderMessage(els.boardMsg, state.boardMsg);
@@ -495,18 +554,19 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
     els.statusSelection.textContent = sel
       ? `selected: ${sel.id} at ${mm(sel.at.x)}, ${mm(sel.at.y)} · rotation ${sel.rotation} · ${sel.populate ? 'populated' : 'bare'}${sel.pinned ? ' · pinned' : ''}`
       : '';
-    els.plateEmpty.hidden = view.panel.instances.length > 0;
+    els.plateEmpty.hidden = view.panel.instances.length > 0 || state.preview !== null;
     if (!els.plateEmpty.hidden) {
       els.plateEmpty.textContent =
         view.sources.length === 0
-          ? 'This panel has no boards yet.\nPick one under Boards, on the right, to start.'
-          : 'The plate is empty.\nPress + next to a board to put it on the panel.';
+          ? 'Step 1: say which boards you need.\nPick one under "Boards you need", on the right.'
+          : 'Nothing on the plate yet.\nStep 2: pick a way to order, on the right.\nOr build a panel yourself with the counts in step 3.';
     }
 
+    const list = optionsOf(state);
     boards(view);
     addable(state.boardFiles, view, state.busy);
-    cost(view);
-    scenarios(state);
+    ways(state, list);
+    plate(state, list);
     issues(view);
   };
 }

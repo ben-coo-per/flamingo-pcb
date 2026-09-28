@@ -524,6 +524,36 @@ function panelPlans(
   return out;
 }
 
+/**
+ * True when `panel` is exactly the panel `layout` describes: the same
+ * instances in the same places, and every setting the layout fixes. Pinning
+ * does not count; it changes nothing about what is made.
+ *
+ * This is how a client knows that what is on the plate is one of the computed
+ * scenarios and not a panel someone arranged by hand.
+ */
+export function layoutMatches(panel: Pick<Panel, 'instances' | 'settings'>, layout: ScenarioLayout): boolean {
+  if (panel.instances.length !== layout.instances.length) return false;
+  for (const want of layout.instances) {
+    const have = panel.instances.find((i) => i.id === want.id);
+    if (!have) return false;
+    if (have.source !== want.source || have.rotation !== want.rotation || have.populate !== want.populate) return false;
+    if (Math.abs(have.at.x - want.at.x) > 0.005 || Math.abs(have.at.y - want.at.y) > 0.005) return false;
+  }
+  const settings = panel.settings as unknown as Record<string, unknown>;
+  for (const [key, value] of Object.entries(layout.settings)) {
+    const mine = settings[key];
+    if (typeof value === 'object' && value !== null) {
+      for (const [k, v] of Object.entries(value)) {
+        if ((mine as Record<string, unknown> | undefined)?.[k] !== v) return false;
+      }
+    } else if (mine !== value) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function quantityText(o: ScenarioOrder): string {
   const pcb = o.priced.order.pcbQty;
   const asm = o.priced.order.assembly?.qty ?? 0;

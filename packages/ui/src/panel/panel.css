@@ -389,7 +389,12 @@ body {
 }
 
 .board-meta {
-  margin: 1px 0 6px 34px;
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .board-controls {
@@ -397,11 +402,7 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 16px;
-  margin-left: 34px;
-}
-
-.board-controls .count-control {
-  flex: 0 0 100%;
+  margin: 6px 0 0 34px;
 }
 
 .board-controls label {
@@ -718,7 +719,7 @@ table.lines tr.order td {
 
 .scenario {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) 100px;
+  grid-template-columns: 16px minmax(0, 1fr) minmax(100px, max-content);
   column-gap: 6px;
   padding: 8px 6px 8px 4px;
   border: 1px solid transparent;
@@ -753,9 +754,14 @@ table.lines tr.order td {
 
 .sc-name {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 7px;
+  gap: 3px 7px;
   font-weight: 700;
+}
+
+.sc-name > span {
+  white-space: nowrap;
 }
 
 .sc-icon {
@@ -830,27 +836,86 @@ table.lines tr.order td {
   cursor: help;
 }
 
-.detail {
-  margin-top: 10px;
-  padding: 8px;
-  border: 2px solid var(--ink);
+/* ---- steps --------------------------------------------------------------- */
+
+.step h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.detail h3 {
+.step-n {
+  flex: none;
+  width: 18px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  line-height: 16px;
+  text-align: center;
+  letter-spacing: 0;
+}
+
+.step .meaning {
+  margin: 0 0 8px;
+}
+
+.sub {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dotted var(--ink);
+}
+
+.sub h3 {
   display: flex;
   align-items: center;
   gap: 7px;
-  margin: 0 0 4px;
-  font-size: 12px;
+  margin: 0 0 6px;
+  font-size: 11px;
   font-weight: 700;
 }
 
-.detail .meaning {
-  margin: 0 0 8px;
+.sub .msg {
+  margin: 8px 0 0;
 }
 
-.detail .msg {
-  margin: 0 0 8px;
+.plate-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-bottom: 8px;
+}
+
+.plate-counts:empty {
+  display: none;
+}
+
+.count-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bare-n {
+  font-size: 10px;
+}
+
+/* Where an option is: it is the panel on the plate, or it is shown there. */
+.where {
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.where-plate {
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.where-shown {
+  border: 1px solid var(--ink);
 }
 
 /* ---- checks -------------------------------------------------------------- */

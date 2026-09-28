@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { checkPanel } from '../src/check.js';
 import { applyPanelOp } from '../src/ops.js';
 import { DEFAULT_SETTINGS, newPanel } from '../src/panel.js';
-import { quoteOrder } from '../src/scenarios.js';
+import { layoutMatches, quoteOrder } from '../src/scenarios.js';
 import type { QuoteRequest, QuoteResult, Scenario } from '../src/scenarios.js';
 import type { ResolvedSource } from '../src/resolved.js';
 import type { Panel, PanelSource } from '../src/types.js';
@@ -174,6 +174,53 @@ describe('quoteOrder: 1 sensor + 5 minis', () => {
 
   it('reports how long it took, and it is quick', () => {
     expect(result.elapsedMs).toBeLessThan(2000);
+  });
+});
+
+describe('layoutMatches', () => {
+  const { s, m } = boards();
+  const result = quoteOrder(request([source(s, 1), source(m, 5)], [s, m]));
+  const merged = byId(result, 'merged-needed-x2');
+
+  function loaded(sc: Scenario): Panel {
+    return applyAll(
+      newPanel('p'),
+      { op: 'addSource', source: source(s, 1) },
+      { op: 'addSource', source: source(m, 5) },
+      { op: 'setLayout', instances: sc.layout!.instances, settings: sc.layout!.settings },
+    );
+  }
+
+  it('recognizes a scenario that was loaded and left alone', () => {
+    const panel = loaded(merged);
+    expect(layoutMatches(panel, merged.layout!)).toBe(true);
+    // Of all the scenarios, only that one.
+    const matches = result.scenarios.filter((x) => x.layout && layoutMatches(panel, x.layout)).map((x) => x.id);
+    expect(matches).toEqual(['merged-needed-x2']);
+  });
+
+  it('pinning an instance changes nothing about what is made', () => {
+    const panel = applyAll(loaded(merged), { op: 'setPinned', id: 'M1', pinned: true });
+    expect(layoutMatches(panel, merged.layout!)).toBe(true);
+  });
+
+  it.each([
+    ['moving an instance', { op: 'moveInstance', id: 'M1', at: { x: 200, y: 7 } }],
+    ['turning an instance', { op: 'rotateInstance', id: 'M1', by: 90 }],
+    ['making an instance bare', { op: 'setPopulate', id: 'M1', populate: false }],
+    ['removing an instance', { op: 'removeInstance', id: 'M1' }],
+    ['adding an instance', { op: 'addInstance', source: 'M' }],
+    ['changing the separation', { op: 'setSettings', settings: { separation: 'solid-tab' } }],
+    ['changing a rail', { op: 'setSettings', settings: { rails: { left: 5 } } }],
+    ['switching the fiducials off', { op: 'setSettings', settings: { fiducials: { enabled: false } } }],
+  ] as const)('%s makes it a panel of its own', (_what, op) => {
+    expect(layoutMatches(applyAll(loaded(merged), op), merged.layout!)).toBe(false);
+  });
+
+  it('tells a silk-divided board from a mouse-bite panel of the same boards', () => {
+    const silk = byId(result, 'silk-divider-needed-x2');
+    expect(layoutMatches(loaded(silk), silk.layout!)).toBe(true);
+    expect(layoutMatches(loaded(silk), merged.layout!)).toBe(false);
   });
 });
 

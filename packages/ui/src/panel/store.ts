@@ -42,8 +42,8 @@ export interface PanelState {
   cursorMm: Point | null;
   quote: QuoteResult | null;
   quoteError: string | null;
-  /** Scenario whose fee lines are shown. */
-  scenario: string | null;
+  /** Counts up whenever `quote` is replaced, so lists built from it know when to rebuild. */
+  quoteRev: number;
   /**
    * Scenario shown on the plate in place of the panel, because it is not one
    * panel that could be loaded (single boards, or several orders). Nothing on
@@ -52,7 +52,6 @@ export interface PanelState {
   preview: string | null;
   arrangeMsg: Message | null;
   exportMsg: Message | null;
-  scenarioMsg: Message | null;
   boardMsg: Message | null;
   /** Board files in the project that could be added to the panel. */
   boardFiles: BoardFile[];
@@ -72,11 +71,10 @@ function initial(): PanelState {
     cursorMm: null,
     quote: null,
     quoteError: null,
-    scenario: null,
+    quoteRev: 0,
     preview: null,
     arrangeMsg: null,
     exportMsg: null,
-    scenarioMsg: null,
     boardMsg: null,
     boardFiles: [],
     menu: null,
