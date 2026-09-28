@@ -126,3 +126,5 @@ export type {
   QuoteRequest,
 } from './scenarios.js';
 export { quoteOrder, OBJECTIVES } from './scenarios.js';
+
+export type { SourceView, LimitView, PanelView } from './view.js';

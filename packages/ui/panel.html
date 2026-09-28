@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Flamingo — Panel</title>
+  </head>
+  <body>
+    <div id="panel-app">
+      <header class="bar">
+        <span class="bar-app">Flamingo</span>
+        <span class="bar-view">Panel</span>
+        <span id="panel-name" class="bar-name"></span>
+        <span id="panel-file" class="bar-file"></span>
+        <span class="bar-spacer"></span>
+        <a class="bar-link" href="/">Board editor</a>
+      </header>
+
+      <main id="plate" class="plate">
+        <canvas id="plate-canvas"></canvas>
+        <div id="plate-empty" class="plate-empty" hidden></div>
+        <div id="context-menu" class="menu" hidden role="menu"></div>
+      </main>
+
+      <aside class="side">
+        <section class="block">
+          <h2>Boards</h2>
+          <div id="board-list"></div>
+        </section>
+
+        <section class="block">
+          <button id="arrange-btn" class="btn" type="button">Arrange <kbd>A</kbd></button>
+          <div id="arrange-msg" class="msg" hidden></div>
+        </section>
+
+        <section class="block">
+          <h2>Estimated cost <span id="cost-flag" class="tag" hidden>estimate</span></h2>
+          <div id="cost-summary"></div>
+        </section>
+
+        <section class="block">
+          <h2>Compare scenarios</h2>
+          <div id="scenario-list"></div>
+          <div id="scenario-detail"></div>
+        </section>
+
+        <section class="block">
+          <h2>Warnings <span id="issue-count" class="count"></span></h2>
+          <div id="issue-list"></div>
+        </section>
+
+        <section class="block">
+          <button id="export-btn" class="btn" type="button">Export fab files</button>
+          <div id="export-msg" class="msg" hidden></div>
+        </section>
+      </aside>
+
+      <footer class="status">
+        <span id="status-cursor">x: -- y: --</span>
+        <span id="status-zoom">zoom: --</span>
+        <span id="status-size"></span>
+        <span id="status-selection"></span>
+        <span class="bar-spacer"></span>
+        <span id="status-conn">connecting…</span>
+      </footer>
+    </div>
+    <script type="module" src="/src/panel/main.ts"></script>
+  </body>
+</html>
