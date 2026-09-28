@@ -10,6 +10,7 @@
  * Chromium, and checks, in the page itself:
  *
  *   - the view loads and connects
+ *   - a panel can be started from the page: boards are added from a list
  *   - + and - change what is on the plate
  *   - dragging an instance moves it and pins it
  *   - the right-click menu rotates, duplicates, toggles bare, unpins, deletes
@@ -20,7 +21,9 @@
  *   - Delete, Ctrl+Z and Ctrl+Shift+Z work
  *   - an edit made outside the browser (as MCP would) shows up without a reload
  *   - Export offers a zip, and the zip holds the fab files
- *   - every pixel drawn is grey: the view is monochrome
+ *   - colour means "which board" and nothing else: every instance is filled
+ *     with its board's tint, and every coloured pixel and style has the hue of
+ *     a board colour
  *
  * Screenshots go to panel-screenshots/ at the repo root. Exits 0 on success.
  *
@@ -41,8 +44,8 @@
  * The font configuration matters to the last check only. A browser that
  * rasterizes text with subpixel (LCD) antialiasing tints the edges of every
  * letter red and blue; that is the rasterizer, not the page, and the
- * configuration turns it off so that "every pixel is grey" is a statement
- * about the page. (macOS has had no subpixel antialiasing since 10.14.)
+ * configuration turns it off so that the colour check is a statement about
+ * the page. (macOS has had no subpixel antialiasing since 10.14.)
  */
 
 import { existsSync, readdirSync } from 'node:fs';
@@ -56,6 +59,7 @@ import type { Browser, Page } from 'playwright-core';
 import { Resvg } from '@resvg/resvg-js';
 import { newBoard } from '@flamingo/engine';
 import type { PanelView } from '@flamingo/panel';
+import { BOARD_COLORS, boardColorAt, tint } from '@flamingo/panel';
 import { Doc } from '../src/document.js';
 import { startServer } from '../src/http.js';
 import type { StartedServer } from '../src/http.js';
@@ -119,10 +123,8 @@ async function main(): Promise<void> {
     };
     const getView = async (): Promise<PanelView> => (await (await fetch(`${base}/api/panel`)).json()) as PanelView;
 
-    // The panel the page will open on: both boards, 1 + 5 needed, nothing placed.
-    await post('/api/panel/new', { name: 'combo' });
-    await post('/api/panel/add-board', { path: 'esp32-breakout.flamingo', key: 'S', needed: 1 });
-    await post('/api/panel/add-board', { path: 'usbc-breakout.flamingo', key: 'M', needed: 5 });
+    // The page opens on a panel with nothing on it, the way a new one starts.
+    await post('/api/panel/new', { name: 'first' });
 
     const remote = process.env.FLAMINGO_PLAYWRIGHT_WS;
     if (remote) {
@@ -189,6 +191,33 @@ async function main(): Promise<void> {
     await page.waitForFunction('window.flamingoPanel && window.flamingoPanel.state().view !== null');
     await page.waitForFunction("document.getElementById('status-conn').textContent === 'connected'");
     assert((await page.title()) === 'Flamingo — Panel', 'wrong page title');
+    assert((await text('#panel-name')) === 'first', 'the panel name is not shown');
+
+    // --- starting a panel --------------------------------------------------
+    step('a panel is started from the page');
+    assert((await text('#plate-empty')).includes('Pick one under Boards'), 'an empty panel does not say how to start');
+    await page.locator('#board-add button.add-board').first().waitFor();
+    const offered = (await page.locator('#board-add button.add-board').allInnerTexts()).map((t) => t.replace(/^\+\s*/, '').trim()).sort();
+    assert(JSON.stringify(offered) === JSON.stringify(['esp32-breakout', 'usbc-breakout']), `the boards on offer are ${JSON.stringify(offered)}`);
+    assert((await text('#board-add .add-title')) === 'Add a board to start', 'the list of boards has no heading');
+    await shot('00-start', 'A new panel: nothing on the plate, and the project\'s boards on offer under Boards.');
+    await page.locator('#board-add button.add-board', { hasText: 'usbc-breakout' }).click();
+    await until('v.panel.sources.length === 1 && v.panel.instances.length === 1', 'the first board on the panel, with one instance');
+    assert((await page.locator('#board-add button.add-board').count()) === 1, 'a board on the panel is still on offer');
+    await page.locator('#board-add button.add-board', { hasText: 'esp32-breakout' }).click();
+    await until('v.panel.sources.length === 2 && v.panel.instances.length === 2', 'both boards on the panel');
+    assert((await page.locator('#board-add button.add-board').count()) === 0, 'boards are on offer although all are on the panel');
+    assert((await errorCodes()).length === 0, `starting a panel left errors: ${(await errorCodes()).join(', ')}`);
+    const started0 = await getView();
+    assert(started0.filePath !== null && started0.panel.sources.map((x) => x.path).sort().join() === 'esp32-breakout.flamingo,usbc-breakout.flamingo', 'the boards were not recorded by relative path');
+    await shot('00b-started', 'Both boards added from the list: one instance of each on the plate, each in its board\'s colour.');
+
+    // The rest runs on the panel of the brief: S and M, 1 + 5 needed, nothing placed.
+    await post('/api/panel/new', { name: 'combo' });
+    await post('/api/panel/add-board', { path: 'esp32-breakout.flamingo', key: 'S', needed: 1 });
+    await post('/api/panel/add-board', { path: 'usbc-breakout.flamingo', key: 'M', needed: 5 });
+    await until("v.panel.name === 'combo' && v.panel.sources.length === 2 && v.panel.instances.length === 0", 'the combo panel');
+    await page.waitForFunction("document.querySelectorAll('#board-list .board').length === 2");
     assert((await text('#panel-name')) === 'combo', 'the panel name is not shown');
     const rows = await page.locator('#board-list .board').count();
     assert(rows === 2, `expected 2 boards in the list, got ${rows}`);
@@ -213,10 +242,19 @@ async function main(): Promise<void> {
     const costAll = await text('#cost-total');
     assert(/^\$\d+\.\d\d$/.test(costAll), `the cost total reads "${costAll}"`);
     assert(await page.locator('#cost-flag').isVisible(), 'the cost is not flagged as an estimate');
-    const flagged = await page.locator('#cost-summary table.lines td.flag', { hasText: 'est.' }).count();
-    const unflagged = await page.locator('#cost-summary table.lines tr:not(.sum) td.flag:text-is("")').count();
+    const flags = (await page.evaluate(`[...document.querySelectorAll('#cost-summary table.lines td.flag')].map((e) => e.textContent.trim())`)) as string[];
+    const flagged = flags.filter((f) => f === 'est.').length;
+    const unflagged = flags.filter((f) => f === '').length;
     assert(flagged > 0 && unflagged > 0, `expected both estimated and verified fee lines, got ${flagged} and ${unflagged}`);
     assert((await text('#cost-summary .legend')).includes('est. = estimate'), 'the estimate mark is not explained');
+    // Three subtotals, folded; the lines are one click away.
+    const groups = (await page.locator('#cost-summary .cost-group .cost-name').allInnerTexts()).map((t) => t.trim());
+    assert(JSON.stringify(groups) === JSON.stringify(['Boards', 'Assembly', 'Parts']), `the cost is grouped as ${JSON.stringify(groups)}`);
+    assert(!(await page.locator('#cost-summary .cost-group table.lines').first().isVisible()), 'the fee lines are unfolded from the start');
+    await page.locator('#cost-summary .cost-group summary', { hasText: 'Assembly' }).click();
+    assert(await page.locator('#cost-summary .cost-group[open] table.lines td', { hasText: 'Economic PCBA setup' }).isVisible(), 'unfolding Assembly does not show its lines');
+    const assemblyFlag = (await text('#cost-summary .cost-group[open] summary .flag'));
+    assert(assemblyFlag === '', 'the Assembly subtotal is marked as an estimate although every line in it is verified');
     await shot('02-one-plus-five', 'After pressing + once for S and five times for M: 1 + 5 on the plate, arranged as they were added, with the live cost.');
 
     step('- takes one away, and the cost follows');
@@ -253,10 +291,21 @@ async function main(): Promise<void> {
 
     step('the check lists what the drop caused, and marks the instances');
     await until("v.issues.some((i) => i.code === 'overlap')", 'an overlap error');
-    const overlap = await text('#issue-list .issue-error[data-code="overlap"] .issue-text');
-    assert(/M3/.test(overlap) && /S1/.test(overlap), `the overlap warning reads "${overlap}"`);
-    assert(/\d+ error/.test(await text('#issue-count')), 'the warnings heading does not count the errors');
-    await shot('04-dropped-pinned-overlap', 'M3 dropped on S1: pinned (filled corner square, PINNED), both marked with a second outline and ERROR, and the overlap listed under Warnings.');
+    const row = page.locator('#issue-list .issue-error[data-code="overlap"]');
+    assert((await row.locator('.issue-title').innerText()).trim() === 'Overlap', 'the overlap has no short title');
+    const chips = (await row.locator('.issue-chips .chip').allInnerTexts()).map((t) => t.trim()).sort();
+    assert(JSON.stringify(chips) === JSON.stringify(['M3', 'S1']), `the overlap names ${JSON.stringify(chips)}`);
+    assert(!(await row.locator('.issue-text').isVisible()), 'the sentence is shown before it is asked for');
+    await row.locator('summary .issue-title').click();
+    const overlap = (await row.locator('.issue-text').innerText()).trim();
+    assert(/M3/.test(overlap) && /S1/.test(overlap) && /overlap/.test(overlap), `the overlap reads "${overlap}"`);
+    assert(Number(await text('#issue-count .level-error')) >= 1, 'the heading does not count the errors');
+    // A chip selects its instance on the plate and leaves the row as it is.
+    await row.locator('.issue-chips .chip', { hasText: 'S1' }).click();
+    assert((await state<string | null>('s.selection')) === 'S1', 'a chip does not select its instance');
+    assert(await row.locator('.issue-text').isVisible(), 'selecting from a chip folded the row');
+    await row.locator('.issue-chips .chip', { hasText: 'M3' }).click();
+    await shot('04-dropped-pinned-overlap', 'M3 dropped on S1: pinned (filled corner square, PINNED), both marked with a second outline and ERROR, and the overlap listed under Checks with a chip per board involved.');
 
     // --- arrange -----------------------------------------------------------
     step('A arranges around the pinned instance');
@@ -367,9 +416,17 @@ async function main(): Promise<void> {
     await page.waitForFunction(`document.querySelector('#cost-summary .order-line').textContent !== ${JSON.stringify(orderBefore)}`);
     const orderAfter = await text('#cost-summary .order-line');
     const totalAfter = await text('#cost-total');
-    console.log(`  needed 5: "${orderBefore}" ${totalBefore}; needed 12: "${orderAfter}" ${totalAfter}`);
+    const flat = (t: string): string => t.replace(/\s*\n\s*/g, ', ');
+    console.log(`  needed 5: ${flat(orderBefore)}, ${totalBefore}; needed 12: ${flat(orderAfter)}, ${totalAfter}`);
     assert(orderAfter !== orderBefore && totalAfter !== totalBefore, 'the cost summary did not follow the needed quantity');
-    assert((await text('#cost-summary .received')).includes('need 12'), 'boards received does not show the new need');
+    const gotM = page.locator('#cost-summary .received .got[data-board="M"]');
+    assert((await gotM.getAttribute('data-need')) === '12', 'boards received does not show the new need');
+    assert(Number(await gotM.getAttribute('data-got')) >= 12, 'fewer boards received than needed');
+    // More boards than there is room to draw one by one: numbers instead.
+    assert((await gotM.locator('.pips-text').innerText()).trim() === `${await gotM.getAttribute('data-got')}/12`, 'a large quantity is not shown as received/needed');
+    const gotS = page.locator('#cost-summary .received .got[data-board="S"]');
+    assert((await gotS.locator('.pip-met').count()) === 1, 'the need for S is not drawn one mark per board');
+    assert((await gotS.locator('.pip-over').count()) === Number(await gotS.getAttribute('data-got')) - 1, 'the extra boards of S are not drawn one mark each');
     const derived = await state<number>('s.view.derivedMs');
     console.log(`  the server derived this view, checks and cost included, in ${derived} ms`);
     await shot('08-cost-follows-quantity', 'Needed quantity of M raised to 12: more panels assembled, a new total, and new scenarios below.');
@@ -379,46 +436,60 @@ async function main(): Promise<void> {
 
     // --- scenarios ---------------------------------------------------------
     step('selecting a scenario shows its fees and loads its panel');
-    await page.waitForFunction("document.querySelectorAll('#scenario-list tr[data-scenario]').length >= 4");
+    await page.waitForFunction("document.querySelectorAll('#scenario-list [data-scenario]').length >= 4");
     await page.waitForFunction("window.flamingoPanel.state().quote.scenarios.every((s) => s.received.find((r) => r.key === 'M').needed === 5)");
-    const head = (await page.locator('#scenario-list thead th').allInnerTexts()).map((t) => t.trim());
-    assert(JSON.stringify(head) === JSON.stringify(['#', 'Scenario', 'Total', 'Per board']), `the scenario table is headed ${JSON.stringify(head)}`);
-    const totals = (await page.locator('#scenario-list tbody tr td:nth-child(3)').allInnerTexts()).map((t) => Number(/\$([\d.]+)/.exec(t)![1]));
+    const totals = (await page.locator('#scenario-list .scenario .sc-total').allInnerTexts()).map((t) => Number(/\$([\d.]+)/.exec(t)![1]));
     assert(totals.every((t, i) => i === 0 || t >= totals[i - 1]!), `the scenarios are not ranked by total: ${totals.join(', ')}`);
-    const firstRow = await text('#scenario-list tbody tr:first-child');
-    assert(/got\/need S \d+\/1\s+M \d+\/5/.test(firstRow), `a scenario row does not show boards received against needed: "${firstRow}"`);
-    assert(/warning/.test(firstRow) && /est\./.test(firstRow), 'a scenario row shows no warnings count or no estimate mark');
+    const first = page.locator('#scenario-list .scenario').first();
+    // Boards received against needed, per design, one mark per board.
+    const got = await first.locator('.sc-got .got').evaluateAll((els) => els.map((e) => [e.getAttribute('data-board'), e.getAttribute('data-got'), e.getAttribute('data-need'), e.querySelectorAll('.pip-met').length, e.querySelectorAll('.pip-over').length]));
+    assert(got.length === 2 && got[0]![0] === 'S' && got[0]![2] === '1' && got[1]![0] === 'M' && got[1]![2] === '5', `a scenario row shows boards received as ${JSON.stringify(got)}`);
+    for (const [key, g, need, met, over] of got) {
+      assert(Number(met) === Number(need) && Number(over) === Number(g) - Number(need), `${key}: ${g} of ${need} drawn as ${met} + ${over} marks`);
+    }
+    assert((await first.locator('.sc-warn').count()) === 1, 'a scenario row shows no count of warnings');
+    assert((await first.locator('.sc-per .est').innerText()).trim() === 'est.', 'a scenario row shows no estimate mark');
+    assert((await first.locator('.sc-order .chip').count()) >= 2, 'a scenario row does not show what is on the panel');
+    // Cost as a length: the dearest scenario fills the bar, the cheapest is shortest.
+    const meters = await page.locator('#scenario-list .scenario .sc-cost .meter i').evaluateAll((els) => els.map((e) => parseFloat((e as HTMLElement).style.width)));
+    assert(meters[meters.length - 1] === 100 && meters[0]! < 100, `the cost bars are ${meters.join(', ')}`);
+    // A row is a few words, not a paragraph.
+    const words = (await first.innerText()).split(/\s+/).filter((w) => /[a-z]{3,}/i.test(w)).length;
+    assert(words <= 12, `a scenario row has ${words} words`);
 
     const target = 'merged-needed-x2';
     const want = await state<{ n: number; total: number; w: number; h: number }>(
       `(() => { const q = s.quote.scenarios.find((x) => x.id === '${target}'); return { n: q.layout.instances.length, total: q.total, w: q.layout.width, h: q.layout.height }; })()`,
     );
-    await page.locator(`#scenario-list tr[data-scenario="${target}"]`).click();
+    await page.locator(`#scenario-list [data-scenario="${target}"]`).click();
     await page.locator('#scenario-lines').waitFor();
     await until(`v.panel.instances.length === ${want.n}`, `${want.n} instances from the scenario`);
-    const lines = await page.locator('#scenario-lines table.lines tr:not(.sum)').count();
-    assert(lines >= 8, `the scenario shows ${lines} fee lines`);
-    assert((await text('#scenario-lines')).includes('Different designs: 2 in one file'), 'the different-designs fee is not itemized');
-    assert((await text('#scenario-lines table.lines tr.sum')).includes(`$${want.total.toFixed(2)}`), 'the scenario detail does not total to the scenario');
+    const lines = await page.locator('#scenario-lines table.lines tr').count();
+    assert(lines >= 8, `the scenario has ${lines} fee lines`);
+    const detail = async (): Promise<string> => (await page.locator('#scenario-lines').evaluate((e) => e.textContent)) ?? '';
+    assert((await detail()).includes('Different designs: 2 in one file'), 'the different-designs fee is not itemized');
+    assert((await text('#scenario-lines .cost-total .amount')) === `$${want.total.toFixed(2)}`, 'the scenario detail does not total to the scenario');
+    await page.locator('#scenario-lines .cost-group summary', { hasText: 'Boards' }).click();
+    assert(await page.locator('#scenario-lines td', { hasText: 'Different designs: 2 in one file' }).isVisible(), 'unfolding Boards does not show the fee');
     const loaded = await state<{ w: number; h: number; sep: string }>('({ w: s.view.geometry.frame.width, h: s.view.geometry.frame.height, sep: s.view.panel.settings.separation })');
     assert(Math.abs(loaded.w - want.w) < 0.01 && Math.abs(loaded.h - want.h) < 0.01, `the plate is ${loaded.w} x ${loaded.h}, the scenario ${want.w} x ${want.h}`);
     await page.waitForFunction(`document.getElementById('cost-total').textContent === '$${want.total.toFixed(2)}'`);
-    assert(await page.locator(`#scenario-list tr[data-scenario="${target}"].selected`).isVisible(), 'the selected scenario is not marked');
+    assert(await page.locator(`#scenario-list [data-scenario="${target}"].selected`).isVisible(), 'the selected scenario is not marked');
     assert((await errorCodes()).length === 0, `the loaded scenario has errors: ${(await errorCodes()).join(', ')}`);
-    await shot('09-scenario-loaded', 'Scenario "One panel, mouse bites" selected: its fee lines below the table, its 1 + 3 panel on the plate, and the live cost equal to its total.');
+    await shot('09-scenario-loaded', 'Scenario "Mouse-bite panel" selected: its cost below the list with Boards unfolded, its 1 + 3 panel on the plate, and the live cost equal to its total.');
 
-    await page.locator('#scenario-list tr[data-scenario^="silk-divider"]').first().click();
+    await page.locator('#scenario-list [data-scenario^="silk-divider"]').first().click();
     await until("v.panel.settings.separation === 'silk-divider'", 'a silk-divider panel on the plate');
     assert((await state<number>('s.view.geometry.tabs.length')) === 0, 'a silk-divider panel has tabs');
-    assert(!(await text('#scenario-lines')).includes('Different designs'), 'a silk-divided board is charged for different designs');
+    assert(!(await detail()).includes('Different designs'), 'a silk-divided board is charged for different designs');
     await shot('10-scenario-silk-divider', 'The cheapest scenario: boards inside one outline, divided by silkscreen lines (dotted), no rails, no tabs.');
 
-    await page.locator('#scenario-list tr[data-scenario="separate"]').click();
+    await page.locator('#scenario-list [data-scenario="separate"]').click();
     await page.locator('#scenario-lines .msg').waitFor();
     assert((await text('#scenario-lines .msg')).includes('there is no panel to load'), 'a scenario of single boards does not say the plate is unchanged');
     assert((await state<string>('s.view.panel.settings.separation')) === 'silk-divider', 'a scenario without a panel changed the plate');
 
-    await page.locator(`#scenario-list tr[data-scenario="${target}"]`).click();
+    await page.locator(`#scenario-list [data-scenario="${target}"]`).click();
     await until(`v.panel.settings.separation === 'mouse-bite' && v.panel.instances.length === ${want.n}`, 'the mouse-bite scenario back on the plate');
 
     // --- sync --------------------------------------------------------------
@@ -487,43 +558,103 @@ async function main(): Promise<void> {
     started.panel!.touch();
     await until("v.sources.find((s) => s.key === 'M').stale === true", 'M stale in the page');
     assert((await text('#board-list .board[data-key="M"] .tag')) === 'stale', 'the board list does not tag M as stale');
-    assert((await text('#issue-list')).includes('changed on disk'), 'the stale board is not listed under Warnings');
+    assert((await text('#issue-list .issue[data-code="source-stale"] .issue-title')) === 'Board changed on disk', 'the stale board is not listed under Checks');
     await page.keyboard.press('a');
     await until("v.issues.filter((i) => i.severity === 'error').length === 0", 'a clean panel');
-    const stalePng = await shot('14-stale-source', 'usbc-breakout edited on disk: tagged stale in the board list, its instances dotted and labelled STALE, and a warning listed.');
+    await shot('14-stale-source', 'usbc-breakout edited on disk: tagged stale in the board list, its instances dotted and labelled STALE, and listed under Checks.');
 
-    // --- monochrome --------------------------------------------------------
-    step('every pixel is grey');
-    let coloured = 0;
-    for (const png of [stalePng, await page.screenshot()]) {
-      const img = new Resvg(
-        `<svg xmlns="http://www.w3.org/2000/svg" width="${VIEWPORT.width}" height="${VIEWPORT.height}"><image width="${VIEWPORT.width}" height="${VIEWPORT.height}" href="data:image/png;base64,${png.toString('base64')}"/></svg>`,
-      ).render();
-      const px = img.pixels;
-      for (let i = 0; i < px.length; i += 4) {
-        if (Math.abs(px[i]! - px[i + 1]!) > 2 || Math.abs(px[i + 1]! - px[i + 2]!) > 2) coloured++;
-      }
-    }
-    assert(
-      coloured === 0,
-      `${coloured} pixels are not grey. If they all sit on the edges of text, the browser is antialiasing for an LCD: see the header of this script.`,
+    // --- colour ------------------------------------------------------------
+    step('colour means which board, and nothing else');
+    const hue = (r: number, g: number, b: number): number => {
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const d = max - min;
+      if (d === 0) return 0;
+      const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      return (h * 60 + 360) % 360;
+    };
+    const rgb = (hex: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
+    const boardHues = BOARD_COLORS.map((c) => hue(...rgb(c)));
+    const nearBoardHue = (r: number, g: number, b: number): boolean =>
+      boardHues.some((h) => Math.min(Math.abs(h - hue(r, g, b)), 360 - Math.abs(h - hue(r, g, b))) <= 10);
+
+    const png = await page.screenshot();
+    const img = new Resvg(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${VIEWPORT.width}" height="${VIEWPORT.height}"><image width="${VIEWPORT.width}" height="${VIEWPORT.height}" href="data:image/png;base64,${png.toString('base64')}"/></svg>`,
+    ).render();
+    const px = img.pixels;
+    const at = (x: number, y: number): [number, number, number] => {
+      const i = (Math.round(y) * img.width + Math.round(x)) * 4;
+      return [px[i]!, px[i + 1]!, px[i + 2]!];
+    };
+
+    // Every instance is filled with the tint of its board's colour.
+    const keys = await state<string[]>('s.view.panel.sources.map((x) => x.key)');
+    const placed = await state<Array<{ id: string; source: string; populate: boolean }>>(
+      's.view.geometry.instances.map((i) => ({ id: i.id, source: i.source, populate: i.populate }))',
     );
-    // And in the styles themselves, whatever the rasterizer does with them.
-    const tinted = (await page.evaluate(`(() => {
-      const grey = (c) => { const m = /rgba?\\(([^)]+)\\)/.exec(c); if (!m) return true; const [r, g, b, a] = m[1].split(',').map(Number); return a === 0 || (r === g && g === b); };
+    for (const inst of placed) {
+      const want = rgb(tint(boardColorAt(keys.indexOf(inst.source))));
+      const c = await centreOf(inst.id);
+      const box = (await page.evaluate(
+        `(() => { const s = window.flamingoPanel.state(); const i = s.view.geometry.instances.find((x) => x.id === ${JSON.stringify(inst.id)}); const a = window.flamingoPanel.toPlate({ x: i.bbox.minX, y: i.bbox.minY }); const b = window.flamingoPanel.toPlate({ x: i.bbox.maxX, y: i.bbox.maxY }); return { w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) }; })()`,
+      )) as { w: number; h: number };
+      // The commonest colour in a patch beside the label, clear of the outline.
+      const seen = new Map<string, number>();
+      for (let dy = -6; dy <= 6; dy++) {
+        for (let dx = -6; dx <= 6; dx++) {
+          const k = at(c.x + box.w * 0.3 + dx, c.y + box.h * 0.3 + dy).join(',');
+          seen.set(k, (seen.get(k) ?? 0) + 1);
+        }
+      }
+      const [most] = [...seen.entries()].sort((p, q) => q[1] - p[1])[0]!;
+      const got = most.split(',').map(Number);
+      assert(
+        got.every((v, i) => Math.abs(v - want[i]!) <= 3),
+        `${inst.id} is filled rgb(${most}); its board ${inst.source} is rgb(${want.join(',')})`,
+      );
+    }
+    assert(new Set(placed.map((i) => i.source)).size === 2, 'the check needs instances of two boards on the plate');
+
+    // And no pixel anywhere has a colour that is not a board's.
+    let coloured = 0;
+    let stray = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      const [r, g, b] = [px[i]!, px[i + 1]!, px[i + 2]!];
+      if (Math.max(r, g, b) - Math.min(r, g, b) <= 6) continue;
+      coloured++;
+      if (!nearBoardHue(r, g, b)) stray++;
+    }
+    assert(coloured > 1000, `only ${coloured} coloured pixels: the boards are not colour-coded`);
+    assert(
+      stray <= coloured * 0.002,
+      `${stray} of ${coloured} coloured pixels have a hue that is no board's. If they all sit on the edges of text, the browser is antialiasing for an LCD: see the header of this script.`,
+    );
+
+    // The same in the styles, whatever the rasterizer does with them.
+    const styled = (await page.evaluate(`(() => {
       const out = [];
+      const probe = document.createElement('canvas').getContext('2d');
       for (const e of document.querySelectorAll('*')) {
         const c = getComputedStyle(e);
         for (const prop of ['color', 'backgroundColor', 'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor', 'outlineColor']) {
-          if (!grey(c[prop])) out.push(e.tagName + '#' + e.id + '.' + e.className + ' ' + prop + ' ' + c[prop]);
+          probe.fillStyle = '#000';
+          probe.fillStyle = c[prop];
+          probe.clearRect(0, 0, 1, 1);
+          probe.fillRect(0, 0, 1, 1);
+          const [r, g, b, a] = probe.getImageData(0, 0, 1, 1).data;
+          if (a === 0 || Math.max(r, g, b) - Math.min(r, g, b) <= 6) continue;
+          out.push({ what: e.tagName + '.' + e.className + ' ' + prop, r, g, b });
         }
       }
       return out;
-    })()`)) as string[];
-    assert(tinted.length === 0, `elements styled with a colour:\n${tinted.slice(0, 10).join('\n')}`);
+    })()`)) as Array<{ what: string; r: number; g: number; b: number }>;
+    const off = styled.filter((x) => !nearBoardHue(x.r, x.g, x.b));
+    assert(styled.length > 0, 'nothing in the sidebar carries a board colour');
+    assert(off.length === 0, `elements styled with a colour that is no board's:\n${off.slice(0, 10).map((x) => `${x.what} rgb(${x.r},${x.g},${x.b})`).join('\n')}`);
     const motion = await page.evaluate(`(() => [...document.querySelectorAll('*')].filter((e) => { const c = getComputedStyle(e); return c.transitionDuration.split(',').some((d) => parseFloat(d) > 0) || c.animationName !== 'none' || c.boxShadow !== 'none' || c.backgroundImage !== 'none'; }).length)()`);
     assert(motion === 0, `${motion} element(s) have a transition, animation, shadow or gradient`);
-    console.log('  no coloured pixel, no coloured style, no transition, animation, shadow or gradient');
+    console.log(`  ${placed.length} instances filled with their board's tint; ${coloured} coloured pixels, ${stray} stray; no transition, animation, shadow or gradient`);
 
     assert(pageErrors.length === 0, `the page logged errors:\n${pageErrors.join('\n')}`);
 

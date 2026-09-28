@@ -1,9 +1,14 @@
 /*
  * Flamingo panel view.
  *
- * Monochrome. Structure comes from spacing, weight and line style; state is
- * carried by line weight, dashes, hatching and labels. No colour, no shadows,
- * no gradients, no transitions. Desktop only.
+ * Black on white. Structure comes from spacing, weight and line style; state
+ * is carried by line weight, dashes, hatching and labels.
+ *
+ * Colour is used for one thing only: telling designs apart. Anything that
+ * stands for a board takes its colour from --board, which the page sets to
+ * that board's colour (packages/panel/src/colors.ts).
+ *
+ * No shadows, no gradients, no transitions. Desktop only.
  */
 
 @font-face {
@@ -27,6 +32,11 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* `hidden` must win over any display set below. */
+[hidden] {
+  display: none !important;
 }
 
 html,
@@ -279,9 +289,61 @@ body {
   align-items: baseline;
 }
 
-.board-key {
-  font-weight: 700;
+.swatch {
   min-width: 22px;
+  padding: 0 4px;
+  border: 2px solid var(--board);
+  background: color-mix(in srgb, var(--board) 18%, white);
+  font-weight: 700;
+  text-align: center;
+}
+
+.board-add {
+  margin-top: 10px;
+}
+
+.board-list:empty + .board-add,
+#board-list:empty + .board-add {
+  margin-top: 0;
+}
+
+.add-title {
+  margin-bottom: 4px;
+  font-weight: 700;
+}
+
+.add-board {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 4px 8px;
+  border: 1px dashed var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.add-board:hover:not(:disabled),
+.add-board:focus-visible {
+  border-style: solid;
+  background: var(--ink);
+  color: var(--paper);
+  outline: none;
+}
+
+.add-board:disabled {
+  cursor: default;
+}
+
+.add-board .plus {
+  display: inline-block;
+  width: 18px;
+  font-weight: 700;
 }
 
 .board-name {
@@ -292,7 +354,7 @@ body {
 }
 
 .board-meta {
-  margin: 1px 0 6px 30px;
+  margin: 1px 0 6px 34px;
 }
 
 .board-controls {
@@ -300,7 +362,7 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 16px;
-  margin-left: 30px;
+  margin-left: 34px;
 }
 
 .board-controls .count-control {
@@ -363,13 +425,141 @@ input.qty:focus {
   outline-offset: 0;
 }
 
+/* ---- shared marks --------------------------------------------------------- */
+
+/* A board, by name, in its colour. Hollow when it ships bare. */
+.chip {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1.5px solid var(--board, var(--ink));
+  background: color-mix(in srgb, var(--board, var(--ink)) 18%, white);
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.chip-bare {
+  border-style: dashed;
+  background: var(--paper);
+}
+
+.chip-key {
+  --board: var(--ink);
+}
+
+button.chip-instance {
+  cursor: pointer;
+}
+
+button.chip-instance:hover,
+button.chip-instance:focus-visible {
+  background: var(--board, var(--ink));
+  color: var(--paper);
+  outline: none;
+}
+
+/* Boards received: one mark per board. Solid = needed, hollow = extra. */
+.got {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 10px;
+  white-space: nowrap;
+}
+
+.pips {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.pip {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--board, var(--ink));
+}
+
+.pip-met {
+  background: var(--board, var(--ink));
+}
+
+.pip-short {
+  border-style: dotted;
+  border-color: var(--ink);
+}
+
+.pips-text {
+  padding: 0 4px;
+  border: 1.5px solid var(--board, var(--ink));
+  font-size: 11px;
+  line-height: 14px;
+}
+
+/* A share of something, as a length. */
+.meter {
+  display: block;
+  height: 5px;
+}
+
+.meter i {
+  display: block;
+  height: 100%;
+  background: var(--ink);
+}
+
+.est {
+  font-size: 10px;
+  border-bottom: 1px dotted var(--ink);
+  cursor: help;
+}
+
+details > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+details > summary::before {
+  content: '+';
+  display: inline-block;
+  width: 12px;
+  font-weight: 700;
+}
+
+details[open] > summary::before {
+  content: '−';
+}
+
+.notes {
+  margin: 4px 0 0;
+  padding: 0 0 0 12px;
+  list-style: none;
+}
+
+.notes li {
+  padding: 1px 0 1px 10px;
+  text-indent: -10px;
+}
+
+.notes li::before {
+  content: '· ';
+}
+
+.notes-block {
+  margin-top: 8px;
+}
+
 /* ---- cost ---------------------------------------------------------------- */
 
 .total {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  margin-bottom: 2px;
 }
 
 .total-amount {
@@ -379,121 +569,207 @@ input.qty:focus {
 }
 
 .order-line {
-  margin-bottom: 8px;
+  display: flex;
+  gap: 6px;
+  margin: 2px 0 10px;
+}
+
+.order-line span {
+  padding: 0 5px;
+  border: 1px solid var(--ink);
+  font-size: 11px;
+}
+
+.order-line .qty-made {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.cost-group > summary,
+.cost-total {
+  display: grid;
+  grid-template-columns: 12px 78px minmax(0, 1fr) 70px 30px;
+  align-items: center;
+  column-gap: 6px;
+  padding: 2px 0;
+}
+
+.cost-group > summary::before {
+  grid-column: 1;
+}
+
+.cost-total {
+  margin-top: 3px;
+  padding-top: 4px;
+  border-top: 1px solid var(--ink);
+  font-weight: 700;
+}
+
+.cost-total .cost-name {
+  grid-column: 2;
+}
+
+.cost-group .amount,
+.cost-total .amount {
+  text-align: right;
+  white-space: nowrap;
 }
 
 table.lines {
   width: 100%;
+  margin: 2px 0 6px;
   border-collapse: collapse;
+  border-left: 1px solid var(--ink);
+  font-size: 11px;
 }
 
 table.lines td {
-  padding: 1px 0;
+  padding: 1px 0 1px 8px;
   vertical-align: top;
 }
 
 table.lines td.amount {
-  padding-left: 8px;
   text-align: right;
   white-space: nowrap;
 }
 
 table.lines td.flag {
-  width: 34px;
+  width: 36px;
   padding-left: 6px;
   white-space: nowrap;
 }
 
-table.lines tr.sum td {
-  padding-top: 3px;
-  border-top: 1px solid var(--ink);
-  font-weight: 700;
-}
-
-table.lines tr.group td {
-  padding-top: 6px;
+table.lines tr.order td {
+  padding-top: 4px;
   font-weight: 700;
 }
 
 .received {
-  margin-top: 8px;
-}
-
-.notes {
-  margin: 8px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.notes li {
-  padding-left: 12px;
-  text-indent: -12px;
+  margin-top: 10px;
 }
 
 .legend {
   margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px dotted var(--ink);
+  font-size: 10px;
+  cursor: help;
 }
 
 /* ---- scenarios ----------------------------------------------------------- */
 
-table.scenarios {
-  width: 100%;
-  border-collapse: collapse;
+.sc-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin-bottom: 6px;
+  font-size: 10px;
 }
 
-table.scenarios th {
-  padding: 2px 4px 2px 0;
-  border-bottom: 1px solid var(--ink);
-  font-weight: 700;
-  text-align: left;
-  white-space: nowrap;
+.sc-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
-table.scenarios td {
-  padding: 4px 4px 4px 0;
-  border-bottom: 1px dotted var(--ink);
-  vertical-align: top;
+.sc-legend .chip {
+  font-size: 10px;
+  line-height: 13px;
 }
 
-table.scenarios th.num,
-table.scenarios td.num {
-  text-align: right;
-  white-space: nowrap;
-}
-
-table.scenarios tbody tr {
+.scenario {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 104px;
+  column-gap: 6px;
+  padding: 7px 6px 7px 4px;
+  border: 1px solid transparent;
+  border-top: 1px dotted var(--ink);
   cursor: pointer;
 }
 
-table.scenarios tbody tr:hover td {
-  text-decoration: underline;
+.scenario:first-child {
+  border-top-color: transparent;
 }
 
-table.scenarios tbody tr.selected td {
-  border-top: 2px solid var(--ink);
-  border-bottom: 2px solid var(--ink);
+.scenario:hover,
+.scenario:focus-visible {
+  border: 1px solid var(--ink);
+  outline: none;
+}
+
+.scenario.selected {
+  border: 2px solid var(--ink);
+  padding: 6px 5px 6px 3px;
+}
+
+.scenario.selected + .scenario,
+.scenario:hover + .scenario {
+  border-top-color: transparent;
+}
+
+.sc-rank {
   font-weight: 700;
 }
 
-table.scenarios tbody tr.selected td:first-child {
-  border-left: 2px solid var(--ink);
-  padding-left: 4px;
+.sc-name {
+  font-weight: 700;
 }
 
-table.scenarios tbody tr.selected td:last-child {
-  border-right: 2px solid var(--ink);
+.sc-name .tag {
+  margin-left: 6px;
 }
 
-.scenario-sub {
-  font-weight: 400;
+.sc-order {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  margin-top: 3px;
+}
+
+.sc-qty {
+  margin-left: 3px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.sc-got {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 5px;
+}
+
+.sc-warn {
+  margin-left: auto;
+  padding: 0 4px;
+  border: 1px solid var(--ink);
+  font-size: 10px;
+  line-height: 13px;
+  cursor: help;
+}
+
+.sc-cost {
+  text-align: right;
+}
+
+.sc-total {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.sc-per {
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.sc-cost .meter {
+  margin-top: 5px;
+  border-bottom: 1px solid var(--ink);
 }
 
 .detail {
   margin-top: 10px;
   padding: 8px;
-  border: 1px solid var(--ink);
+  border: 2px solid var(--ink);
 }
 
 .detail h3 {
@@ -502,11 +778,49 @@ table.scenarios tbody tr.selected td:last-child {
   font-weight: 700;
 }
 
-/* ---- issues -------------------------------------------------------------- */
+.detail .msg {
+  margin: 0 0 8px;
+}
+
+/* ---- checks -------------------------------------------------------------- */
+
+.level {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.level-error {
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.level-warning {
+  border: 1px solid var(--ink);
+}
+
+.level-info {
+  border: 1px dotted var(--ink);
+  font-weight: 400;
+}
+
+.level-none {
+  border-style: dotted;
+  background: var(--paper);
+  color: var(--ink);
+  font-weight: 400;
+}
+
+.count .level {
+  margin-left: 3px;
+}
 
 .issue {
-  display: flex;
-  gap: 8px;
   padding: 4px 0;
   border-top: 1px dotted var(--ink);
 }
@@ -515,29 +829,36 @@ table.scenarios tbody tr.selected td:last-child {
   border-top: 0;
 }
 
-.issue-level {
-  flex: 0 0 56px;
-  font-size: 10px;
-  line-height: 18px;
-  text-align: center;
-  align-self: flex-start;
+.issue > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
 }
 
-.issue-error .issue-level {
-  background: var(--ink);
-  color: var(--paper);
+.issue > summary::before {
+  order: 9;
+  margin-left: auto;
+  width: auto;
+}
+
+.issue-error .issue-title {
   font-weight: 700;
 }
 
-.issue-warning .issue-level {
-  border: 1px solid var(--ink);
-  font-weight: 700;
+.issue-n {
+  font-size: 11px;
 }
 
-.issue-info .issue-level {
-  border: 1px dotted var(--ink);
+.issue-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
 }
 
-.issue-error .issue-text {
-  font-weight: 700;
+.issue-text {
+  margin: 4px 0 2px 24px;
+  padding: 0 0 0 8px;
+  border-left: 1px solid var(--ink);
+  font-size: 11px;
 }

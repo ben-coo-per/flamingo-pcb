@@ -4,6 +4,9 @@ Branch `panelize`, on top of `main` (487b6b0). Written 2026-09-28.
 All ten steps of the order of work are done and committed. The branch is pushed
 to the fork `ben-coo-per/flamingo-pcb`; see section 1.
 
+**Section 16 records changes made after Ben's first review of the panel view.
+Where it contradicts sections 7, 12 or 14, section 16 is current.**
+
 ## 1. Git remotes and what was pushed
 
 `git remote -v` at the start of the session:
@@ -539,11 +542,11 @@ edited, when its DRC runs once.
 | --- | --- | --- | --- | --- |
 | engine | 305 | 0 | 0 | 0 |
 | fab | 67 | 1 (baseline) | 0 | 0 |
-| panel | 214 | 0 | 0 | 214 |
+| panel | 219 | 0 | 0 | 219 |
 | parts | 41 | 0 | 0 | 0 |
 | server | 198 | 2 (baseline) | 2 | 51 |
-| ui | 53 | 0 | 0 | 12 |
-| **total** | **878** | **3 (all baseline)** | 2 | **277** |
+| ui | 60 | 0 | 0 | 19 |
+| **total** | **890** | **3 (all baseline)** | 2 | **289** |
 
 Where the brief's list of unit tests lives:
 
@@ -564,25 +567,27 @@ Scripts:
 | --- | --- |
 | `npx tsx packages/server/scripts/e2e-panel.ts` with Java | **PASS**, exit 0. Both boards routed and DRC-clean, panel check 0 errors, export not waived, 9 gerbers + 2 drill files parsed by tracespace, BOM 34 designators on 7 rows, CPL 34 rows. 11 s. |
 | same, without Java (this machine as it is) | **PASS**, exit 0, on unrouted boards. The only errors are each board's own unconnected nets, and only those are waived. 2 s. |
-| `npx tsx packages/server/scripts/verify-panel-ui.ts` | **PASS**, exit 0. 17 checks, 14 screenshots. |
+| `npx tsx packages/server/scripts/verify-panel-ui.ts` | **PASS**, exit 0. 18 checks, 16 screenshots. |
 | `npx tsx packages/server/scripts/e2e-esp32.ts` with Java, stock check off | **PASS**, exit 0. Unchanged script. It rewrites `docs/images/esp32-breakout.png`; I restored the file. |
 
 ## 12. UI screenshots
 
 In `panel-screenshots/`, 1600 × 1000, headless Chromium, on the boards
-`e2e-panel.ts` builds (routed).
+`e2e-panel.ts` builds (routed). Retaken after the review changes of section 16.
 
 | File | What it shows |
 | --- | --- |
+| `00-start.png` | A new panel: nothing on the plate, the project's boards on offer under Boards. |
+| `00b-started.png` | Both boards added from the list: one instance of each, each in its board's colour. |
 | `01-loaded-empty.png` | The view as it opens: both boards listed with needed 1 and 5, nothing on the plate. |
 | `02-one-plus-five.png` | After `+` once for S and five times for M: 1 + 5 on the plate with the live cost. |
 | `03-dragging.png` | M3 picked up: drawn where the pointer has it, its position beside it. |
-| `04-dropped-pinned-overlap.png` | M3 dropped on S1: pinned, both marked as errors, the overlap listed under Warnings. |
+| `04-dropped-pinned-overlap.png` | M3 dropped on S1: pinned, both marked as errors, the overlap listed under Checks with a chip per board. |
 | `05-arranged-around-pinned.png` | After `A`: five instances packed, M3 left where it was pinned. |
 | `06-context-menu.png` | Right-click on M3: rotate 90°, duplicate, delete, make bare, unpin. |
 | `07-bare-instances.png` | M3 made bare and duplicated as M6: hatched, dashed, labelled BARE. |
 | `08-cost-follows-quantity.png` | Needed quantity of M raised to 12: more panels assembled, a new total. |
-| `09-scenario-loaded.png` | A scenario selected: its fee lines, its 1 + 3 panel on the plate, live cost equal to its total. |
+| `09-scenario-loaded.png` | A scenario selected: its cost in three subtotals with Boards unfolded, its 1 + 3 panel on the plate. |
 | `10-scenario-silk-divider.png` | The cheapest scenario: boards in one outline divided by silkscreen lines, no rails, no tabs. |
 | `11-exported.png` | Export: the zip is ready and offered as a link. |
 | `12-export-refused.png` | Export on a panel with an overlap: refused, with the findings. |
@@ -592,10 +597,11 @@ In `panel-screenshots/`, 1600 × 1000, headless Chromium, on the boards
 What the script asserts beyond the pictures: the download is a zip holding
 `combo.GTL`, `.GBL`, `.GKO`, both drill files, `bom.csv`, `cpl.csv`; Delete,
 Ctrl+Z and Ctrl+Shift+Z; pan and zoom; an edit made outside the browser appears
-without a reload; every pixel is grey and no element has a colour, transition,
+without a reload; every instance is filled with its board's tint, and no pixel
+or style has a colour that is not a board's; no element has a transition,
 animation, shadow or gradient; the board editor still loads.
 
-The every-pixel-is-grey test needs a browser that antialiases text in grey.
+The colour test needs a browser that antialiases text in grey.
 Chromium on Linux tints text edges for LCDs by default; the container was
 started with `packages/server/scripts/lib/greyscale-fonts.conf` to turn that
 off. The script's header has the command.
@@ -681,3 +687,105 @@ thing and did not add a control.
 6. Tab placement that avoids copper, and per-stretch blocked edges.
 7. Install Java 25 and a font on this machine if the three baseline failures
    and the unrouted e2e should go away here.
+
+## 16. Changes after review (2026-09-28)
+
+Ben looked at the panel view and asked for three things. All three are done,
+on top of the unattended work, in one commit.
+
+### What Ben said, and what changed
+
+| Ben | Change |
+| --- | --- |
+| "The scenarios and warnings are very text heavy. I don't like that." | Both lists say things with shapes first. See below. |
+| "It would be nice to have some color-coding ... they can be hard to tell apart if the shape is similar between different boards." | Every design has a colour. This lifts the monochrome rule of the brief, for this one purpose. |
+| "It is also not clear how you would start to panel a board - is this just done with an LLM call?" | It was: MCP or CLI only. **Boards** now lists the project's board files; picking one puts it on the plate. |
+
+### Colour
+
+- One colour per design, by its position among the panel's boards, from a
+  seven-colour palette chosen to survive colour blindness (Okabe and Ito's,
+  less the yellow). `packages/panel/src/colors.ts`.
+- An instance is filled with an 18% tint of its board's colour and outlined in
+  the colour. The same colour marks the board in the board list, in scenario
+  rows, in boards-received marks, and on the chips under Checks.
+- **Colour means which board and nothing else.** Bare, pinned, stale, blocked
+  and in-error are still drawn with line style, hatching and labels. Errors are
+  not red. The view reads the same in greyscale.
+- `panel_screenshot` and `panel.render.svg` use the same colours.
+- Still no shadows, gradients, transitions or animations.
+
+### Scenarios
+
+A row was four lines of prose. It is now:
+
+- a two-word name (`Silk-divided board`, `Mouse-bite panel`, `Separate orders`)
+- what one panel holds, as chips in the boards' colours: `S ×1` `M ×3`; a bare
+  board's chip is hollow
+- how many are made and assembled: `5 made · 2 assembled`
+- boards received against needed, **one mark per board**: solid for a needed
+  board, hollow for an extra one (numbers instead above 12 boards)
+- the total, the price per board, and a bar whose length is the total relative
+  to the dearest scenario
+- a count of notes; the notes themselves are in the detail
+
+Scenarios that are not possible are folded into one line. The detail of the
+selected scenario shows three subtotals (Boards, Assembly, Parts), each with a
+bar for its share; the fee lines unfold per subtotal.
+
+The optimizer's own titles and summaries are unchanged. MCP and the CLI still
+print them in full.
+
+### Checks (was: Warnings)
+
+- Findings of one kind are one row: a level mark (`E`, `W`, `i`), a title of a
+  few words, a count, and a chip per instance involved.
+- The sentence is behind the row, one click away.
+- **Clicking a chip selects that instance on the plate.**
+- The heading counts errors, warnings and notes.
+- On the e2e panel this turns seven lines of text into two rows.
+
+### Estimated cost
+
+The same three subtotals as a scenario's detail, folded by default. Notes are
+folded into one line. The legend is one line; the long form is a tooltip.
+
+### Starting a panel
+
+- **Boards** lists every `.flamingo` file next to the panel that is not on it
+  yet. Picking one adds the board and puts one instance of it on the plate.
+- The board's key is chosen as before: the first letter of its name, or the
+  next free letter.
+- An empty panel says where to start instead of quoting MCP commands.
+- The view now re-fits when a board or an instance is added, and when another
+  panel is opened. Before, a panel that outgrew the view stayed cut off.
+
+### Decisions in this round that are mine
+
+1. The palette, the 18% tint, and colour by position. Removing a board shifts
+   the colours of the boards after it.
+2. Severity stays uncoloured.
+3. Twelve is the most boards drawn one mark each.
+4. The section is called Checks, since it also holds notes and may be empty of
+   warnings.
+5. Adding a board places one instance at once.
+6. Fee lines are folded by default.
+
+### Superseded
+
+- Section 7: decisions 1 (white plate, black ink only), 26 (legend), 27
+  (scenario table columns) and 31 (warnings as a list of sentences).
+- Section 14: "How do boards get onto a panel from the browser?" is answered.
+  The other rows stand: no control yet to remove a board, edit settings,
+  refresh a stale board, promote layers, choose the ranking, waive an export.
+- Section 12: the screenshots were retaken.
+
+### Also fixed
+
+- Elements marked `hidden` that had a display set in CSS were shown anyway:
+  the `estimate` tag appeared with no cost to flag.
+
+### Not pushed
+
+This commit is local. The fork has `panelize` as of 9c50dfa.
+

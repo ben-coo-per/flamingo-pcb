@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import type { PanelGeometry, PanelIssue, PlacedInstance, Received } from '@flamingo/panel';
+import type { CostLine, PanelGeometry, PanelIssue, PlacedInstance, Received } from '@flamingo/panel';
 import {
+  ISSUE_TITLE,
+  MAX_PIPS,
+  composition,
+  groupCost,
+  groupIssues,
+  pips,
+  scenarioTags,
   escapeHtml,
   issueCounts,
   money,
@@ -167,5 +174,92 @@ describe('panel view: text', () => {
     const edited = structuredClone(view);
     edited.sources[0]!.stale = true;
     expect(quoteKey(edited)).not.toBe(base);
+  });
+});
+
+
+describe('panel view: short forms', () => {
+  const issue = (code: PanelIssue['code'], severity: PanelIssue['severity'], instances: string[], message: string): PanelIssue => ({
+    code,
+    severity,
+    message,
+    instances,
+    sources: [],
+  });
+
+  it('folds findings of one kind into one row, worst first', () => {
+    const groups = groupIssues([
+      issue('blocked-edge', 'info', ['M1'], 'M1 edge W is blocked'),
+      issue('blocked-edge', 'info', ['M2'], 'M2 edge S is blocked'),
+      issue('size-assembly', 'warning', [], 'Standard PCBA cannot take this panel'),
+      issue('overlap', 'error', ['S1', 'M1'], 'S1 and M1 overlap'),
+      issue('blocked-edge', 'info', ['M1'], 'M1 edge N is blocked'),
+    ]);
+    expect(groups.map((g) => [g.severity, g.title, g.messages.length, g.instances])).toEqual([
+      ['error', 'Overlap', 1, ['S1', 'M1']],
+      ['warning', 'Assembly size limit', 1, []],
+      ['info', 'Blocked edge', 3, ['M1', 'M2']],
+    ]);
+  });
+
+  it('keeps one kind apart by severity', () => {
+    const groups = groupIssues([
+      issue('unsupported-instance', 'warning', ['M2'], 'held by 1 tab'),
+      issue('unsupported-instance', 'error', ['M4'], 'has no tabs'),
+    ]);
+    expect(groups.map((g) => [g.severity, g.instances])).toEqual([
+      ['error', ['M4']],
+      ['warning', ['M2']],
+    ]);
+  });
+
+  it('has a short title for every kind of finding', () => {
+    for (const [code, title] of Object.entries(ISSUE_TITLE)) {
+      expect(title.length, code).toBeGreaterThan(3);
+      expect(title.split(' ').length, code).toBeLessThanOrEqual(5);
+    }
+  });
+
+  it('folds fee lines into boards, assembly and parts', () => {
+    const line = (code: CostLine['code'], amount: number, estimate: boolean): CostLine => ({
+      code,
+      label: code,
+      amount,
+      estimate,
+      sources: [],
+    });
+    const groups = groupCost([
+      line('pcb', 2, true),
+      line('pcb-designs', 8, true),
+      line('asm-setup', 8.18, false),
+      line('asm-stencil', 1.53, false),
+      line('part', 0.62, true),
+      line('part', 1.34, true),
+    ]);
+    expect(groups.map((g) => [g.name, g.amount, g.estimate, g.lines.length])).toEqual([
+      ['Boards', 10, true, 2],
+      ['Assembly', 9.71, false, 2],
+      ['Parts', 1.96, true, 2],
+    ]);
+    // A bare order has no assembly and no parts to show.
+    expect(groupCost([line('pcb', 2, true)]).map((g) => g.name)).toEqual(['Boards']);
+  });
+
+  it('draws one mark per board received, up to a point', () => {
+    expect(pips({ assembled: 6, needed: 5 })).toMatchObject({ met: 5, over: 1, short: 0, asText: false });
+    expect(pips({ assembled: 2, needed: 5 })).toMatchObject({ met: 2, over: 0, short: 3, asText: false });
+    expect(pips({ assembled: MAX_PIPS, needed: 1 })).toMatchObject({ asText: false });
+    expect(pips({ assembled: 50, needed: 48 })).toMatchObject({ asText: true, label: '50/48' });
+  });
+
+  it('splits a design in a piece into populated and bare', () => {
+    expect(composition({ key: 'M', total: 3, populated: 1 })).toEqual({ populated: 1, bare: 2 });
+    expect(composition({ key: 'M', total: 3, populated: 3 })).toEqual({ populated: 3, bare: 0 });
+  });
+
+  it('tags what sets a scenario apart', () => {
+    expect(scenarioTags({ id: 'merged-needed-x2' })).toEqual([]);
+    expect(scenarioTags({ id: 'merged-wish-x2' })).toEqual(['extras populated']);
+    expect(scenarioTags({ id: 'silk-divider-bare-x5', promotedTo: 4 })).toEqual(['extras bare', 'as 4-layer']);
   });
 });

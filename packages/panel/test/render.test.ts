@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { checkPanel } from '../src/check.js';
 import { computeGeometry } from '../src/geometry.js';
 import { arrange } from '../src/layout.js';
+import { boardColorAt, tint } from '../src/colors.js';
 import { renderPanelSVG } from '../src/node/render.js';
 import { LIMITS, applyAll, awkwardBoard, panelOf, plainBoard, resolved } from './helpers.js';
 
@@ -23,13 +24,16 @@ describe('renderPanelSVG', () => {
     return { panel, geometry, issues: checkPanel(panel, [a, w], LIMITS, geometry) };
   }
 
-  it('is a well-formed, monochrome SVG', () => {
+  it('is a well-formed SVG whose only colours are the boards\'', () => {
     const { panel, geometry, issues } = scene();
     const svg = renderPanelSVG(panel, [a, w], geometry, { issues, limits: [{ width: 250, height: 250, label: 'assembly max' }] });
     expect(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true);
     expect(svg.trimEnd().endsWith('</svg>')).toBe(true);
     const colours = new Set([...svg.matchAll(/(?:fill|stroke)="(#[0-9a-fA-F]{3,8})"/g)].map((m) => m[1]));
-    expect([...colours].sort()).toEqual(['#000', '#fff']);
+    // Ink, paper, and for each of the two boards its colour and its tint.
+    expect([...colours].sort()).toEqual(
+      ['#000', '#fff', boardColorAt(0), tint(boardColorAt(0)), boardColorAt(1), tint(boardColorAt(1))].sort(),
+    );
     expect(svg).not.toContain('<text');
     expect(svg).not.toMatch(/NaN|Infinity|undefined/);
   });
@@ -60,6 +64,14 @@ describe('renderPanelSVG', () => {
     expect(bare).toContain('stroke-width="0.700"'); // blocked edge
     const limited = renderPanelSVG(panel, [a, w], geometry, { limits: [{ width: 250, height: 250, label: 'asm' }] });
     expect(limited).toContain('stroke-dasharray="4 2"');
+  });
+
+  it('gives every instance of a board that board\'s colour', () => {
+    const { panel, geometry } = scene();
+    const svg = renderPanelSVG(panel, [a, w], geometry, { labels: false });
+    const fills = (c: string): number => (svg.match(new RegExp(`fill="${tint(c)}"`, 'g')) ?? []).length;
+    expect(fills(boardColorAt(0))).toBe(panel.instances.filter((i) => i.source === 'A').length);
+    expect(fills(boardColorAt(1))).toBe(panel.instances.filter((i) => i.source === 'W').length);
   });
 
   it('scales to the requested width', () => {

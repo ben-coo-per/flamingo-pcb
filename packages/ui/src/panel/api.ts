@@ -61,3 +61,26 @@ export const api = {
 export function isError(r: unknown): r is ApiError {
   return typeof r === 'object' && r !== null && (r as { ok?: unknown }).ok === false;
 }
+
+export interface BoardFile {
+  /** Absolute path; what add-board takes. */
+  path: string;
+  name: string;
+  mtimeMs: number;
+  onPanel: boolean;
+}
+
+/** Board files in the project, newest first, each marked if it is on the panel already. */
+export async function listBoards(): Promise<BoardFile[]> {
+  try {
+    const res = await fetch('/api/panel/files');
+    const body = (await res.json()) as { ok?: boolean; boards?: BoardFile[] };
+    return body.boards ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export function addBoard(path: string): Promise<{ ok: true; key: string; name: string } | ApiError> {
+  return post<{ ok: true; key: string; name: string }>('/api/panel/add-board', { path });
+}

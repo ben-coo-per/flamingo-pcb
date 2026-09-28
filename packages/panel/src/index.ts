@@ -128,3 +128,5 @@ export type {
 export { quoteOrder, OBJECTIVES } from './scenarios.js';
 
 export type { SourceView, LimitView, PanelView } from './view.js';
+
+export { BOARD_COLORS, BOARD_TINT, boardColorAt, boardColor, tint } from './colors.js';
