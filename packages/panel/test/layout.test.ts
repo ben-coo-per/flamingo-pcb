@@ -5,7 +5,7 @@ import { arrange, sizeLimit } from '../src/layout.js';
 import type { ArrangeResult } from '../src/layout.js';
 import type { ResolvedSource } from '../src/resolved.js';
 import type { Panel } from '../src/types.js';
-import { LIMITS, applyAll, awkwardBoard, panelOf, plainBoard, resolved } from './helpers.js';
+import { EDGE_CONN, LIMITS, applyAll, awkwardBoard, comp, panelOf, plainBoard, resolved } from './helpers.js';
 import type { InstanceSpec } from './helpers.js';
 
 function arranged(panel: Panel, sources: ResolvedSource[], result: ArrangeResult): Panel {
@@ -73,7 +73,7 @@ describe('arrange', () => {
     expect(result.ok && result.placements.map((p) => p.rotation)).toEqual([180, 90]);
   });
 
-  it('only ever offers the current rotation and a quarter turn from it', () => {
+  it('packs a board as it is or a quarter turn from it', () => {
     const panel = panelOf([a], [['A', 0, 0, { rotation: 180 }]]);
     const result = arrange(panel, [a], LIMITS);
     expect(result.ok && [180, 270]).toContain(result.ok && result.placements[0]!.rotation);
@@ -124,6 +124,33 @@ describe('arrange', () => {
       expect(inst.edges[t.side].blocked).toBe(false);
     }
     expect([...tabCounts(g).values()].every((n) => n >= 2)).toBe(true);
+  });
+
+  it('turns a board around when its blocked edge would leave it hanging', () => {
+    // A connector on the S edge and nothing else blocked. Rails top and bottom
+    // only: a board in the bottom row with its connector facing the rail can
+    // only be held from above and from the sides.
+    const conn = plainBoard('conn', 22, 16);
+    conn.components.push(comp('J1', EDGE_CONN, 11, 0.5));
+    const c = resolved('C', conn);
+    const panel = panelOf([c], many('C', 2));
+    const out = arranged(panel, [c], arrange(panel, [c], LIMITS));
+    const g = computeGeometry(out, [c]);
+    expect([...tabCounts(g).values()].every((n) => n >= 2)).toBe(true);
+    expect(errors(out, [c])).toEqual([]);
+    // Left as it was when turning is not allowed.
+    const fixed = arranged(panel, [c], arrange(panel, [c], LIMITS, { rotate: false }));
+    expect(fixed.instances.every((i) => i.rotation === 0)).toBe(true);
+  });
+
+  it('keeps two overhanging parts clear of each other', () => {
+    const conn = plainBoard('conn', 22, 16);
+    conn.components.push(comp('J1', EDGE_CONN, 11, 0.5)); // overhangs S by 1.5 mm
+    const c = resolved('C', conn);
+    // Whatever the packer does with eight of them, the check must find no fault.
+    const panel = panelOf([c], many('C', 8), [{ op: 'setSettings', settings: { rails: { left: 5, right: 5 } } }]);
+    const out = arranged(panel, [c], arrange(panel, [c], LIMITS));
+    expect(errors(out, [c])).toEqual([]);
   });
 
   it('says why and how big when the instances do not fit', () => {
@@ -330,6 +357,7 @@ describe('rails, tabs, fiducials and tooling holes', () => {
 
   it('spreads tabs along an edge', () => {
     expect(tabCentres(0, 12, 5, 50)).toEqual([6]);
+    expect(tabCentres(0, 16, 5, 50)).toEqual([4, 12]);
     expect(tabCentres(0, 40, 5, 50)).toEqual([10, 30]);
     expect(tabCentres(0, 120, 5, 50)).toEqual([20, 60, 100]);
     expect(tabCentres(0, 4, 5, 50)).toEqual([]);
