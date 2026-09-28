@@ -369,7 +369,11 @@ function assemble(
   }, 0);
   const warnings = [...extraWarnings];
   for (const o of orders) {
-    for (const n of o.priced.cost.notes) if (!warnings.includes(n)) warnings.push(n);
+    for (const n of o.priced.cost.notes) {
+      // Said once, below, for the scenario as a whole.
+      if (n.startsWith('Boards divided by silkscreen lines')) continue;
+      if (!warnings.includes(n)) warnings.push(n);
+    }
     for (const r of o.priced.rejected) {
       const w = `Not available: ${r}`;
       if (!warnings.includes(w)) warnings.push(w);

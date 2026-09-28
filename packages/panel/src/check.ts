@@ -24,6 +24,8 @@ export type Severity = 'error' | 'warning' | 'info';
 export type IssueCode =
   | 'source-missing'
   | 'source-stale'
+  /** Raised by the server, which runs each source board's own DRC. */
+  | 'source-drc'
   | 'stackup-mismatch'
   | 'stackup-too-few'
   | 'stackup-promoted'

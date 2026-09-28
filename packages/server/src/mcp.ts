@@ -46,6 +46,8 @@ import { formatAutorouteSummary, runAutorouteBroadcast } from './autoroute.js';
 import { pngDimensions, renderPNG } from './screenshot.js';
 import { checkStock, stockCheckEnabled } from './stock.js';
 import { exportStep } from './step.js';
+import { registerPanelTools } from './panel/mcp.js';
+import type { PanelSession } from './panel/session.js';
 
 /**
  * Parts API injected into the MCP context so tests can supply a mock (no
@@ -68,6 +70,12 @@ export interface McpContext {
    * jar in the unit suite). Production wires up the real runner from route.ts.
    */
   route: RouteRunner;
+  /**
+   * Panel session. When present, the panel tools (panel_*, quote_order,
+   * export_panel_fab) are served next to the board tools; when absent the
+   * tool list is exactly the board tools.
+   */
+  panel?: PanelSession;
 }
 
 // ---------------------------------------------------------------------------
@@ -1227,6 +1235,8 @@ export function createMcpServer(ctx: McpContext): McpServer {
       };
     },
   );
+
+  if (ctx.panel) registerPanelTools(server, ctx.panel);
 
   return server;
 }
