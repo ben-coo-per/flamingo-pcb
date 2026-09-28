@@ -196,9 +196,12 @@ export function resolveSourceGeometry(board: Board, limits: PanelLimits): Source
       if (beyondBox) continue;
       // Inside the bounding box but outside a non-rectangular outline (a notch,
       // a cut corner): the part still overhangs the board there.
-      const outside = poly.find((p) => !pointInPolygon(p, outline) && insideBox(p, bbox, EPS));
-      if (outside && !onBoundary(outside, outline)) {
-        const side = nearestSide(outside, bbox);
+      const outside = poly.filter(
+        (p) => insideBox(p, bbox, EPS) && !pointInPolygon(p, outline) && !onBoundary(p, outline),
+      );
+      // Which side a notch belongs to is a judgement call, so every side
+      // nearest to a stray corner is blocked.
+      for (const side of new Set(outside.map((p) => nearestSide(p, bbox)))) {
         overhangs.push({ refdes: c.refdes, side, depth: 0, polygon: poly });
         block(side, `${c.refdes} overhangs the outline`, 0, overhangMargin.value);
       }
