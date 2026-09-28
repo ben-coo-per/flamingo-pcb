@@ -80,3 +80,6 @@ export {
 
 export type { Severity, IssueCode, PanelIssue } from './check.js';
 export { checkPanel, hasErrors, targetLayers, usedLayerCounts, assemblyFit } from './check.js';
+
+export type { SizeLimit, ArrangeOptions, ArrangeOk, ArrangeFail, ArrangeResult } from './layout.js';
+export { arrange, sizeLimit } from './layout.js';

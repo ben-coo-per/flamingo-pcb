@@ -14,3 +14,5 @@ export {
   resolveSource,
   resolveSources,
 } from './load.js';
+export type { PanelRenderLimit, PanelRenderOpts } from './render.js';
+export { renderPanelSVG } from './render.js';
