@@ -104,6 +104,7 @@ export class PanelSession extends EventEmitter {
   private readonly drcCache = new Map<string, DrcViolation[]>();
   private cached: { panel: Panel; view: PanelView; sources: ResolvedSource[] } | null = null;
   private revision = 0;
+  private watch: ReturnType<typeof setInterval> | null = null;
 
   constructor(opts: PanelSessionOptions, doc?: PanelDoc) {
     super();
@@ -330,7 +331,7 @@ export class PanelSession extends EventEmitter {
     return resolve(isAbsolute(path) ? path : join(this.projectDir, path));
   }
 
-  /** Create an empty panel and save it as `<projectDir>/<name>.flamingo-panel` (or at `path`). */
+  /** Create an empty panel and save it as `<projectDir>/<name>.plamingo` (or at `path`). */
   async create(name: string, path?: string): Promise<Outcome<{ filePath: string }>> {
     const filePath = path
       ? this.resolvePath(path.endsWith(PANEL_EXTENSION) ? path : `${path}${PANEL_EXTENSION}`)
@@ -684,7 +685,45 @@ export class PanelSession extends EventEmitter {
     return hasErrors(issues);
   }
 
+  /**
+   * Notice source boards that change on disk, so that a board edited in a
+   * server of its own, or by hand, shows up here as stale without anyone
+   * telling this one. Polls file times: cheap, and works on every file system.
+   */
+  watchSources(intervalMs = 1500): void {
+    if (this.watch) return;
+    let last: string | null = null;
+    let busy = false;
+    const tick = async (): Promise<void> => {
+      if (busy) return;
+      busy = true;
+      try {
+        const seen = await Promise.all(
+          this.panel.sources.map(async (s) => {
+            const path = sourcePath(this.panelDir, s);
+            try {
+              const st = await stat(path);
+              return `${path}:${st.mtimeMs}:${st.size}`;
+            } catch {
+              return `${path}:missing`;
+            }
+          }),
+        );
+        const now = seen.join('|');
+        if (last !== null && now !== last) this.touch();
+        last = now;
+      } finally {
+        busy = false;
+      }
+    };
+    this.watch = setInterval(() => void tick(), intervalMs);
+    this.watch.unref();
+    void tick();
+  }
+
   async close(): Promise<void> {
+    if (this.watch) clearInterval(this.watch);
+    this.watch = null;
     await this.doc.close();
   }
 }

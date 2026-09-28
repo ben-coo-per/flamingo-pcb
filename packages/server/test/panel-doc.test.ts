@@ -46,7 +46,7 @@ describe('PanelDoc', () => {
   });
 
   it('save writes the panel atomically and load reads it back', async () => {
-    const file = join(dir, 'p.flamingo-panel');
+    const file = join(dir, 'p.plamingo');
     const doc = new PanelDoc(newPanel('p'), file, 10_000);
     doc.apply(ADD);
     doc.apply({ op: 'addInstance', source: 'A', at: { x: 3, y: 4 } });
@@ -62,7 +62,7 @@ describe('PanelDoc', () => {
   });
 
   it('autosaves after the debounce', async () => {
-    const file = join(dir, 'p.flamingo-panel');
+    const file = join(dir, 'p.plamingo');
     const doc = new PanelDoc(newPanel('p'), file, 20);
     doc.apply(ADD);
     await new Promise((r) => setTimeout(r, 80));
@@ -70,7 +70,7 @@ describe('PanelDoc', () => {
   });
 
   it('close flushes a pending save', async () => {
-    const file = join(dir, 'p.flamingo-panel');
+    const file = join(dir, 'p.plamingo');
     const doc = new PanelDoc(newPanel('p'), file, 10_000);
     doc.apply(ADD);
     await doc.close();
@@ -85,7 +85,7 @@ describe('PanelDoc', () => {
   });
 
   it('reset with persist=false does not rewrite the file it just read', async () => {
-    const file = join(dir, 'p.flamingo-panel');
+    const file = join(dir, 'p.plamingo');
     const original = JSON.stringify(JSON.parse(serializePanel(newPanel('compact'))));
     await writeFile(file, original);
     const doc = new PanelDoc(newPanel('other'), undefined, 10);

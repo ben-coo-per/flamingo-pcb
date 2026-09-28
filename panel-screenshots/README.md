@@ -20,3 +20,4 @@ Taken by `packages/server/scripts/verify-panel-ui.ts` in headless Chromium
 - `12-export-refused.png` — Export on a panel with an overlap: refused, with the findings that stopped it.
 - `13-does-not-fit.png` — 44 + 3 instances: Arrange leaves the plate as it is and says why, with the smallest panel that would hold them.
 - `14-stale-source.png` — usbc-breakout edited on disk: tagged stale in the board list, its instances dotted and labelled STALE, and listed under Checks.
+- `15-served-on-its-own.png` — A panel file served on its own (`flamingo serve alone.plamingo`): the same view, at the root of its own port, with no link to a board editor.

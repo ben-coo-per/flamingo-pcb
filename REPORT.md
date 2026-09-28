@@ -1044,3 +1044,86 @@ are unverified (the order form was not opened), and the tooltip on `min` says
 On 2026-09-28, at Ben's request, `panelize` was pushed to `origin`
 (`ben-coo-per/flamingo-pcb`, his fork) with the commits of sections 16 to 19.
 A fast-forward from 9c50dfa; no force, no pull request.
+
+## 20. Changes after the fifth review (2026-09-28)
+
+Ben: "if we're running each flamingo board file in a shell, should we change
+the way we're running the panel files so that they run basically in the same
+way? so instead of it being a {port}/panel, its just {port}". And: "can we
+change the filetype extension to '.plamingo' instead of '.flamingo-panel'".
+
+### A panel file is served like a board file
+
+```bash
+flamingo serve combo.plamingo     # Flamingo v0.1.0 serving combo.plamingo at http://localhost:4242
+```
+
+- One file, one server, one port. The panel view is the page at `/`.
+- The file is created if it is missing, as a board file is.
+- `FLAMINGO_PORT` sets the port; the default is 4242, as for a board.
+- `/mcp` on this server has the 23 panel tools and none of the 34 board tools.
+  The board routes (`/api/board` and the rest, `/3d`) answer 404. The server
+  has no board, and tools that edit one nobody can see or save would be a trap.
+- `/panel` redirects to `/`, so an old link still arrives.
+- The "Board editor" link in the top bar is hidden on such a server: there is
+  no editor behind it.
+
+### Boards edited in other servers
+
+With each board in a server of its own, the panel's server no longer hears
+about an edit from the editor beside it. It now polls the file times of its
+boards every 1.5 s (`PanelSession.watchSources`) and pushes a new view when one
+changes, so a board saved elsewhere is marked stale in the panel view within
+about two seconds. Polling, not `fs.watch`: it behaves the same on every file
+system, and a panel has a handful of boards.
+
+### `.plamingo`
+
+`PANEL_EXTENSION` is `.plamingo` everywhere: the files written, the CLI, the
+MCP tool descriptions, README, CLAUDE.md, tests and scripts. The contents of a
+file are unchanged (its `kind` field still reads `flamingo-panel`), so an
+existing file only needs renaming. `flamingo serve x.flamingo-panel` says so
+and exits.
+
+### Kept
+
+`flamingo serve board.flamingo [--panel combo.plamingo]` works as it did: the
+editor at `/`, the panel view at `/panel`, all 57 tools at one `/mcp`. That is
+the mode for a session that designs boards and panelizes them through the one
+endpoint in `.mcp.json`, and the one `e2e-panel.ts` runs in.
+
+### Decisions in this round that are mine
+
+1. No board tools on a panel server (above).
+2. The same default port as a board server, not a second default such as 4243.
+   Two servers need `FLAMINGO_PORT` on one of them, exactly as two boards do.
+3. The combined mode stays. Removing it would take the panel tools away from
+   any session connected to a board server.
+4. No support for reading `.flamingo-panel` files under their old name. The
+   format has not been released; the only files were this branch's own.
+5. `.mcp.json` is unchanged. It names port 4242, which is whichever server
+   runs there.
+
+### Existing files changed
+
+- `packages/server/src/http.ts`: option `panelOnly`, and the routes of a panel
+  server ahead of the board routes. Without the option nothing changes.
+- `packages/server/src/mcp.ts`: `McpContext.panelOnly`, and an early return
+  with only the panel tools when it is set.
+- `packages/server/src/cli.ts`: `serve` looks at the extension.
+
+### Checked
+
+- `packages/server/test/panel-serve.test.ts`, 8 tests: the view at `/`, the
+  redirect, routes, tools, the board server unchanged, the watcher, and the
+  CLI itself started on a missing `.plamingo` file and on an old name.
+- `verify-panel-ui.ts`: 20 checks, 18 screenshots. New: a second server
+  started on a panel file, its page at `/`, a board added from it, no editor
+  link (`15-served-on-its-own.png`).
+- `e2e-panel.ts` passes, routed. `npm test`: 923 pass, and the same 3 failures
+  as on `main`.
+
+### Pushed
+
+On 2026-09-28, at Ben's request, to `origin` (`ben-coo-per/flamingo-pcb`).
+Fast-forward; no force, no pull request.

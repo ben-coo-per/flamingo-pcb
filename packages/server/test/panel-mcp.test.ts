@@ -88,8 +88,8 @@ describe('panel MCP tools', () => {
 
   it('panel_new creates the file next to the boards', async () => {
     const out = await ok('panel_new', { name: 'my combo' });
-    expect(out).toContain(join(dir, 'my_combo.flamingo-panel'));
-    const panel = parsePanel(await readFile(join(dir, 'my_combo.flamingo-panel'), 'utf8'));
+    expect(out).toContain(join(dir, 'my_combo.plamingo'));
+    const panel = parsePanel(await readFile(join(dir, 'my_combo.plamingo'), 'utf8'));
     expect(panel).toMatchObject({ name: 'my combo', sources: [], instances: [] });
   });
 
@@ -98,7 +98,7 @@ describe('panel MCP tools', () => {
     expect(await ok('panel_add_board', { path: 'sensor.flamingo' })).toBe('Added board S = "sensor" (40 x 30 mm, 2-layer)');
     expect(await ok('panel_add_board', { path: join(dir, 'mini.flamingo'), needed: 5, niceToHave: 8 })).toContain('Added board M');
     await ok('panel_save');
-    const panel = parsePanel(await readFile(join(dir, 'combo.flamingo-panel'), 'utf8'));
+    const panel = parsePanel(await readFile(join(dir, 'combo.plamingo'), 'utf8'));
     expect(panel.sources.map((s) => [s.key, s.path, s.needed, s.niceToHave])).toEqual([
       ['S', 'sensor.flamingo', 1, 0],
       ['M', 'mini.flamingo', 5, 8],
@@ -351,7 +351,7 @@ describe('panel MCP tools', () => {
     await build();
     await ok('panel_save');
     await ok('panel_new', { name: 'other' });
-    const out = await ok('panel_open', { path: 'combo.flamingo-panel' });
+    const out = await ok('panel_open', { path: 'combo.plamingo' });
     expect(out).toContain('Panel "combo"');
     expect(started.panel!.panel.instances).toHaveLength(4);
     const bad = await call('panel_open', { path: 'sensor.flamingo' });
@@ -362,7 +362,7 @@ describe('panel MCP tools', () => {
   it('autosaves panel edits like board edits', async () => {
     await build();
     await new Promise((r) => setTimeout(r, 120));
-    const saved = parsePanel(await readFile(join(dir, 'combo.flamingo-panel'), 'utf8'));
+    const saved = parsePanel(await readFile(join(dir, 'combo.plamingo'), 'utf8'));
     expect(saved).toEqual(started.panel!.panel);
   });
 

@@ -34,7 +34,7 @@ describe('flamingo panel CLI', () => {
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'flamingo-panel-cli-'));
-    file = join(dir, 'combo.flamingo-panel');
+    file = join(dir, 'combo.plamingo');
     await writeBoards(dir);
   });
 
@@ -104,7 +104,7 @@ describe('flamingo panel CLI', () => {
     expect((await run('rotate-instance', file, 'M1', '--rotation', '45')).err).toContain('rotation must be 0, 90, 180 or 270');
     expect((await run('set', file, '--layers', '3')).err).toContain('--layers must be auto, 2, 4 or 6');
     expect((await run('remove-instance', file, 'Z9')).err).toBe('Unknown instance "Z9"');
-    expect((await run('show', join(dir, 'missing.flamingo-panel'))).err).toContain('does not exist');
+    expect((await run('show', join(dir, 'missing.plamingo'))).err).toContain('does not exist');
   });
 
   it('quote prints ranked scenarios, and JSON on request', async () => {

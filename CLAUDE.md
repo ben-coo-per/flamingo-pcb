@@ -47,11 +47,20 @@ node packages/server/dist/cli.js serve board.flamingo   # prints "Flamingo v0.1.
 
 ## Panels (several boards fabricated as one piece)
 
-`flamingo serve` also hosts a **panel**: a `.flamingo-panel` file next to the
-boards that places copies ("instances") of one or more board files on one
-fabrication panel. 23 more tools are served at the same `/mcp` endpoint; the
-panel view is at `http://localhost:4242/panel`. See "Panels and order cost" in
-`README.md` for every tool and the matching `flamingo panel` CLI commands.
+A **panel** is a `.plamingo` file next to the boards that places copies
+("instances") of one or more board files on one fabrication panel. See "Panels
+and order cost" in `README.md` for every tool and the matching `flamingo panel`
+CLI commands. It is served in one of two ways:
+
+- `flamingo serve combo.plamingo`: like a board file, on its own. The panel
+  view is at `http://localhost:4242`, and `/mcp` has the 23 panel tools and
+  **no board tools**. The file is created if it is missing.
+- `flamingo serve board.flamingo --panel combo.plamingo`: the board's server
+  with the panel added. All 57 tools at one `/mcp`; the panel view is at
+  `/panel`. Use this when one session designs boards and panelizes them.
+
+Two servers on one machine need two ports (`FLAMINGO_PORT`); `.mcp.json` points
+at 4242.
 
 `boards + quantities → quote_order → panel_apply_scenario → panel_check → export_panel_fab`
 
@@ -76,7 +85,10 @@ Conventions:
   The cost model works from the local fee table only.
 - A panel refers to boards by path + content hash. After editing a board that
   is on a panel, `panel_check` reports it stale until `panel_refresh_boards`.
-- Panel support is opt-in in `startServer({ panel: true })`; the CLI turns it on.
+- Panel support is opt-in in `startServer({ panel: true })`; the CLI turns it
+  on. `panelOnly: true` is the server of a panel file.
+- The panel server polls its boards' file times, so a board saved by another
+  server shows up as stale within about two seconds.
 
 ## Conventions
 

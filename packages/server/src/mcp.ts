@@ -76,6 +76,8 @@ export interface McpContext {
    * tool list is exactly the board tools.
    */
   panel?: PanelSession;
+  /** The server was started on a panel file: panel tools only. */
+  panelOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +351,12 @@ const regionSchema = z.object({
  */
 export function createMcpServer(ctx: McpContext): McpServer {
   const server = new McpServer({ name: 'flamingo', version: '0.1.0' });
+
+  // A server started on a panel file has no board of its own to work on.
+  if (ctx.panelOnly && ctx.panel) {
+    registerPanelTools(server, ctx.panel);
+    return server;
+  }
 
   server.registerTool(
     'new_board',
