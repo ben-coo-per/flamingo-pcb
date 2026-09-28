@@ -134,6 +134,155 @@ doing.
 | **History** | `undo`, `redo` |
 | **Output** | `export_fab`, `export_step`, `screenshot` |
 
+## Panels and order cost
+
+Several boards, of the same or of different designs, can be fabricated and
+assembled as one **panel**. Flamingo lays the panel out, checks it against
+JLCPCB's limits, estimates what it costs against the alternatives, and exports
+one fileset for the whole panel.
+
+```bash
+node packages/server/dist/cli.js serve board.flamingo                       # panel view at /panel
+node packages/server/dist/cli.js serve board.flamingo --panel combo.flamingo-panel
+```
+
+A panel is a `.flamingo-panel` file stored next to the boards. It refers to each
+source board by relative path plus a content hash and never copies it, so a
+board edited after it was added marks the panel **stale** until
+`panel_refresh_boards` accepts the change. Every edit is an operation with
+undo/redo, as for boards.
+
+```
+boards + quantities → quote_order → panel_apply_scenario → panel_check → export_panel_fab
+```
+
+### Panel MCP tools
+
+23 tools, served at the same `/mcp` endpoint as the 34 board tools:
+
+| Group | Tool | What it does |
+| --- | --- | --- |
+| **File** | `panel_new` | Create an empty panel and save it as `<name>.flamingo-panel`. |
+| | `panel_open` | Open a panel file. |
+| | `panel_save` | Save now (edits also autosave). |
+| | `panel_get_state` | Text summary: size, settings, boards and quantities, every instance, check and cost totals. |
+| **Boards** | `panel_add_board` | Add a board file as a source, with a short key (`S`, `M`) and its quantities. |
+| | `panel_remove_board` | Remove a board and all of its instances. |
+| | `panel_refresh_boards` | Accept source boards as they are on disk now; clears `stale`. |
+| | `panel_set_quantity` | Set `needed` (assembled boards you must get) and `niceToHave` (total boards welcome if cheap). |
+| **Instances** | `panel_add_instance` | Put one more copy of a board on the panel. |
+| | `panel_remove_instance` | Remove one instance. |
+| | `panel_move_instance` | Move an instance; pins it unless `pin:false`. |
+| | `panel_rotate_instance` | Rotate in steps of 90° about the instance's centre. |
+| | `panel_set_populate` | `true` = assemble; `false` = ship bare (all its parts become do-not-place). |
+| | `panel_pin` | Pin or unpin. Pinned instances are never moved by arrange. |
+| **Layout** | `panel_set_settings` | Separation, spacing, rails, tabs, fiducials, tooling holes, layer count (promotion). |
+| | `panel_arrange` | Pack every unpinned instance into the smallest panel that fits the limits. |
+| | `panel_check` | Report everything wrong with the panel, as data. |
+| | `panel_screenshot` | Render the panel to a PNG. |
+| **History** | `panel_undo`, `panel_redo` | Walk the panel's op log. |
+| **Cost** | `quote_order` | Ranked order scenarios with itemized fees, plus the cost of the panel as it stands. |
+| | `panel_apply_scenario` | Load the panel a scenario implies onto the panel. |
+| **Output** | `export_panel_fab` | Write `gerbers.zip`, merged `bom.csv` and `cpl.csv`, and `panel.render.svg`. |
+
+Instances are named after their board: `S1`, `M1`, `M2`, ... In the merged BOM
+and CPL every designator is prefixed with its instance (`S1_U2`, `M3_R5`) and
+every position is in panel coordinates. Positions are the bottom-left corner of
+the instance's bounding box, in mm, y-up, like everything else in Flamingo.
+
+### What the check looks for
+
+- **Source boards**: unreadable, stale, or with DRC violations of their own.
+- **Stackup**: all boards on a panel must share a layer count and rules set. A
+  mismatch is reported with the option to **promote** the panel
+  (`panel_set_settings copperLayers=4`): boards with fewer layers are then made
+  at the higher count.
+- **Blocked edges**: an edge where a component courtyard overhangs the outline
+  (a USB-C connector) or a keepout reaches the edge (an antenna region) carries
+  no tabs and keeps extra clearance from its neighbour.
+- **Placement**: overlaps, spacing, overhanging parts that would hit a
+  neighbour or a rail, instances that nothing holds.
+- **Size**: the fab's largest board and the assembly services' panel limits.
+
+Errors stop `export_panel_fab` unless `waive:true`. Limits and panel geometry
+defaults live in `packages/panel/config/panel-limits.json`.
+
+### Cost model
+
+`quote_order` compares, from each design's `needed` and `niceToHave`:
+
+- separate orders, one per design
+- each design on a panel of its own
+- one merged mouse-bite panel (pays JLCPCB's different-designs fee)
+- one board with the designs divided by silkscreen lines (counts as one design;
+  you cut the boards apart yourself)
+- different panel counts and quantity steps
+- nice-to-have boards populated, or shipped bare (partial population)
+- for boards with different layer counts: split into one order per layer
+  count, or promote
+
+Rank by `total` (default), `per-board` or `overage`.
+
+Fees live in `packages/panel/config/fee-table.json`. Each value records its
+source URL and whether it was verified on a JLCPCB help page. **Anything built
+on an unverified value is an estimate** and is marked `~` in every report and
+in the browser. Assembly fees are verified; bare-board prices are estimates,
+because JLCPCB publishes them only through its quote calculator, which
+Flamingo never calls. Shipping, tax and coupons are not included. Nothing is
+ever sent to JLCPCB and nothing is ordered.
+
+Set `FLAMINGO_PANEL_CONFIG_DIR` to use your own copies of the two config files,
+and `FLAMINGO_PANEL_PRICES=off` to skip part price lookups.
+
+### Panel CLI
+
+Every tool has a command that works on a panel file directly, no server needed:
+
+```bash
+flamingo panel new combo.flamingo-panel --name combo
+flamingo panel add-board combo.flamingo-panel esp32.flamingo --key S --needed 1
+flamingo panel add-board combo.flamingo-panel breakout.flamingo --key M --needed 5
+flamingo panel quote combo.flamingo-panel
+flamingo panel apply-scenario combo.flamingo-panel merged-needed-x2
+flamingo panel check combo.flamingo-panel        # exit status 1 on errors
+flamingo panel screenshot combo.flamingo-panel --out combo.png
+flamingo panel export combo.flamingo-panel --out fab/combo
+```
+
+| Command | MCP tool |
+| --- | --- |
+| `new <file> [--name N]` | `panel_new` |
+| `show <file>` | `panel_get_state` |
+| `add-board <file> <board> [--key K] [--needed N] [--nice N]` | `panel_add_board` |
+| `remove-board <file> <key>` | `panel_remove_board` |
+| `refresh <file> [key ...]` | `panel_refresh_boards` |
+| `set-quantity <file> <key> [--needed N] [--nice N]` | `panel_set_quantity` |
+| `add-instance <file> <key> [--x X --y Y] [--rotation R] [--bare] [--count N]` | `panel_add_instance` |
+| `remove-instance <file> <id>` | `panel_remove_instance` |
+| `move-instance <file> <id> --x X --y Y [--no-pin]` | `panel_move_instance` |
+| `rotate-instance <file> <id> [--rotation R \| --by DEG]` | `panel_rotate_instance` |
+| `set-populate <file> <id> <true\|false>` | `panel_set_populate` |
+| `pin <file> <id> [--unpin]` | `panel_pin` |
+| `set <file> [--separation S] [--spacing MM] [--rail-top MM] ... [--layers auto\|2\|4\|6]` | `panel_set_settings` |
+| `arrange <file> [--no-rotate]` | `panel_arrange` |
+| `check <file>` | `panel_check` |
+| `screenshot <file> [--out F] [--width PX]` | `panel_screenshot` |
+| `quote <file> [--objective O] [--brief] [--json] [--offline]` | `quote_order` |
+| `apply-scenario <file> <id>` | `panel_apply_scenario` |
+| `export <file> [--out DIR] [--waive]` | `export_panel_fab` |
+
+`panel_undo` and `panel_redo` have no command: the op log is kept in memory, as
+it is for boards, and each command is a process of its own.
+
+### Panel view
+
+`http://localhost:4242/panel` is a slicer-style view of the panel: the panel as
+the build plate, board instances as objects you select, drag, rotate and
+duplicate, a list of boards with counts and quantities, **Arrange** (`A`), a
+live cost estimate, the ranked scenarios, the check's findings, and an export
+button. It shares the panel with MCP: an edit made through either shows up in
+the other at once.
+
 ## Architecture
 
 npm workspaces monorepo — all packages are ESM, strict TypeScript, tested with
@@ -144,6 +293,7 @@ packages/
   engine/   pure library: data model, geometry, netlist/ratsnest, zone fill, DRC, ops
   parts/    LCSC search + EasyEDA footprint fetch/parse/cache
   fab/      Gerber X2 + Excellon writers, BOM/CPL writers, DSN export / SES import
+  panel/    panel format + ops, constraint checks, arrange, merge to one board, cost model, scenarios
   server/   Node: document host, op-log + undo/redo, HTTP + WebSocket, MCP endpoint, CLI, autoroute runner
   ui/       browser PCB view (Canvas 2D) with mouse editing tools
 ```

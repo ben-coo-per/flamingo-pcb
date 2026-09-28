@@ -299,7 +299,7 @@ export function computeCost(order: OrderConfig, fees: FeeTable): CostBreakdown {
       if (basic > 0 && f.feederLoading.value.basic > 0) bits.push(`${basic} basic x ${f.feederLoading.value.basic.toFixed(2)}`);
       lines.push({
         code: 'asm-loading',
-        label: `Feeder loading: ${extended} extended, ${basic} basic part${asm.parts.length === 1 ? '' : 's'}`,
+        label: `Feeder loading (${extended} extended, ${basic} basic)`,
         amount: cents(loading),
         detail: bits.join(' + '),
         ...basis(f.feederLoading),
