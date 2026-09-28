@@ -2,12 +2,14 @@
  * Flamingo Panel - SVG render (Node only: text is stroked with fab's vector
  * font, so the picture never depends on installed fonts).
  *
- * Monochrome on purpose, like the panel view in the browser: state is carried
- * by line weight, dashes, hatching and labels, never by colour.
+ * Drawn like the panel view in the browser. Colour says which design a board
+ * is (colors.ts) and nothing else; state is carried by line weight, dashes,
+ * hatching and labels, never by colour.
  *
  *   panel outline      heavy solid line
  *   rails              light diagonal hatch
  *   size limits        long-dash rectangles, labelled
+ *   board              filled with a tint of its design's colour, outlined in it
  *   populated board    solid outline, label `S1`
  *   bare board         dashed outline, sparse hatch, label `S1 BARE`
  *   pinned             label suffix `PIN`, filled square in the corner
@@ -22,6 +24,7 @@
 import type { Point } from '@flamingo/engine';
 import { strokeText } from '@flamingo/fab';
 import type { PanelIssue } from '../check.js';
+import { boardColor, tint } from '../colors.js';
 import type { PanelGeometry, PlacedInstance } from '../geometry.js';
 import type { ResolvedSources } from '../resolved.js';
 import { boxCorners } from '../transform.js';
@@ -107,9 +110,13 @@ export function renderPanelSVG(
       `<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="${INK}" stroke-width="${f(width)}"${dash ? ` stroke-dasharray="${dash}"` : ''} stroke-linecap="butt"/>`,
     );
   };
-  const poly = (pts: Point[], width: number, o: { dash?: string; fill?: string; close?: boolean } = {}): void => {
+  const poly = (
+    pts: Point[],
+    width: number,
+    o: { dash?: string; fill?: string; close?: boolean; stroke?: string } = {},
+  ): void => {
     out.push(
-      `<path d="${path(pts, o.close !== false)}" fill="${o.fill ?? 'none'}" stroke="${INK}" stroke-width="${f(width)}"${o.dash ? ` stroke-dasharray="${o.dash}"` : ''} stroke-linejoin="miter"/>`,
+      `<path d="${path(pts, o.close !== false)}" fill="${o.fill ?? 'none'}" stroke="${o.stroke ?? INK}" stroke-width="${f(width)}"${o.dash ? ` stroke-dasharray="${o.dash}"` : ''} stroke-linejoin="miter"/>`,
     );
   };
   const text = (s: string, at: Point, height: number, weight = 0.12): void => {
@@ -121,7 +128,7 @@ export function renderPanelSVG(
     }
   };
   /** Parallel hatch lines across `box`, clipped to `clipId`. */
-  const hatch = (box: Box, pitch: number, width: number, clipId: string, cross = false): void => {
+  const hatch = (box: Box, pitch: number, width: number, clipId: string, cross = false, stroke: string = INK): void => {
     const span = box.maxX - box.minX + (box.maxY - box.minY);
     const lines: string[] = [];
     for (let d = -span; d <= span; d += pitch) {
@@ -135,7 +142,7 @@ export function renderPanelSVG(
       }
     }
     out.push(
-      `<g clip-path="url(#${clipId})" stroke="${INK}" stroke-width="${f(width)}">${lines.join('')}</g>`,
+      `<g clip-path="url(#${clipId})" stroke="${stroke}" stroke-width="${f(width)}">${lines.join('')}</g>`,
     );
   };
   const defs: string[] = [];
@@ -214,6 +221,7 @@ export function renderPanelSVG(
     }
   }
 
+  const keys = panel.sources.map((s) => s.key);
   for (const inst of geometry.instances) {
     drawInstance(inst);
   }
@@ -221,13 +229,16 @@ export function renderPanelSVG(
   function drawInstance(inst: PlacedInstance): void {
     const src = sources.find((s) => s.key === inst.source);
     const b = inst.bbox;
+    const colour = boardColor(keys, inst.source);
+
+    poly(inst.outline, 0, { fill: tint(colour), stroke: 'none' });
 
     for (const k of inst.keepouts) {
       hatch(bboxOf(k), 1.2, 0.06, clip(k), true);
       poly(k, 0.08, { dash: '0.6 0.6' });
     }
-    if (!inst.populate) hatch(b, 3, 0.08, clip(inst.outline));
-    poly(inst.outline, 0.3, inst.populate ? {} : { dash: '2 1' });
+    if (!inst.populate) hatch(b, 3, 0.1, clip(inst.outline), false, colour);
+    poly(inst.outline, 0.35, inst.populate ? { stroke: colour } : { dash: '2 1', stroke: colour });
 
     for (const o of inst.overhangs) poly(o.polygon, 0.1, { dash: '0.8 0.5' });
 

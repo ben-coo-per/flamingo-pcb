@@ -283,6 +283,11 @@ live cost estimate, the ranked scenarios, the check's findings, and an export
 button. It shares the panel with MCP: an edit made through either shows up in
 the other at once.
 
+A panel is started from the page: **Boards** lists the board files next to the
+panel, and picking one puts it on the plate. Each design has its own colour, on
+the plate and in every list. Colour means which board and nothing else; bare,
+pinned, blocked and in-error are drawn with line style, hatching and labels.
+
 ## Architecture
 
 npm workspaces monorepo — all packages are ESM, strict TypeScript, tested with

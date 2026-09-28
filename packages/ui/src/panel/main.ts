@@ -15,7 +15,7 @@ import './panel.css';
 import type { Point } from '@flamingo/engine';
 import type { PanelOp, PanelView } from '@flamingo/panel';
 import { fitToBoard, panBy, screenToWorld, worldToScreen, zoomAt } from '../view.js';
-import { api, isError } from './api.js';
+import { addBoard, api, isError, listBoards } from './api.js';
 import { drawPlate } from './draw.js';
 import { mm, quoteKey } from './format.js';
 import { DRAG_THRESHOLD_PX, contentBox, dropPosition, hitInstance } from './hit.js';
@@ -88,6 +88,15 @@ function fitNewLayout(since: number): void {
 
 let quotedFor = '';
 let quoteSeq = 0;
+let boardsFor = '';
+
+/** List the project's board files again when the panel's boards have changed. */
+function refreshBoardFiles(view: PanelView | null, force = false): void {
+  const key = JSON.stringify(view?.panel.sources.map((s) => s.path) ?? null);
+  if (!force && key === boardsFor) return;
+  boardsFor = key;
+  void listBoards().then((boardFiles) => store.set({ boardFiles }));
+}
 
 /** Fetch the scenarios again when what they depend on has changed. */
 function refreshQuote(view: PanelView): void {
@@ -118,9 +127,12 @@ const ws = connectPanelWs({
     const drag = state.drag?.droppedAt !== undefined && view.revision > state.drag.droppedAt ? null : state.drag;
     const selection = view.panel.instances.some((i) => i.id === state.selection) ? state.selection : null;
     const menu = state.menu && view.panel.instances.some((i) => i.id === state.menu!.id) ? state.menu : null;
-    store.set({ view, drag, selection, menu });
+    // Another panel was opened or started: look at it afresh.
+    const swapped = state.view !== null && state.view.filePath !== view.filePath;
+    store.set({ view, drag, selection, menu, ...(swapped ? { hasFit: false, scenario: null, scenarioMsg: null, arrangeMsg: null, exportMsg: null } : {}) });
     if (!store.get().hasFit && cssWidth > 0) fit(view);
     refreshQuote(view);
+    refreshBoardFiles(view);
   },
 });
 
@@ -174,6 +186,7 @@ async function arrange(): Promise<void> {
 
 async function setCount(board: string, count: number): Promise<void> {
   if (count < 0) return;
+  const since = store.get().view?.revision ?? 0;
   const r = await api.count(board, count);
   if (isError(r)) {
     store.set({ arrangeMsg: { text: r.error, problem: true } });
@@ -188,7 +201,27 @@ async function setCount(board: string, count: number): Promise<void> {
     });
   } else {
     store.set({ arrangeMsg: null });
+    // Adding arranges the panel, which may have outgrown the view.
+    if (r.added.length > 0) fitNewLayout(since);
   }
+}
+
+/** Put a board file on the panel, with one instance of it on the plate. */
+async function addBoardToPanel(path: string): Promise<void> {
+  if (store.get().busy) return;
+  store.set({ busy: true, boardMsg: null });
+  const since = store.get().view?.revision ?? 0;
+  const added = await addBoard(path);
+  if (isError(added)) {
+    store.set({ busy: false, boardMsg: { text: added.error, problem: true } });
+    return;
+  }
+  const placed = await api.count(added.key, 1);
+  store.set({
+    busy: false,
+    boardMsg: isError(placed) ? { text: `${added.name} was added, but could not be placed: ${placed.error}`, problem: true } : null,
+  });
+  fitNewLayout(since);
 }
 
 function removeSelected(): void {
@@ -449,6 +482,8 @@ const renderSidebar = createSidebar(
     panelName: $('panel-name'),
     panelFile: $('panel-file'),
     boardList: $('board-list'),
+    boardAdd: $('board-add'),
+    boardMsg: $('board-msg'),
     arrangeBtn: $<HTMLButtonElement>('arrange-btn'),
     arrangeMsg: $('arrange-msg'),
     costFlag: $('cost-flag'),
@@ -470,8 +505,13 @@ const renderSidebar = createSidebar(
     setCount: (board, count) => void setCount(board, count),
     setQuantity: (board, field, value) => send({ op: 'setQuantity', key: board, [field]: value }),
     selectScenario: (id) => void selectScenario(id),
+    selectInstance: (id) => store.set({ selection: id, menu: null }),
+    addBoard: (path) => void addBoardToPanel(path),
   },
 );
+
+// A board made in the editor since this page loaded should be on offer.
+window.addEventListener('focus', () => refreshBoardFiles(store.get().view, true));
 
 $('arrange-btn').addEventListener('click', () => void arrange());
 $('export-btn').addEventListener('click', () => void exportFab());

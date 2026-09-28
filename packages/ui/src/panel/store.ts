@@ -9,6 +9,7 @@
 import type { Point } from '@flamingo/engine';
 import type { PanelView, QuoteResult } from '@flamingo/panel';
 import type { ViewTransform } from '../state.js';
+import type { BoardFile } from './api.js';
 
 export interface Drag {
   id: string;
@@ -46,6 +47,9 @@ export interface PanelState {
   arrangeMsg: Message | null;
   exportMsg: Message | null;
   scenarioMsg: Message | null;
+  boardMsg: Message | null;
+  /** Board files in the project that could be added to the panel. */
+  boardFiles: BoardFile[];
   /** Open context menu: the instance it is for and where, in plate pixels. */
   menu: { id: string; x: number; y: number } | null;
   busy: boolean;
@@ -66,6 +70,8 @@ function initial(): PanelState {
     arrangeMsg: null,
     exportMsg: null,
     scenarioMsg: null,
+    boardMsg: null,
+    boardFiles: [],
     menu: null,
     busy: false,
   };

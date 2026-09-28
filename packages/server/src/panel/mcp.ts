@@ -375,7 +375,7 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
     'panel_screenshot',
     {
       description:
-        'Render the panel to a PNG so you can see it. Monochrome: bare boards are hatched with a dashed outline, blocked edges are heavy with a comb of ticks, tabs are solid bars, instances with errors or warnings get a second outline, size limits are long-dash rectangles.',
+        'Render the panel to a PNG so you can see it. Each board design has its own colour, the same as in the panel view; colour means nothing else. State is drawn, not coloured: bare boards are hatched with a dashed outline, blocked edges are heavy with a comb of ticks, tabs are solid bars, instances with errors or warnings get a second outline, size limits are long-dash rectangles.',
       inputSchema: {
         widthPx: z.number().int().positive().optional().describe('Image width in px (default 1200, at most 2400)'),
       },

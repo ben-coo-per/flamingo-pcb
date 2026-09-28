@@ -2,8 +2,10 @@
  * Panel view - canvas drawing.
  *
  * `drawPlate` is a pure function of the state: panel view in, pixels out.
- * Monochrome. What a thing is, and what state it is in, is said with line
- * weight, dashes, hatching and labels:
+ * Colour says which design a board is, and nothing else: every instance is
+ * filled with a tint of its board's colour and outlined in it. What state a
+ * thing is in is said with line weight, dashes, hatching and labels, so the
+ * plate reads the same without colour:
  *
  *   panel outline      heavy solid line
  *   rails              diagonal hatch
@@ -22,6 +24,7 @@
 
 import type { Point } from '@flamingo/engine';
 import type { Box, PanelGeometry, PlacedInstance, Side } from '@flamingo/panel';
+import { BOARD_TINT, boardColor, tint } from '@flamingo/panel';
 import type { ViewTransform } from '../state.js';
 import { worldToScreen } from '../view.js';
 import { mm, worstByInstance } from './format.js';
@@ -55,16 +58,24 @@ function trace(ctx: Ctx, t: ViewTransform, pts: Point[], close = true): void {
   if (close) ctx.closePath();
 }
 
-function stroke(ctx: Ctx, width: number, dash: number[] = []): void {
+function stroke(ctx: Ctx, width: number, dash: number[] = [], colour: string = INK): void {
   ctx.lineWidth = width;
   ctx.setLineDash(dash);
-  ctx.strokeStyle = INK;
+  ctx.strokeStyle = colour;
   ctx.stroke();
   ctx.setLineDash([]);
 }
 
 /** Diagonal hatch inside the current path, at a fixed pitch in screen pixels. */
-function hatch(ctx: Ctx, t: ViewTransform, pts: Point[], pitch: number, width: number, cross = false): void {
+function hatch(
+  ctx: Ctx,
+  t: ViewTransform,
+  pts: Point[],
+  pitch: number,
+  width: number,
+  cross = false,
+  colour: string = INK,
+): void {
   const screen = pts.map((p) => worldToScreen(t, p));
   const xs = screen.map((p) => p.x);
   const ys = screen.map((p) => p.y);
@@ -88,19 +99,28 @@ function hatch(ctx: Ctx, t: ViewTransform, pts: Point[], pitch: number, width: n
     }
   }
   ctx.lineWidth = width;
-  ctx.strokeStyle = INK;
+  ctx.strokeStyle = colour;
   ctx.stroke();
   ctx.restore();
 }
 
-function label(ctx: Ctx, text: string, x: number, y: number, px: number, bold = false, align: CanvasTextAlign = 'center'): void {
+function label(
+  ctx: Ctx,
+  text: string,
+  x: number,
+  y: number,
+  px: number,
+  bold = false,
+  align: CanvasTextAlign = 'center',
+  ground: string = PAPER,
+): void {
   ctx.font = `${bold ? '700 ' : ''}${px}px ${FONT}`;
   ctx.textAlign = align;
   ctx.textBaseline = 'middle';
-  // Paper behind the text keeps it legible over hatching.
+  // A patch of the ground behind the text keeps it legible over hatching.
   const w = ctx.measureText(text).width;
   const left = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
-  ctx.fillStyle = PAPER;
+  ctx.fillStyle = ground;
   ctx.fillRect(left - 3, y - px * 0.62, w + 6, px * 1.24);
   ctx.fillStyle = INK;
   ctx.fillText(text, x, y);
@@ -228,6 +248,7 @@ function drawInstance(
   inst: PlacedInstance,
   level: 'error' | 'warning' | undefined,
   stale: boolean,
+  colour: string,
 ): void {
   const t = state.transform;
   const off = dragOffset(inst.id, state.drag);
@@ -236,9 +257,9 @@ function drawInstance(
   const outline = shift(inst.outline, off);
   const box = shiftBox(inst.bbox, off);
 
-  // An instance being dragged hides what is under it.
+  // Opaque, so an instance being dragged hides what is under it.
   trace(ctx, t, outline);
-  ctx.fillStyle = PAPER;
+  ctx.fillStyle = tint(colour, BOARD_TINT);
   ctx.fill();
 
   for (const k of inst.keepouts) {
@@ -247,13 +268,13 @@ function drawInstance(
     trace(ctx, t, poly);
     stroke(ctx, 0.75, [2, 3]);
   }
-  if (!inst.populate) hatch(ctx, t, outline, 16, 0.6);
+  if (!inst.populate) hatch(ctx, t, outline, 16, 1, false, colour);
 
   trace(ctx, t, outline);
-  if (selected) stroke(ctx, 4, inst.populate ? [] : [10, 5]);
-  else if (!inst.populate) stroke(ctx, 1.5, [10, 5]);
-  else if (stale) stroke(ctx, 1.5, [2, 4]);
-  else stroke(ctx, 1.5);
+  if (selected) stroke(ctx, 4.5, inst.populate ? [] : [10, 5], colour);
+  else if (!inst.populate) stroke(ctx, 2, [10, 5], colour);
+  else if (stale) stroke(ctx, 2, [2, 4], colour);
+  else stroke(ctx, 2, [], colour);
 
   for (const o of inst.overhangs) {
     trace(ctx, t, shift(o.polygon, off));
@@ -314,7 +335,8 @@ function drawInstance(
   const big = Math.max(11, Math.min(30, hPx / 3.2, wPx / 3));
   const small = Math.max(9, Math.min(12, big * 0.5));
   const showTags = tags.length > 0 && hPx > big + small + 10;
-  label(ctx, inst.id, c.x, showTags ? c.y - small * 0.7 : c.y, big, true);
+  const ground = tint(colour, BOARD_TINT);
+  label(ctx, inst.id, c.x, showTags ? c.y - small * 0.7 : c.y, big, true, 'center', ground);
   if (showTags) {
     // Tags that do not fit the board are dropped from the right.
     ctx.font = `${small}px ${FONT}`;
@@ -323,7 +345,7 @@ function drawInstance(
       tags.pop();
       text = tags.join(' · ');
     }
-    label(ctx, text, c.x, c.y + big * 0.62, small);
+    label(ctx, text, c.x, c.y + big * 0.62, small, false, 'center', ground);
   }
 
   if (moving) {
@@ -346,11 +368,13 @@ export function drawPlate(ctx: Ctx, state: PanelState, width: number, height: nu
 
   const worst = worstByInstance(view.issues);
   const stale = new Set(view.sources.filter((s) => s.stale).map((s) => s.key));
+  const keys = view.panel.sources.map((s) => s.key);
   // The dragged instance is drawn last, on top of the rest.
   const dragged = state.drag?.id;
   for (const inst of geometry.instances) {
-    if (inst.id !== dragged) drawInstance(ctx, state, inst, worst.get(inst.id), stale.has(inst.source));
+    if (inst.id === dragged) continue;
+    drawInstance(ctx, state, inst, worst.get(inst.id), stale.has(inst.source), boardColor(keys, inst.source));
   }
   const top = geometry.instances.find((i) => i.id === dragged);
-  if (top) drawInstance(ctx, state, top, worst.get(top.id), stale.has(top.source));
+  if (top) drawInstance(ctx, state, top, worst.get(top.id), stale.has(top.source), boardColor(keys, top.source));
 }
