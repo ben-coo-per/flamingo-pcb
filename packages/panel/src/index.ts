@@ -113,3 +113,16 @@ export {
   designsCharged,
   quotePanel,
 } from './order.js';
+
+export type {
+  Objective,
+  ScenarioKind,
+  ScenarioLayout,
+  ScenarioOrder,
+  ScenarioLine,
+  Scenario,
+  RejectedScenario,
+  QuoteResult,
+  QuoteRequest,
+} from './scenarios.js';
+export { quoteOrder, OBJECTIVES } from './scenarios.js';
