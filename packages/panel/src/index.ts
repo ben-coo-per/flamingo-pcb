@@ -83,3 +83,6 @@ export { checkPanel, hasErrors, targetLayers, usedLayerCounts, assemblyFit } fro
 
 export type { SizeLimit, ArrangeOptions, ArrangeOk, ArrangeFail, ArrangeResult } from './layout.js';
 export { arrange, sizeLimit } from './layout.js';
+
+export type { MergedLabel, MergedPanel } from './merge.js';
+export { mergePanel, mergedRefdes, assemblyBoard } from './merge.js';

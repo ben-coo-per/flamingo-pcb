@@ -16,3 +16,5 @@ export {
 } from './load.js';
 export type { PanelRenderLimit, PanelRenderOpts } from './render.js';
 export { renderPanelSVG } from './render.js';
+export type { PanelFabFiles, ExportPanelFabResult } from './exportPanelFab.js';
+export { buildPanelFab, exportPanelFab } from './exportPanelFab.js';
