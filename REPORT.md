@@ -1,7 +1,8 @@
 # Panelization + cost optimizer — work report
 
-Branch `panelize`, 14 commits on top of `main` (487b6b0). Written 2026-09-28.
-All ten steps of the order of work are done and committed. Nothing was pushed.
+Branch `panelize`, on top of `main` (487b6b0). Written 2026-09-28.
+All ten steps of the order of work are done and committed. The branch is pushed
+to the fork `ben-coo-per/flamingo-pcb`; see section 1.
 
 ## 1. Git remotes and what was pushed
 
@@ -12,17 +13,28 @@ origin	git@github.com:cheewee2000/flamingo-pcb.git (fetch)
 origin	git@github.com:cheewee2000/flamingo-pcb.git (push)
 ```
 
-**Nothing was pushed.** `origin` points at `cheewee2000/flamingo-pcb`, the
-original repo, not at a fork. Per the git rules every commit stays local on
-`panelize`. No remote was added, no pull request was opened, nothing was fetched
-or merged, `main` was not touched, nothing was force-pushed.
+`origin` pointed at `cheewee2000/flamingo-pcb`, the original repo, not at a
+fork. Per the git rules **nothing was pushed during the unattended work**: every
+commit stayed local on `panelize`.
 
-To publish the branch once `origin` points at your fork:
+Afterwards, on 2026-09-28 and at Ben's request:
 
-```sh
-git remote set-url origin git@github.com:<you>/flamingo-pcb.git
-git push -u origin panelize
+- No fork existed under the signed-in GitHub account, so
+  `ben-coo-per/flamingo-pcb` was created as a fork of `cheewee2000/flamingo-pcb`.
+  It is public, as the original is.
+- `origin` was re-pointed at it with `git remote set-url`. No remote was added.
+- `panelize` was pushed to it and tracks `origin/panelize`. Nothing else was
+  pushed: `main` on the fork is the original's `main` (487b6b0).
+
 ```
+origin	git@github.com:ben-coo-per/flamingo-pcb.git (fetch)
+origin	git@github.com:ben-coo-per/flamingo-pcb.git (push)
+```
+
+No pull request was opened, against either repo. Nothing was pushed to or
+merged from the original repo, and nothing was force-pushed. The original repo
+is no longer a remote of this checkout; add it as `upstream` yourself if you
+want to pull its changes later.
 
 ## 2. Summary
 
@@ -662,7 +674,7 @@ thing and did not add a control.
    around 80 × 60 mm. Put them in `fee-table.json` with `verified: true`.
 2. **Open an exported panel in a Gerber viewer**, then in JLCPCB's. The profile
    layer and the mouse-bite holes are what to look at.
-3. Point `origin` at your fork and push `panelize`.
+3. Review `panelize` on the fork and merge it yourself when you are ready.
 4. Answer section 14. The first four rows are what makes the view usable
    without an agent.
 5. Part prices from a source that has them for modules.
