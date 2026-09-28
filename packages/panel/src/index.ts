@@ -55,3 +55,28 @@ export { resolveSourceGeometry } from './source.js';
 
 export type { ResolvedSource, ResolvedSources } from './resolved.js';
 export { findSource } from './resolved.js';
+
+export type {
+  PlacedOverhang,
+  PlacedInstance,
+  UnplacedInstance,
+  RailSide,
+  Rail,
+  Frame,
+  Tab,
+  Fiducial,
+  ToolingHole,
+  PanelGeometry,
+} from './geometry.js';
+export {
+  effectiveSpacing,
+  placeInstances,
+  computeFrame,
+  edgeSpans,
+  tabCentres,
+  computeGeometry,
+  tabCounts,
+} from './geometry.js';
+
+export type { Severity, IssueCode, PanelIssue } from './check.js';
+export { checkPanel, hasErrors, targetLayers, usedLayerCounts, assemblyFit } from './check.js';

@@ -112,3 +112,51 @@ export function awkwardBoard(name = 'awkward', w = 30, h = 20): Board {
   });
   return b;
 }
+
+// ---------------------------------------------------------------------------
+// Panels and resolved sources without touching the disk
+// ---------------------------------------------------------------------------
+
+import { resolveSourceGeometry } from '../src/source.js';
+import type { ResolvedSource } from '../src/resolved.js';
+import { newPanel } from '../src/panel.js';
+import { applyPanelOp } from '../src/ops.js';
+import type { PanelOp } from '../src/ops.js';
+import type { Panel, PanelInstance } from '../src/types.js';
+
+export function resolved(key: string, board: Board, extra: Partial<ResolvedSource> = {}): ResolvedSource {
+  return {
+    key,
+    path: `${board.name}.flamingo`,
+    name: board.name,
+    recordedHash: 'h',
+    hash: 'h',
+    stale: false,
+    board,
+    geometry: resolveSourceGeometry(board, LIMITS),
+    ...extra,
+  };
+}
+
+export function applyAll(panel: Panel, ...ops: PanelOp[]): Panel {
+  for (const op of ops) {
+    const r = applyPanelOp(panel, op);
+    if (!r.ok) throw new Error(`${op.op}: ${r.error}`);
+    panel = r.panel;
+  }
+  return panel;
+}
+
+export type InstanceSpec = [source: string, x: number, y: number, extra?: Partial<PanelInstance>];
+
+/** A panel over `sources` with instances at the given corners. */
+export function panelOf(sources: ResolvedSource[], instances: InstanceSpec[], settings: PanelOp[] = []): Panel {
+  let p = newPanel('test');
+  for (const s of sources) {
+    p = applyAll(p, { op: 'addSource', source: { key: s.key, path: s.path, hash: 'h', name: s.name } });
+  }
+  for (const [source, x, y, extra] of instances) {
+    p = applyAll(p, { op: 'addInstance', source, at: { x, y }, ...extra });
+  }
+  return applyAll(p, ...settings);
+}
