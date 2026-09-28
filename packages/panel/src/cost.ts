@@ -288,6 +288,9 @@ export function computeCost(order: OrderConfig, fees: FeeTable): CostBreakdown {
         amount: cents(fees.assembly.handSolderLabor.value),
         ...basis(fees.assembly.handSolderLabor),
       });
+      notes.push(
+        'Through-hole joints are counted from plated through-hole pads, including the mounting legs of surface-mount connectors. JLCPCB may not charge those as hand-soldered.',
+      );
     }
 
     const basic = asm.parts.filter((p) => p.basic).length;

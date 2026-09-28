@@ -255,7 +255,7 @@ function facing(a: PlacedInstance, b: PlacedInstance): { side: Side; gap: number
 
 const OPPOSITE: Record<Side, Side> = { N: 'S', S: 'N', E: 'W', W: 'E' };
 
-function placementIssues(panel: Panel, geometry: PanelGeometry): PanelIssue[] {
+function placementIssues(panel: Panel, geometry: PanelGeometry, limits: PanelLimits): PanelIssue[] {
   const issues: PanelIssue[] = [];
   const spacing = effectiveSpacing(panel.settings);
   const list = geometry.instances;
@@ -270,7 +270,12 @@ function placementIssues(panel: Panel, geometry: PanelGeometry): PanelIssue[] {
       };
       const f = facing(a, b);
       if (f) {
-        const need = Math.max(a.margins[f.side], b.margins[OPPOSITE[f.side]]);
+        // Two parts overhanging toward each other must clear each other, not
+        // just the board opposite.
+        const oa = a.edges[f.side].overhang;
+        const ob = b.edges[OPPOSITE[f.side]].overhang;
+        const both = oa > 0 && ob > 0 ? oa + ob + limits.blockedEdges.overhangMargin.value : 0;
+        const need = Math.max(a.margins[f.side], b.margins[OPPOSITE[f.side]], both);
         if (f.gap < need - EPS) {
           const blocked = need > spacing + EPS;
           const why = blocked
@@ -665,7 +670,7 @@ export function checkPanel(
     });
   }
   issues.push(
-    ...placementIssues(panel, geometry),
+    ...placementIssues(panel, geometry, limits),
     ...edgeAndTabIssues(panel, geometry, limits),
     ...tabCopperIssues(panel, sources, geometry, limits),
     ...sizeIssues(panel, sources, geometry, limits),

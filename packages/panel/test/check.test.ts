@@ -293,6 +293,20 @@ describe('checkPanel: overlap and spacing', () => {
     expect(find(issues, 'unsupported-instance').message).toContain('edges N, S are blocked');
   });
 
+  it('two overhanging parts facing each other must clear each other', () => {
+    const awk = resolved('B', awkwardBoard()); // connector on S, overhang 1.5 mm
+    // Upper board as it is, lower board turned 180: connector faces connector.
+    const at = (gap: number) =>
+      panelOf([awk], [
+        ['B', 0, 0, { rotation: 180 }],
+        ['B', 0, 20 + gap],
+      ], [{ op: 'setSettings', settings: { rails: { top: 0, bottom: 0, left: 5, right: 5 } } }]);
+    // 2.5 mm satisfies each edge on its own; together they need 1.5 + 1.5 + 1.
+    const tight = find(checkPanel(at(3), [awk], LIMITS), 'blocked-edge-clearance');
+    expect(tight.message).toContain('needs 4 mm');
+    expect(codes(checkPanel(at(4), [awk], LIMITS))).not.toContain('blocked-edge-clearance');
+  });
+
   it('flags an overhanging part that lands on a neighbour or a rail', () => {
     const awk = resolved('B', awkwardBoard());
     const onNeighbour = panelOf([a, awk], [

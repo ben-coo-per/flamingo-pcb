@@ -14,10 +14,18 @@
  */
 
 import type { PanelLimits } from './config.js';
-import { computeFrame, effectiveSpacing, placeInstances, type PlacedInstance } from './geometry.js';
+import {
+  computeFrame,
+  computeGeometry,
+  effectiveSpacing,
+  placeInstances,
+  tabCounts,
+  type PlacedInstance,
+} from './geometry.js';
 import type { InstancePlacement } from './ops.js';
 import type { ResolvedSources } from './resolved.js';
-import { targetLayers, usedLayerCounts } from './check.js';
+import type { EdgeInfo } from './source.js';
+import { checkPanel, targetLayers, usedLayerCounts } from './check.js';
 import { rotateSide, rotatedSize } from './transform.js';
 import type { Panel, PanelInstance, Rotation, Side } from './types.js';
 import { SIDES } from './types.js';
@@ -123,24 +131,50 @@ function overlaps(a: Rect, b: Rect): boolean {
   return a.x < b.x + b.w - EPS && b.x < a.x + a.w - EPS && a.y < b.y + b.h - EPS && b.y < a.y + a.h - EPS;
 }
 
-/** How far each side of an instance grows: its clearance, less the half of the spacing its neighbour brings. */
-function growth(margins: Record<Side, number>, spacing: number): Record<Side, number> {
+/**
+ * How far each side of an instance grows. Grown rectangles may touch, so two
+ * growths add up to the gap between two boards:
+ *  - a plain edge grows by half the spacing, giving the spacing between two;
+ *  - a blocked edge grows by its clearance less the half spacing a plain
+ *    neighbour brings, giving exactly its clearance;
+ *  - an edge with an overhanging part grows by at least the overhang plus half
+ *    the margin, so that two such edges facing each other keep the margin
+ *    between the parts, not merely between a part and a board.
+ */
+function growth(
+  edges: Record<Side, EdgeInfo>,
+  spacing: number,
+  overhangMargin: number,
+): Record<Side, number> {
   const g = {} as Record<Side, number>;
-  for (const s of SIDES) g[s] = Math.max(0, margins[s] - spacing / 2);
+  for (const s of SIDES) {
+    const e = edges[s];
+    const margin = Math.max(spacing, e.clearance);
+    g[s] = Math.max(0, margin - spacing / 2, e.overhang > 0 ? e.overhang + overhangMargin / 2 : 0);
+  }
   return g;
 }
 
-function optionsFor(inst: PanelInstance, sources: ResolvedSources, spacing: number, rotate: boolean): Option[] {
+/** A board's edges keyed by the panel side each faces once turned by `rotation`. */
+function turnedEdges(edges: Record<Side, EdgeInfo>, rotation: Rotation): Record<Side, EdgeInfo> {
+  const out = {} as Record<Side, EdgeInfo>;
+  for (const boardSide of SIDES) out[rotateSide(boardSide, rotation)] = edges[boardSide];
+  return out;
+}
+
+function optionsFor(
+  inst: PanelInstance,
+  sources: ResolvedSources,
+  spacing: number,
+  overhangMargin: number,
+  rotate: boolean,
+): Option[] {
   const g = sources.find((s) => s.key === inst.source)!.geometry!;
   const rotations: Rotation[] = rotate ? [inst.rotation, ((inst.rotation + 90) % 360) as Rotation] : [inst.rotation];
   const out: Option[] = [];
   for (const rotation of rotations) {
     const size = rotatedSize(g.bbox, rotation);
-    const margins = {} as Record<Side, number>;
-    for (const boardSide of SIDES) {
-      margins[rotateSide(boardSide, rotation)] = Math.max(spacing, g.edges[boardSide].clearance);
-    }
-    const grow = growth(margins, spacing);
+    const grow = growth(turnedEdges(g.edges, rotation), spacing, overhangMargin);
     const o: Option = {
       rotation,
       w: size.width + grow.W + grow.E,
@@ -156,8 +190,8 @@ function optionsFor(inst: PanelInstance, sources: ResolvedSources, spacing: numb
   return out;
 }
 
-function grownRect(p: PlacedInstance, spacing: number): Rect {
-  const g = growth(p.margins, spacing);
+function grownRect(p: PlacedInstance, spacing: number, overhangMargin: number): Rect {
+  const g = growth(p.edges, spacing, overhangMargin);
   return {
     x: p.bbox.minX - g.W,
     y: p.bbox.minY - g.S,
@@ -268,10 +302,11 @@ export function arrange(
   }
 
   const pinnedPlaced = placeInstances({ ...panel, instances: pinned }, sources).instances;
-  const obstacles = pinnedPlaced.map((p) => grownRect(p, spacing));
+  const overhangMargin = limits.blockedEdges.overhangMargin.value;
+  const obstacles = pinnedPlaced.map((p) => grownRect(p, spacing, overhangMargin));
 
   const items: Item[] = free
-    .map((inst) => ({ id: inst.id, options: optionsFor(inst, sources, spacing, rotate) }))
+    .map((inst) => ({ id: inst.id, options: optionsFor(inst, sources, spacing, overhangMargin, rotate) }))
     .sort((a, b) => {
       const size = (it: Item): [number, number] => [
         Math.max(...it.options.map((o) => Math.max(o.w, o.h))),
@@ -371,11 +406,15 @@ export function arrange(
   }
 
   if (bestFit) {
+    const supported =
+      rotate && panel.settings.separation !== 'silk-divider'
+        ? improveSupport(panel, usable, sources, limits, bestFit, limit, pinned.length === 0)
+        : bestFit;
     // Keep the panel's order of instances in the result.
-    const placements = [...bestFit.placements].sort(
+    const placements = [...supported.placements].sort(
       (a, b) => panel.instances.indexOf(byId.get(a.id)!) - panel.instances.indexOf(byId.get(b.id)!),
     );
-    return { ok: true, placements, width: bestFit.width, height: bestFit.height, limit, skipped };
+    return { ok: true, placements, width: supported.width, height: supported.height, limit, skipped };
   }
 
   const limitText = `${fmt(limit.width)} x ${fmt(limit.height)} mm (${limit.label})`;
@@ -422,6 +461,81 @@ export function arrange(
     limit,
     skipped,
   };
+}
+
+/**
+ * A board whose blocked edge ended up facing a rail or a neighbour may be left
+ * hanging by a single tab. Turning it by 180 degrees inside the space it
+ * already occupies moves the blocked edge to the other side at no cost in
+ * area, so that is tried for every board held by too few tabs, and kept when
+ * the board ends up better held and nothing else gets worse.
+ */
+function improveSupport(
+  panel: Panel,
+  usable: PanelInstance[],
+  sources: ResolvedSources,
+  limits: PanelLimits,
+  start: Candidate,
+  limit: SizeLimit,
+  anchorAtOrigin: boolean,
+): Candidate {
+  const spacing = effectiveSpacing(panel.settings);
+  const min = limits.tabs.minPerInstance.value;
+  const apply = (placements: InstancePlacement[]): Panel => ({
+    ...panel,
+    instances: usable.map((inst) => {
+      const pl = placements.find((q) => q.id === inst.id);
+      return pl ? { ...inst, at: pl.at, rotation: pl.rotation ?? inst.rotation } : inst;
+    }),
+  });
+  const score = (p: Panel): { weak: number; tabs: Map<string, number>; errors: number } => {
+    const g = computeGeometry(p, sources);
+    const tabs = tabCounts(g);
+    return {
+      weak: [...tabs.values()].filter((n) => n < min).length,
+      tabs,
+      errors: checkPanel(p, sources, limits, g).filter((i) => i.severity === 'error').length,
+    };
+  };
+
+  let placements = start.placements.map((p) => ({ ...p, at: { ...p.at } }));
+  let current = score(apply(placements));
+  if (current.weak === 0) return start;
+
+  for (const pl of placements) {
+    if ((current.tabs.get(pl.id) ?? 0) >= min) continue;
+    const inst = usable.find((i) => i.id === pl.id)!;
+    const g = sources.find((s) => s.key === inst.source)!.geometry!;
+    const rotation = pl.rotation ?? inst.rotation;
+    const flipped = ((rotation + 180) % 360) as Rotation;
+    const growAt = (r: Rotation): Record<Side, number> =>
+      growth(turnedEdges(g.edges, r), spacing, limits.blockedEdges.overhangMargin.value);
+    const before = growAt(rotation);
+    const after = growAt(flipped);
+    const trial = placements.map((q) =>
+      q.id === pl.id
+        ? { id: q.id, rotation: flipped, at: { x: q.at.x - before.W + after.W, y: q.at.y - before.S + after.S } }
+        : q,
+    );
+    const next = score(apply(trial));
+    const held = next.tabs.get(pl.id) ?? 0;
+    if (held > (current.tabs.get(pl.id) ?? 0) && next.weak < current.weak && next.errors <= current.errors) {
+      placements = trial;
+      current = next;
+    }
+  }
+  if (placements.every((p, i) => p.rotation === start.placements[i]!.rotation)) return start;
+
+  const frame = computeFrame(panel.settings, placeInstances(apply(placements), sources).instances);
+  if (!frame || !fits(frame.width, frame.height, limit)) return start;
+  if (anchorAtOrigin) {
+    for (const pl of placements) {
+      pl.at = { x: round(pl.at.x - frame.outer.minX), y: round(pl.at.y - frame.outer.minY) };
+    }
+  } else {
+    for (const pl of placements) pl.at = { x: round(pl.at.x), y: round(pl.at.y) };
+  }
+  return { ...start, placements, width: frame.width, height: frame.height };
 }
 
 function round(n: number): number {

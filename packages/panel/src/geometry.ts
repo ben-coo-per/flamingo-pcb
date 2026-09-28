@@ -309,8 +309,9 @@ export function tabCentres(lo: number, hi: number, width: number, pitch: number)
   const usable = len - 2 * TAB_CORNER_MARGIN;
   if (usable < width) return [(lo + hi) / 2];
   let n = Math.max(1, Math.ceil(len / pitch));
-  // One tab in the middle of a long edge lets the board rock; give it two.
-  if (n === 1 && len >= 4 * width) n = 2;
+  // One tab in the middle of an edge lets the board rock: give it two as soon
+  // as two fit with room between them.
+  if (n === 1 && len >= 3 * width) n = 2;
   while (n > 1 && usable / n < width) n--;
   const out: number[] = [];
   for (let i = 0; i < n; i++) out.push(lo + (len * (i + 0.5)) / n);
