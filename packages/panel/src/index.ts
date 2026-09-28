@@ -86,3 +86,30 @@ export { arrange, sizeLimit } from './layout.js';
 
 export type { MergedLabel, MergedPanel } from './merge.js';
 export { mergePanel, mergedRefdes, assemblyBoard } from './merge.js';
+
+export type { QtyPrice, AreaTier, JointTier, PerSide, AttritionRule, AssemblyFees, FeeTable } from './fees.js';
+export { stepAtLeast } from './fees.js';
+
+export type {
+  OrderPart,
+  OrderPiece,
+  OrderAssembly,
+  OrderConfig,
+  CostCode,
+  CostLine,
+  CostBreakdown,
+} from './cost.js';
+export { computeCost, boardPrice, billedQuantity } from './cost.js';
+
+export type { Received, PieceCount, Eligibility, PricedOrder, PanelQuote } from './order.js';
+export {
+  pieceParts,
+  pieceSides,
+  assemblyEligibility,
+  priceOrder,
+  quantitiesFor,
+  receivedFor,
+  countInstances,
+  designsCharged,
+  quotePanel,
+} from './order.js';

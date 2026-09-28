@@ -3,7 +3,7 @@
  * config files, board files, hashing and fab output.
  */
 
-export { shippedConfigDir, loadPanelLimits } from './config.js';
+export { shippedConfigDir, loadPanelLimits, loadFeeTable } from './config.js';
 export { hashBoard } from './hash.js';
 export type { LoadedBoard } from './load.js';
 export {
