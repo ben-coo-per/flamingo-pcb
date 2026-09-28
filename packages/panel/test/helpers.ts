@@ -6,9 +6,11 @@
 import type { Board, ComponentInst, Footprint, PathSeg } from '@flamingo/engine';
 import { newBoard } from '@flamingo/engine';
 import type { PanelLimits } from '../src/config.js';
-import { loadPanelLimits } from '../src/node/config.js';
+import type { FeeTable } from '../src/fees.js';
+import { loadFeeTable, loadPanelLimits } from '../src/node/config.js';
 
 export const LIMITS: PanelLimits = loadPanelLimits();
+export const FEES: FeeTable = loadFeeTable();
 
 export function rectOutline(w: number, h: number, x0 = 0, y0 = 0): PathSeg[] {
   const p = [

@@ -10,6 +10,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { PanelLimits } from '../config.js';
+import type { FeeTable } from '../fees.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -34,4 +35,8 @@ function readConfig<T>(file: string, dir?: string): T {
 
 export function loadPanelLimits(dir?: string): PanelLimits {
   return readConfig<PanelLimits>('panel-limits.json', dir);
+}
+
+export function loadFeeTable(dir?: string): FeeTable {
+  return readConfig<FeeTable>('fee-table.json', dir);
 }
