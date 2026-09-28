@@ -35,9 +35,9 @@ describe('fee table', () => {
     for (const { path, entry } of entries) {
       expect(typeof entry.verified, path).toBe('boolean');
       expect(entry.source, path).toMatch(/^(https:\/\/\S+|design-choice)$/);
-      // Verified means read from a JLCPCB page on a recorded date.
+      // Verified means read from a JLCPCB help article on a recorded date.
       if (entry.verified) {
-        expect(entry.source, path).toMatch(/^https:\/\/jlcpcb\.com\//);
+        expect(entry.source, path).toMatch(/^https:\/\/jlcpcb\.com\/help\//);
         expect(entry.date, path).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       }
     }

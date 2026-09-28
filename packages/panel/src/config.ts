@@ -13,7 +13,7 @@ export interface Sourced<T> {
   value: T;
   /** URL the value was taken from, or `design-choice` for a Flamingo default. */
   source: string;
-  /** true only when read from the cited JLCPCB page with WebFetch on `date`. */
+  /** true only when read from the cited JLCPCB /help/ article with WebFetch on `date`. */
   verified: boolean;
   /** ISO date of verification. */
   date?: string;

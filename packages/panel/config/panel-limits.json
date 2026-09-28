@@ -1,5 +1,5 @@
 {
-  "$comment": "Panel size limits and panelization geometry. Every entry is {value, source, verified, date?, note?}. verified:true means the value was read from the cited JLCPCB page with WebFetch on the given date. verified:false means it is an estimate or a Flamingo design choice; source 'design-choice' marks the latter.",
+  "$comment": "Panel size limits and panelization geometry. Every entry is {value, source, verified, date?, note?}. verified:true means the value was read from the cited JLCPCB /help/ article with WebFetch on the given date. verified:false means anything else: a number read from another JLCPCB page (capabilities, blog), an estimate, or a Flamingo design choice; source 'design-choice' marks the last.",
   "asOf": "2026-09-28",
   "fab": {
     "maxSize": {
@@ -9,9 +9,9 @@
           "height": 600
         },
         "source": "https://jlcpcb.com/capabilities/pcb-capabilities",
-        "verified": true,
+        "verified": false,
         "date": "2026-09-28",
-        "note": "FR4 2-layer maximum dimensions. Official capabilities page, not a /help/ article."
+        "note": "Read from JLCPCB's official capabilities page with WebFetch on 2026-09-28. It is not a /help/ article, so it is not marked verified. FR4 2-layer maximum dimensions."
       },
       "4": {
         "value": {
@@ -19,9 +19,9 @@
           "height": 593
         },
         "source": "https://jlcpcb.com/capabilities/pcb-capabilities",
-        "verified": true,
+        "verified": false,
         "date": "2026-09-28",
-        "note": "FR4 4-layer maximum dimensions. Official capabilities page, not a /help/ article."
+        "note": "Read from JLCPCB's official capabilities page with WebFetch on 2026-09-28. It is not a /help/ article, so it is not marked verified. FR4 4-layer maximum dimensions."
       },
       "6": {
         "value": {
@@ -29,9 +29,9 @@
           "height": 586
         },
         "source": "https://jlcpcb.com/capabilities/pcb-capabilities",
-        "verified": true,
+        "verified": false,
         "date": "2026-09-28",
-        "note": "FR4 6-layer and above. Official capabilities page, not a /help/ article."
+        "note": "Read from JLCPCB's official capabilities page with WebFetch on 2026-09-28. It is not a /help/ article, so it is not marked verified. FR4 6-layer and above."
       }
     },
     "minSize": {
@@ -40,21 +40,23 @@
         "height": 3
       },
       "source": "https://jlcpcb.com/capabilities/pcb-capabilities",
-      "verified": true,
-      "date": "2026-09-28"
+      "verified": false,
+      "date": "2026-09-28",
+      "note": "Read from JLCPCB's official capabilities page with WebFetch on 2026-09-28. It is not a /help/ article, so it is not marked verified."
     },
     "minSpacing": {
       "value": 1.6,
       "source": "https://jlcpcb.com/capabilities/pcb-capabilities",
-      "verified": true,
+      "verified": false,
       "date": "2026-09-28",
-      "note": "Mouse-bite panels: 'Panel board spacing: 1.6 or 2 mm'. The same page also says spacing should be >= 2 mm in general, so 2 mm is the default and 1.6 mm the floor."
+      "note": "Read from JLCPCB's official capabilities page with WebFetch on 2026-09-28. It is not a /help/ article, so it is not marked verified. Mouse-bite panels: 'Panel board spacing: 1.6 or 2 mm'. The same page also says spacing should be >= 2 mm in general, so 2 mm is the default and 1.6 mm the floor."
     },
     "minNpthDiameter": {
       "value": 0.5,
       "source": "https://jlcpcb.com/capabilities/pcb-capabilities",
-      "verified": true,
-      "date": "2026-09-28"
+      "verified": false,
+      "date": "2026-09-28",
+      "note": "Read from JLCPCB's official capabilities page with WebFetch on 2026-09-28. It is not a /help/ article, so it is not marked verified."
     }
   },
   "assembly": {
@@ -67,9 +69,9 @@
           "maxHeight": 500
         },
         "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
-        "verified": true,
+        "verified": false,
         "date": "2026-09-28",
-        "note": "Official capabilities page, not a /help/ article."
+        "note": "Read from JLCPCB's official capabilities page with WebFetch on 2026-09-28. It is not a /help/ article, so it is not marked verified."
       },
       "panelSize": {
         "value": {
@@ -89,9 +91,9 @@
           "max": 50
         },
         "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
-        "verified": true,
+        "verified": false,
         "date": "2026-09-28",
-        "note": "Official capabilities page, not a /help/ article."
+        "note": "Read from JLCPCB's official capabilities page with WebFetch on 2026-09-28. It is not a /help/ article, so it is not marked verified."
       },
       "layers": {
         "value": [
@@ -100,15 +102,16 @@
           6
         ],
         "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
-        "verified": true,
-        "date": "2026-09-28"
+        "verified": false,
+        "date": "2026-09-28",
+        "note": "Read from JLCPCB's official capabilities page with WebFetch on 2026-09-28. It is not a /help/ article, so it is not marked verified."
       },
       "sides": {
         "value": 1,
         "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
-        "verified": true,
+        "verified": false,
         "date": "2026-09-28",
-        "note": "Single sided placement only."
+        "note": "Read from JLCPCB's official capabilities page with WebFetch on 2026-09-28. It is not a /help/ article, so it is not marked verified. Single sided placement only."
       },
       "separations": {
         "value": [
@@ -122,8 +125,9 @@
       "railsRequired": {
         "value": false,
         "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
-        "verified": true,
-        "date": "2026-09-28"
+        "verified": false,
+        "date": "2026-09-28",
+        "note": "Read from JLCPCB's official capabilities page with WebFetch on 2026-09-28. It is not a /help/ article, so it is not marked verified."
       }
     },
     "standard": {
@@ -135,9 +139,9 @@
           "maxHeight": 500
         },
         "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
-        "verified": true,
+        "verified": false,
         "date": "2026-09-28",
-        "note": "Official capabilities page, not a /help/ article."
+        "note": "Read from JLCPCB's official capabilities page with WebFetch on 2026-09-28. It is not a /help/ article, so it is not marked verified."
       },
       "panelSize": {
         "value": {
@@ -157,9 +161,9 @@
           "max": 80000
         },
         "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
-        "verified": true,
+        "verified": false,
         "date": "2026-09-28",
-        "note": "Official capabilities page, not a /help/ article."
+        "note": "Read from JLCPCB's official capabilities page with WebFetch on 2026-09-28. It is not a /help/ article, so it is not marked verified."
       },
       "layers": {
         "value": [
@@ -168,31 +172,32 @@
           6
         ],
         "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
-        "verified": true,
+        "verified": false,
         "date": "2026-09-28",
-        "note": "JLCPCB lists 1-32 layers; Flamingo boards are 2, 4 or 6."
+        "note": "Read from JLCPCB's official capabilities page with WebFetch on 2026-09-28. It is not a /help/ article, so it is not marked verified. JLCPCB lists 1-32 layers; Flamingo boards are 2, 4 or 6."
       },
       "sides": {
         "value": 2,
         "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
-        "verified": true,
-        "date": "2026-09-28"
+        "verified": false,
+        "date": "2026-09-28",
+        "note": "Read from JLCPCB's official capabilities page with WebFetch on 2026-09-28. It is not a /help/ article, so it is not marked verified."
       },
       "separations": {
         "value": [
           "mouse-bite"
         ],
         "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
-        "verified": true,
+        "verified": false,
         "date": "2026-09-28",
-        "note": "Standard also accepts V-cut panels; Flamingo does not generate V-cut panels."
+        "note": "Read from JLCPCB's official capabilities page with WebFetch on 2026-09-28. It is not a /help/ article, so it is not marked verified. Standard also accepts V-cut panels; Flamingo does not generate V-cut panels."
       },
       "railsRequired": {
         "value": true,
         "source": "https://jlcpcb.com/capabilities/pcb-assembly-capabilities",
-        "verified": true,
+        "verified": false,
         "date": "2026-09-28",
-        "note": "Edge rails and fiducials are both listed as necessary for Standard PCBA."
+        "note": "Read from JLCPCB's official capabilities page with WebFetch on 2026-09-28. It is not a /help/ article, so it is not marked verified. Edge rails and fiducials are both listed as necessary for Standard PCBA."
       }
     }
   },
