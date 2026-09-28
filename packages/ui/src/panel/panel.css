@@ -217,6 +217,8 @@ body {
 
 .side {
   grid-area: side;
+  /* A scrollbar that takes room takes it always, so nothing moves when it appears. */
+  scrollbar-gutter: stable;
   border-left: 1px solid var(--ink);
   overflow-y: auto;
   overflow-x: hidden;
@@ -719,8 +721,8 @@ table.lines tr.order td {
 
 .scenario {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) minmax(100px, max-content);
-  column-gap: 6px;
+  grid-template-columns: 16px minmax(0, 1fr) max-content;
+  gap: 0 6px;
   padding: 8px 6px 8px 4px;
   border: 1px solid transparent;
   border-top: 1px dotted var(--ink);
@@ -770,6 +772,7 @@ table.lines tr.order td {
 
 /* Label on the left, fact on the right: each panel / order / you get. */
 .sc-facts {
+  grid-column: 2 / -1;
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr);
   gap: 4px 6px;
@@ -795,25 +798,51 @@ table.lines tr.order td {
 .sc-facts dd.sc-qty {
   display: block;
   font-size: 11px;
-  white-space: nowrap;
+}
+
+/* A quantity that is what it is because no smaller order exists. */
+.min {
+  padding: 0 3px;
+  border: 1px dashed var(--ink);
+  font-size: 10px;
+  line-height: 13px;
+  cursor: help;
+}
+
+.got-bare {
+  font-size: 11px;
+}
+
+/* Cost as a length, then the same per board, then the notes. */
+.sc-foot {
+  grid-column: 2 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.sc-foot .meter {
+  flex: 1;
+  min-width: 40px;
+  border-bottom: 1px solid var(--ink);
 }
 
 .sc-qty .chip {
   margin-right: 5px;
 }
 
-.sc-qty .sep {
-  padding-right: 5px;
-}
-
-.sc-cost {
-  text-align: right;
-}
-
 .sc-total {
   font-size: 14px;
   font-weight: 700;
   line-height: 20px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.sc-total .est {
+  font-size: 10px;
+  font-weight: 400;
 }
 
 .sc-per {
@@ -821,14 +850,8 @@ table.lines tr.order td {
   white-space: nowrap;
 }
 
-.sc-cost .meter {
-  margin-top: 5px;
-  border-bottom: 1px solid var(--ink);
-}
-
 .sc-warn {
-  display: inline-block;
-  margin-top: 8px;
+  flex: none;
   padding: 0 4px;
   border: 1px solid var(--ink);
   font-size: 10px;

@@ -33,6 +33,10 @@ export interface OptionOrder {
   counts: PieceCount[];
   made: number;
   assembled: number;
+  /** More pieces are made than the need asks for, because no smaller order exists. */
+  minMade: boolean;
+  /** Likewise for the pieces assembled. */
+  minAssembled: boolean;
 }
 
 export interface Option {
@@ -72,6 +76,38 @@ export function boardsAskedFor(received: Received[]): number {
   }, 0);
 }
 
+/**
+ * Whether the quantities of an order are what they are because JLCPCB takes
+ * no smaller order, not because the need asks for them.
+ */
+export function minimumsReached(
+  order: Pick<OptionOrder, 'counts' | 'made' | 'assembled'>,
+  received: Received[],
+  view: Pick<PanelView, 'sources' | 'minimums'>,
+): { minMade: boolean; minAssembled: boolean } {
+  let toAssemble = 0;
+  let toMake = 0;
+  for (const c of order.counts) {
+    const r = received.find((x) => x.key === c.key);
+    const want = r ? Math.max(r.needed, r.niceToHave) : 0;
+    if (want === 0) continue;
+    const parts = (view.sources.find((s) => s.key === c.key)?.geometry?.partLines ?? 1) > 0;
+    if (parts && c.populated > 0) toAssemble = Math.max(toAssemble, Math.ceil(want / c.populated));
+    else if (c.total > 0) toMake = Math.max(toMake, Math.ceil(want / c.total));
+  }
+  toMake = Math.max(toMake, toAssemble);
+  const min = view.minimums;
+  return {
+    minMade: min !== undefined && order.made === min.made && toMake < order.made,
+    minAssembled: min !== undefined && order.assembled === min.assembled && toAssemble < order.assembled,
+  };
+}
+
+function withMinimums(o: Option, view: PanelView): Option {
+  o.orders = o.orders.map((order) => ({ ...order, ...minimumsReached(order, o.received, view) }));
+  return o;
+}
+
 function fromScenario(s: Scenario): Option {
   return {
     id: s.id,
@@ -84,6 +120,8 @@ function fromScenario(s: Scenario): Option {
       counts: o.counts,
       made: o.priced.order.pcbQty,
       assembled: o.priced.order.assembly?.qty ?? 0,
+      minMade: false,
+      minAssembled: false,
     })),
     received: s.received,
     total: s.total,
@@ -113,8 +151,8 @@ function ownPanel(view: PanelView): Option {
     tags: [view.panel.settings.separation === 'silk-divider' ? 'silk lines' : view.panel.settings.separation === 'solid-tab' ? 'solid tabs' : 'mouse bites'],
     meaning: 'A panel you arranged yourself, priced and ranked like the others.',
     orders: q.order
-      ? [{ panel: q.order.piece.boards > 1, counts, made: q.order.pcbQty, assembled: q.order.assembly?.qty ?? 0 }]
-      : [{ panel: true, counts, made: 0, assembled: 0 }],
+      ? [{ panel: q.order.piece.boards > 1, counts, made: q.order.pcbQty, assembled: q.order.assembly?.qty ?? 0, minMade: false, minAssembled: false }]
+      : [{ panel: true, counts, made: 0, assembled: 0, minMade: false, minAssembled: false }],
     received: q.received,
     total: q.cost ? q.cost.total : null,
     perBoard: q.cost ? (asked > 0 ? cents(q.cost.total / asked) : q.cost.total) : null,
@@ -153,6 +191,7 @@ export function buildOptions(view: PanelView, quote: QuoteResult | null, preview
   if (!matched && view.panel.instances.length > 0) options.push(ownPanel(view));
   // Cheapest first; what cannot be priced goes last. Equal totals keep the optimizer's order.
   return options
+    .map((o) => withMinimums(o, view))
     .map((o, i) => ({ o, i }))
     .sort((a, b) => (a.o.total ?? Infinity) - (b.o.total ?? Infinity) || a.i - b.i)
     .map((x) => x.o);

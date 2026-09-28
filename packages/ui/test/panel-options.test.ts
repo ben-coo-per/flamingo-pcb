@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { PanelView, QuoteResult, Received, Scenario } from '@flamingo/panel';
-import { OWN, boardsAskedFor, buildOptions, optionInView, rankOf, scenarioOnPlate } from '../src/panel/options.js';
+import { OWN, boardsAskedFor, buildOptions, minimumsReached, optionInView, rankOf, scenarioOnPlate } from '../src/panel/options.js';
 
 const instance = (id: string, source: string, x: number, populate = true) => ({
   id,
@@ -63,6 +63,7 @@ function view(instances: ReturnType<typeof instance>[], cost: number | null = 50
     panel: { name: 'combo', sources: [{ key: 'S' }, { key: 'M' }], instances, settings: { separation: 'mouse-bite' } },
     sources: ['S', 'M'].map((key) => ({ key, instances: count(key), populated: count(key, true), needed: 2, niceToHave: 0 })),
     issues: [],
+    minimums: { made: 5, assembled: 2, verified: false },
     quote:
       cost === null
         ? { order: null, cost: null, received: [], problems: ['S is needed but is not on the panel'], notes: [] }
@@ -119,6 +120,8 @@ describe('panel view: ways to order', () => {
         ],
         made: 5,
         assembled: 2,
+        minMade: true,
+        minAssembled: false,
       },
     ]);
   });
@@ -146,6 +149,22 @@ describe('panel view: ways to order', () => {
   it('lists the panel on its own while the ways are being worked out', () => {
     const list = buildOptions(view(LAYOUT.instances), null, null);
     expect(list.map((o) => o.id)).toEqual([OWN]);
+  });
+
+  it('says when a quantity is the smallest order there is', () => {
+    const v = view([]);
+    const one = [{ key: 'S', total: 1, populated: 1 }];
+    // 1 needed: 2 are assembled and 5 made because nothing smaller can be ordered.
+    expect(minimumsReached({ counts: one, made: 5, assembled: 2 }, [got('S', 1, 2, 3)], v)).toEqual({ minMade: true, minAssembled: true });
+    // 2 needed: 2 assembled is the need; 5 made is still the minimum.
+    expect(minimumsReached({ counts: one, made: 5, assembled: 2 }, [got('S', 2, 2, 3)], v)).toEqual({ minMade: true, minAssembled: false });
+    // 5 needed: both are the need.
+    expect(minimumsReached({ counts: one, made: 5, assembled: 5 }, [got('S', 5, 5)], v)).toEqual({ minMade: false, minAssembled: false });
+    // 3 on a panel, 6 wished for: 2 panels assembled is what the wish asks for.
+    const three = [{ key: 'S', total: 3, populated: 3 }];
+    expect(minimumsReached({ counts: three, made: 5, assembled: 2 }, [got('S', 2, 6, 9, 6)], v)).toEqual({ minMade: true, minAssembled: false });
+    // More than the minimum is never the minimum.
+    expect(minimumsReached({ counts: one, made: 10, assembled: 10 }, [got('S', 7, 10)], v)).toEqual({ minMade: false, minAssembled: false });
   });
 
   it('counts the boards that were asked for', () => {

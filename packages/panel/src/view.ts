@@ -37,6 +37,16 @@ export interface LimitView {
   binding: boolean;
 }
 
+/** The smallest order JLCPCB takes: why 5 panels are made when 2 are needed. */
+export interface OrderMinimums {
+  /** Fewest pieces fabricated in one order. */
+  made: number;
+  /** Fewest pieces assembled in one order. */
+  assembled: number;
+  /** false = an estimate. */
+  verified: boolean;
+}
+
 export interface PanelView {
   panel: Panel;
   filePath: string | null;
@@ -47,6 +57,7 @@ export interface PanelView {
   issues: PanelIssue[];
   quote: PanelQuote;
   limits: LimitView[];
+  minimums: OrderMinimums;
   /** Layer count the panel will be made at; null while the boards disagree. */
   layers: 2 | 4 | 6 | null;
   /** Milliseconds it took to derive this view. */
