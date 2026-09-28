@@ -1039,7 +1039,8 @@ are unverified (the order form was not opened), and the tooltip on `min` says
 `verify-panel-ui.ts`: 19 checks pass, 17 screenshots refreshed. `npm test`:
 915 pass, and the same 3 failures as on `main`.
 
-### Not pushed
+### Pushed
 
-The commits of sections 16 to 19 are local. The fork has `panelize` as of
-9c50dfa.
+On 2026-09-28, at Ben's request, `panelize` was pushed to `origin`
+(`ben-coo-per/flamingo-pcb`, his fork) with the commits of sections 16 to 19.
+A fast-forward from 9c50dfa; no force, no pull request.
