@@ -220,3 +220,37 @@ export function composition(c: PieceCount, hasParts = true): { populated: number
   if (!hasParts) return { populated: c.total, bare: 0 };
   return { populated: c.populated, bare: c.total - c.populated };
 }
+
+/** What a kind of scenario is, in two sentences, for the detail of the selected one. */
+export const SCENARIO_MEANING: Record<ScenarioKind, string> = {
+  separate: 'Each design is ordered on its own, as single boards. Nothing is panelized.',
+  'own-panels': 'Each design gets a panel of its own, and each panel is its own order.',
+  merged: 'All boards share one panel and are held in it by break-off tabs. JLCPCB charges for each extra design on a panel.',
+  'silk-divider':
+    'All boards sit inside one plain outline with printed lines between them, which JLCPCB counts as one design. You cut the boards apart yourself.',
+  split: 'Boards are grouped by layer count, and each group is its own order.',
+};
+
+/** True when selecting the scenario replaces the panel: it is one order, and that order is a panel. */
+export function loadsOntoPanel(s: Pick<Scenario, 'orders'>): boolean {
+  return s.orders.length === 1 && s.orders[0]!.panel && s.orders[0]!.layout !== null;
+}
+
+/** `5 panels`, `1 board`. */
+export function pieces(n: number, panel: boolean): string {
+  const word = panel ? 'panel' : 'board';
+  return `${n} ${word}${n === 1 ? '' : 's'}`;
+}
+
+/** One line for the banner over a scenario that is shown, not loaded. */
+export function previewLine(s: Pick<Scenario, 'kind' | 'orders'>, rank: number): string {
+  const panels = s.orders.filter((o) => o.panel).length;
+  const singles = s.orders.length - panels;
+  const what =
+    panels === 0
+      ? `${s.orders.length} order${s.orders.length === 1 ? '' : 's'} of single boards, no panel`
+      : singles === 0
+        ? `${panels} panels, each its own order`
+        : `${s.orders.length} orders: ${panels} panel${panels === 1 ? '' : 's'} and ${singles} of single boards`;
+  return `Scenario ${rank}, ${SCENARIO_LABEL[s.kind]}: ${what}`;
+}

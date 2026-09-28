@@ -44,6 +44,12 @@ export interface PanelState {
   quoteError: string | null;
   /** Scenario whose fee lines are shown. */
   scenario: string | null;
+  /**
+   * Scenario shown on the plate in place of the panel, because it is not one
+   * panel that could be loaded (single boards, or several orders). Nothing on
+   * the plate can be edited while this is set.
+   */
+  preview: string | null;
   arrangeMsg: Message | null;
   exportMsg: Message | null;
   scenarioMsg: Message | null;
@@ -67,6 +73,7 @@ function initial(): PanelState {
     quote: null,
     quoteError: null,
     scenario: null,
+    preview: null,
     arrangeMsg: null,
     exportMsg: null,
     scenarioMsg: null,

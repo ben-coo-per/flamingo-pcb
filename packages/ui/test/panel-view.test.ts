@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import type { CostLine, PanelGeometry, PanelIssue, PlacedInstance, Received } from '@flamingo/panel';
 import {
   ISSUE_TITLE,
+  loadsOntoPanel,
+  previewLine,
   MAX_PIPS,
   composition,
   groupCost,
@@ -16,7 +18,7 @@ import {
   receivedShort,
   worstByInstance,
 } from '../src/panel/format.js';
-import { contentBox, dragOffset, dropPosition, hitInstance, roundMm } from '../src/panel/hit.js';
+import { contentBox, dragOffset, dropPosition, hitInstance, platePlaces, platesBox, roundMm } from '../src/panel/hit.js';
 
 function inst(id: string, x: number, y: number, w: number, h: number, extra: Partial<PlacedInstance> = {}): PlacedInstance {
   const free = { blocked: false, reasons: [], overhang: 0, clearance: 0 };
@@ -261,5 +263,51 @@ describe('panel view: short forms', () => {
     expect(scenarioTags({ id: 'merged-needed-x2' })).toEqual([]);
     expect(scenarioTags({ id: 'merged-wish-x2' })).toEqual(['extras populated']);
     expect(scenarioTags({ id: 'silk-divider-bare-x5', promotedTo: 4 })).toEqual(['extras bare', 'as 4-layer']);
+  });
+});
+
+describe('panel view: a scenario on the plate', () => {
+  const frame = (w: number, h: number, x = 0, y = 0) => ({
+    frame: { inner: { minX: x, minY: y, maxX: x + w, maxY: y + h }, outer: { minX: x, minY: y, maxX: x + w, maxY: y + h }, width: w, height: h },
+  });
+  const order = (panel: boolean, layout: boolean) =>
+    ({ panel, layout: layout ? { instances: [], settings: {}, width: 1, height: 1 } : null }) as never;
+
+  it('puts the plates side by side, bottoms on one line', () => {
+    const spots = platePlaces([frame(40, 30), frame(22, 16, 5, 7)], 18);
+    expect(spots.map((s) => s.box)).toEqual([
+      { minX: 0, minY: 0, maxX: 40, maxY: 30 },
+      { minX: 58, minY: 0, maxX: 80, maxY: 16 },
+    ]);
+    // A plate whose own corner is elsewhere is moved to its place.
+    expect(spots[1]!.offset).toEqual({ x: 53, y: -7 });
+    const box = platesBox(spots);
+    expect(box.minX).toBe(0);
+    expect(box.maxX).toBeGreaterThanOrEqual(80);
+    expect(box.minY).toBeLessThan(0); // captions
+    expect(box.maxY).toBeGreaterThan(30); // quantity and banner
+  });
+
+  it('has a plate to show even for nothing', () => {
+    expect(platesBox([])).toEqual({ minX: 0, minY: 0, maxX: 100, maxY: 70 });
+  });
+
+  it('loads a scenario only when it is one panel', () => {
+    expect(loadsOntoPanel({ orders: [order(true, true)] })).toBe(true);
+    expect(loadsOntoPanel({ orders: [order(false, false)] })).toBe(false);
+    expect(loadsOntoPanel({ orders: [order(false, false), order(false, false)] })).toBe(false);
+    expect(loadsOntoPanel({ orders: [order(true, true), order(true, true)] })).toBe(false);
+  });
+
+  it('says in one line what is on show', () => {
+    expect(previewLine({ kind: 'separate', orders: [order(false, false), order(false, false)] }, 5)).toBe(
+      'Scenario 5, Separate orders: 2 orders of single boards, no panel',
+    );
+    expect(previewLine({ kind: 'own-panels', orders: [order(true, true), order(true, true)] }, 2)).toBe(
+      'Scenario 2, A panel per design: 2 panels, each its own order',
+    );
+    expect(previewLine({ kind: 'split', orders: [order(true, true), order(false, false)] }, 3)).toBe(
+      'Scenario 3, Split by layers: 2 orders: 1 panel and 1 of single boards',
+    );
   });
 });

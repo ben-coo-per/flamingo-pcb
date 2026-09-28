@@ -27,6 +27,7 @@ import type { CostLine, OrderPiece } from './cost.js';
 import type { FeeTable } from './fees.js';
 import { stepAtLeast } from './fees.js';
 import { computeGeometry } from './geometry.js';
+import type { PanelGeometry } from './geometry.js';
 import { arrange } from './layout.js';
 import { applyPanelOp } from './ops.js';
 import type { PanelOp, SettingsPatch } from './ops.js';
@@ -60,6 +61,11 @@ export interface ScenarioOrder {
   /** Boards of each design in one piece. */
   counts: PieceCount[];
   layout: ScenarioLayout | null;
+  /**
+   * One piece of this order as a shape: the panel, or for an order of single
+   * boards the board on its own. What a client draws to show the order.
+   */
+  plate: PanelGeometry;
 }
 
 export interface ScenarioLine extends CostLine {
@@ -301,7 +307,22 @@ function planPanel(ctx: Ctx, plan: PanelPlan): ScenarioOrder | string {
       width: geometry.frame.width,
       height: geometry.frame.height,
     },
+    plate: geometry,
   };
+}
+
+/** A board on its own, as the shape of one piece: no rails, no tabs, nothing around it. */
+function singleBoardPlate(ctx: Ctx, s: PanelSource, populate: boolean): PanelGeometry {
+  const { req } = ctx;
+  const panel: Panel = {
+    ...newPanel(s.name, req.settings),
+    sources: [s],
+    instances: [{ id: `${s.key}1`, source: s.key, at: { x: 0, y: 0 }, rotation: 0, pinned: false, populate }],
+  };
+  panel.settings.rails = { top: 0, bottom: 0, left: 0, right: 0 };
+  panel.settings.fiducials.enabled = false;
+  panel.settings.toolingHoles.enabled = false;
+  return computeGeometry(panel, req.resolved);
 }
 
 /** One design as a single-board order. */
@@ -340,7 +361,15 @@ function planSingle(ctx: Ctx, s: PanelSource, target: number): ScenarioOrder | s
   );
   if (priced.order === null) return `${s.key}: no assembly service can take it (${priced.rejected.join('; ')})`;
   if (priced.cost.problems.length > 0) return `${s.key}: ${priced.cost.problems[0]}`;
-  return { label: priced.order.label, designs: [s.key], panel: false, priced, counts, layout: null };
+  return {
+    label: priced.order.label,
+    designs: [s.key],
+    panel: false,
+    priced,
+    counts,
+    layout: null,
+    plate: singleBoardPlate(ctx, s, counts[0]!.populated > 0),
+  };
 }
 
 function describeCounts(counts: PieceCount[]): string {

@@ -20,16 +20,21 @@
  *   board-edge keepout cross hatch
  *   tab                filled bar; mouse-bite holes as open circles
  *   error / warning    second outline outside the board (solid / dashed), label ERROR / WARNING
+ *
+ * The plate shows one of two things: the panel, which can be edited, or a
+ * scenario that is not one panel (single boards, several orders), shown as one
+ * plate per order, side by side, each drawn as a stack to say "several of
+ * these". Those cannot be edited; see `drawScenario`.
  */
 
 import type { Point } from '@flamingo/engine';
-import type { Box, PanelGeometry, PlacedInstance, Side } from '@flamingo/panel';
+import type { Box, PanelGeometry, PlacedInstance, Scenario, Side } from '@flamingo/panel';
 import { BOARD_TINT, boardColor, tint } from '@flamingo/panel';
 import type { ViewTransform } from '../state.js';
 import { worldToScreen } from '../view.js';
-import { mm, worstByInstance } from './format.js';
-import { dragOffset } from './hit.js';
-import type { PanelState } from './store.js';
+import { mm, pieces, worstByInstance } from './format.js';
+import { dragOffset, platePlaces } from './hit.js';
+import type { Drag, PanelState } from './store.js';
 
 const INK = '#000';
 const PAPER = '#fff';
@@ -154,6 +159,21 @@ function shiftBox(b: Box, by: Point): Box {
   return { minX: b.minX + by.x, minY: b.minY + by.y, maxX: b.maxX + by.x, maxY: b.maxY + by.y };
 }
 
+/** What one plate is drawn with. */
+interface Look {
+  t: ViewTransform;
+  holeDiameter: number;
+  drag: Drag | null;
+  selection: string | null;
+  /** Lines under the plate's bottom-left corner; the first is bold. */
+  caption: string[];
+}
+
+/** `t`, with everything moved by `by` mm. */
+function moved(t: ViewTransform, by: Point): ViewTransform {
+  return { ...t, originPxX: t.originPxX + by.x * t.scale * (t.flipped ? -1 : 1), originPxY: t.originPxY - by.y * t.scale };
+}
+
 function drawLimits(ctx: Ctx, state: PanelState, geometry: PanelGeometry, width: number, height: number): void {
   const view = state.view!;
   const t = state.transform;
@@ -175,8 +195,8 @@ function drawLimits(ctx: Ctx, state: PanelState, geometry: PanelGeometry, width:
   });
 }
 
-function drawFrame(ctx: Ctx, state: PanelState, geometry: PanelGeometry): void {
-  const t = state.transform;
+function drawFrame(ctx: Ctx, look: Look, geometry: PanelGeometry): void {
+  const { t } = look;
   const frame = geometry.frame;
   if (!frame) return;
 
@@ -191,7 +211,7 @@ function drawFrame(ctx: Ctx, state: PanelState, geometry: PanelGeometry): void {
     ctx.fillStyle = INK;
     ctx.fill();
   }
-  const holeR = (state.view!.panel.settings.tabs.holeDiameter / 2) * t.scale;
+  const holeR = (look.holeDiameter / 2) * t.scale;
   if (holeR >= 1.2) {
     for (const tab of geometry.tabs) {
       for (const h of tab.holes) {
@@ -239,21 +259,21 @@ function drawFrame(ctx: Ctx, state: PanelState, geometry: PanelGeometry): void {
   }
 
   const at = worldToScreen(t, { x: frame.outer.minX, y: frame.outer.minY });
-  label(ctx, `${mm(frame.width)} × ${mm(frame.height)} mm`, at.x, at.y + 14, 12, true, 'left');
+  look.caption.forEach((line, i) => label(ctx, line, at.x, at.y + 14 + i * 17, 12, i === 0, 'left'));
 }
 
 function drawInstance(
   ctx: Ctx,
-  state: PanelState,
+  look: Look,
   inst: PlacedInstance,
   level: 'error' | 'warning' | undefined,
   stale: boolean,
   colour: string,
 ): void {
-  const t = state.transform;
-  const off = dragOffset(inst.id, state.drag);
+  const { t } = look;
+  const off = dragOffset(inst.id, look.drag);
   const moving = off.x !== 0 || off.y !== 0;
-  const selected = state.selection === inst.id;
+  const selected = look.selection === inst.id;
   const outline = shift(inst.outline, off);
   const box = shiftBox(inst.bbox, off);
 
@@ -354,6 +374,53 @@ function drawInstance(
   }
 }
 
+/**
+ * A scenario that is not one panel: one plate per order, side by side. Each is
+ * drawn on top of two offset outlines, a stack, because an order is several of
+ * the same piece.
+ */
+function drawScenario(ctx: Ctx, state: PanelState, scenario: Scenario): void {
+  const view = state.view!;
+  const keys = view.panel.sources.map((s) => s.key);
+  const places = platePlaces(scenario.orders.map((o) => o.plate));
+  scenario.orders.forEach((order, i) => {
+    const frame = order.plate.frame;
+    if (!frame) return;
+    const t = moved(state.transform, places[i]!.offset);
+    const made = order.priced.order.pcbQty;
+    const assembled = order.priced.order.assembly?.qty ?? 0;
+
+    for (const step of [2, 1]) {
+      const back = { ...t, originPxX: t.originPxX + step * 7, originPxY: t.originPxY - step * 7 };
+      trace(ctx, back, corners(frame.outer));
+      ctx.fillStyle = PAPER;
+      ctx.fill();
+      stroke(ctx, 1);
+    }
+    trace(ctx, t, corners(frame.outer));
+    ctx.fillStyle = PAPER;
+    ctx.fill();
+
+    const look: Look = {
+      t,
+      holeDiameter: view.panel.settings.tabs.holeDiameter,
+      drag: null,
+      selection: null,
+      caption: [
+        `Order ${i + 1} of ${scenario.orders.length}: ${pieces(made, order.panel)}, ${assembled} assembled`,
+        `${order.panel ? 'panel' : 'single board'} ${mm(frame.width)} × ${mm(frame.height)} mm`,
+      ],
+    };
+    drawFrame(ctx, look, order.plate);
+    for (const inst of order.plate.instances) {
+      drawInstance(ctx, look, inst, undefined, false, boardColor(keys, inst.source));
+    }
+    // How many of this piece, where the eye lands first.
+    const corner = worldToScreen(t, { x: frame.outer.minX, y: frame.outer.maxY });
+    label(ctx, `× ${made}`, corner.x, corner.y - 34, 22, true, 'left');
+  });
+}
+
 /** Draw the plate. `width` and `height` are the canvas size in CSS pixels. */
 export function drawPlate(ctx: Ctx, state: PanelState, width: number, height: number): void {
   ctx.setLineDash([]);
@@ -362,9 +429,28 @@ export function drawPlate(ctx: Ctx, state: PanelState, width: number, height: nu
   const view = state.view;
   if (!view) return;
 
+  const shown = state.preview ? state.quote?.scenarios.find((s) => s.id === state.preview) : undefined;
+  if (shown) {
+    drawScenario(ctx, state, shown);
+    return;
+  }
+
   const { geometry } = view;
   drawLimits(ctx, state, geometry, width, height);
-  drawFrame(ctx, state, geometry);
+  const order = view.quote.order;
+  const look: Look = {
+    t: state.transform,
+    holeDiameter: view.panel.settings.tabs.holeDiameter,
+    drag: state.drag,
+    selection: state.selection,
+    caption: geometry.frame
+      ? [
+          `${mm(geometry.frame.width)} × ${mm(geometry.frame.height)} mm`,
+          ...(order ? [`to meet the need: ${pieces(order.pcbQty, order.piece.boards > 1)}, ${order.assembly?.qty ?? 0} assembled`] : []),
+        ]
+      : [],
+  };
+  drawFrame(ctx, look, geometry);
 
   const worst = worstByInstance(view.issues);
   const stale = new Set(view.sources.filter((s) => s.stale).map((s) => s.key));
@@ -373,8 +459,8 @@ export function drawPlate(ctx: Ctx, state: PanelState, width: number, height: nu
   const dragged = state.drag?.id;
   for (const inst of geometry.instances) {
     if (inst.id === dragged) continue;
-    drawInstance(ctx, state, inst, worst.get(inst.id), stale.has(inst.source), boardColor(keys, inst.source));
+    drawInstance(ctx, look, inst, worst.get(inst.id), stale.has(inst.source), boardColor(keys, inst.source));
   }
   const top = geometry.instances.find((i) => i.id === dragged);
-  if (top) drawInstance(ctx, state, top, worst.get(top.id), stale.has(top.source), boardColor(keys, top.source));
+  if (top) drawInstance(ctx, look, top, worst.get(top.id), stale.has(top.source), boardColor(keys, top.source));
 }

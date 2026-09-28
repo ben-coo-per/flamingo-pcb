@@ -55,7 +55,7 @@ body {
 
 #panel-app {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 420px;
+  grid-template-columns: minmax(0, 1fr) 440px;
   grid-template-rows: 32px minmax(0, 1fr) 24px;
   grid-template-areas:
     'bar bar'
@@ -135,6 +135,41 @@ body {
   border: 1px dashed var(--ink);
   background: var(--paper);
   white-space: pre-line;
+}
+
+/* A scenario is on show in place of the panel. */
+.banner {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 8px 8px 12px;
+  border: 2px solid var(--ink);
+  background: var(--paper);
+  z-index: 5;
+}
+
+.banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.banner-text strong {
+  display: block;
+  font-size: 13px;
+}
+
+.banner .btn {
+  width: auto;
+  white-space: nowrap;
+}
+
+.banner .btn kbd {
+  float: none;
+  margin-left: 10px;
 }
 
 /* ---- context menu -------------------------------------------------------- */
@@ -465,8 +500,13 @@ button.chip-instance:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-right: 10px;
+  margin-right: 12px;
   white-space: nowrap;
+}
+
+.got-n {
+  min-width: 10px;
+  text-align: right;
 }
 
 .pips {
@@ -659,7 +699,8 @@ table.lines tr.order td {
 .sc-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 12px;
+  align-items: center;
+  gap: 2px 10px;
   margin-bottom: 6px;
   font-size: 10px;
 }
@@ -677,9 +718,9 @@ table.lines tr.order td {
 
 .scenario {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) 104px;
+  grid-template-columns: 16px minmax(0, 1fr) 100px;
   column-gap: 6px;
-  padding: 7px 6px 7px 4px;
+  padding: 8px 6px 8px 4px;
   border: 1px solid transparent;
   border-top: 1px dotted var(--ink);
   cursor: pointer;
@@ -697,7 +738,7 @@ table.lines tr.order td {
 
 .scenario.selected {
   border: 2px solid var(--ink);
-  padding: 6px 5px 6px 3px;
+  padding: 7px 5px 7px 3px;
 }
 
 .scenario.selected + .scenario,
@@ -707,44 +748,56 @@ table.lines tr.order td {
 
 .sc-rank {
   font-weight: 700;
+  line-height: 20px;
 }
 
 .sc-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font-weight: 700;
 }
 
-.sc-name .tag {
-  margin-left: 6px;
+.sc-icon {
+  flex: none;
 }
 
-.sc-order {
+/* Label on the left, fact on the right: each panel / order / you get. */
+.sc-facts {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 4px 6px;
+  align-items: center;
+  margin: 6px 0 0;
+}
+
+.sc-facts dt {
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.sc-facts dd {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 3px;
-  margin-top: 3px;
+  margin: 0;
+  min-width: 0;
 }
 
-.sc-qty {
-  margin-left: 3px;
+/* Running text, so the punctuation sits where punctuation sits. */
+.sc-facts dd.sc-qty {
+  display: block;
   font-size: 11px;
   white-space: nowrap;
 }
 
-.sc-got {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  margin-top: 5px;
+.sc-qty .chip {
+  margin-right: 5px;
 }
 
-.sc-warn {
-  margin-left: auto;
-  padding: 0 4px;
-  border: 1px solid var(--ink);
-  font-size: 10px;
-  line-height: 13px;
-  cursor: help;
+.sc-qty .sep {
+  padding-right: 5px;
 }
 
 .sc-cost {
@@ -754,6 +807,7 @@ table.lines tr.order td {
 .sc-total {
   font-size: 14px;
   font-weight: 700;
+  line-height: 20px;
 }
 
 .sc-per {
@@ -766,6 +820,16 @@ table.lines tr.order td {
   border-bottom: 1px solid var(--ink);
 }
 
+.sc-warn {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 0 4px;
+  border: 1px solid var(--ink);
+  font-size: 10px;
+  line-height: 14px;
+  cursor: help;
+}
+
 .detail {
   margin-top: 10px;
   padding: 8px;
@@ -773,9 +837,16 @@ table.lines tr.order td {
 }
 
 .detail h3 {
-  margin: 0 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 4px;
   font-size: 12px;
   font-weight: 700;
+}
+
+.detail .meaning {
+  margin: 0 0 8px;
 }
 
 .detail .msg {

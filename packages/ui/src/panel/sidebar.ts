@@ -8,7 +8,7 @@
  * sentence is behind a disclosure, never in the row.
  */
 
-import type { CostLine, PanelView, PieceCount, Received, Scenario, ScenarioLine } from '@flamingo/panel';
+import type { CostLine, PanelView, PieceCount, Received, Scenario, ScenarioKind, ScenarioLine } from '@flamingo/panel';
 import { boardColor } from '@flamingo/panel';
 import type { BoardFile } from './api.js';
 import {
@@ -17,10 +17,12 @@ import {
   ESTIMATE_MARK,
   LEVEL_LABEL,
   SCENARIO_LABEL,
+  SCENARIO_MEANING,
   composition,
   escapeHtml,
   groupCost,
   groupIssues,
+  loadsOntoPanel,
   mm,
   money,
   pips,
@@ -61,6 +63,37 @@ export interface SidebarActions {
   addBoard(path: string): void;
 }
 
+/**
+ * A scenario's kind as a small drawing: what is fabricated, seen from above.
+ * Solid outlines are cut, dashed lines are printed, short bars are tabs.
+ */
+const SCENARIO_ICON: Record<ScenarioKind, string> = {
+  // Two boards, each on its own.
+  separate:
+    '<rect x="1.5" y="4.5" width="14" height="11"/><rect x="21.5" y="7.5" width="9" height="8"/>',
+  // Two panels, each with copies of one board.
+  'own-panels':
+    '<rect x="1.5" y="2.5" width="13" height="15"/><rect x="4" y="5" width="8" height="4"/><rect x="4" y="11" width="8" height="4"/>' +
+    '<rect x="18.5" y="2.5" width="12" height="15"/><rect x="21" y="5" width="7" height="4"/><rect x="21" y="11" width="7" height="4"/>',
+  // One panel: rails, boards with gaps between them, tabs across the gaps.
+  merged:
+    '<rect x="1.5" y="1.5" width="29" height="17"/><line x1="1.5" y1="4.5" x2="30.5" y2="4.5"/><line x1="1.5" y1="15.5" x2="30.5" y2="15.5"/>' +
+    '<rect x="4" y="6.5" width="12" height="7"/><rect x="19" y="6.5" width="9" height="7"/>' +
+    '<line x1="16" y1="10" x2="19" y2="10" stroke-width="2.5"/>',
+  // One outline, printed lines between the boards.
+  'silk-divider':
+    '<rect x="1.5" y="2.5" width="29" height="15"/><line x1="17" y1="2.5" x2="17" y2="17.5" stroke-dasharray="2 1.5"/>' +
+    '<line x1="17" y1="10" x2="30.5" y2="10" stroke-dasharray="2 1.5"/>',
+  // Two panels of different make.
+  split:
+    '<rect x="1.5" y="2.5" width="13" height="15"/><rect x="4" y="5" width="8" height="10"/>' +
+    '<rect x="18.5" y="2.5" width="12" height="15" stroke-width="2.5"/><rect x="21" y="5.5" width="7" height="9"/>',
+};
+
+function icon(kind: ScenarioKind): string {
+  return `<svg class="sc-icon" viewBox="0 0 32 20" width="32" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.2">${SCENARIO_ICON[kind]}</svg>`;
+}
+
 function flag(estimate: boolean): string {
   return estimate ? `<span class="est" title="${escapeHtml(ESTIMATE_LEGEND_LONG)}">${ESTIMATE_MARK}</span>` : '';
 }
@@ -88,7 +121,7 @@ function receivedMarks(r: Received, colour: string): string {
       '</span>';
   return (
     `<span class="got" style="--board:${colour}" title="${escapeHtml(receivedLong(r))}" data-board="${escapeHtml(r.key)}" data-got="${r.assembled}" data-need="${r.needed}">` +
-    `<b>${escapeHtml(r.key)}</b>${body}</span>`
+    `<b>${escapeHtml(r.key)}</b><span class="got-n">${r.assembled}</span>${body}</span>`
   );
 }
 
@@ -344,36 +377,48 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
             const tags = scenarioTags(s)
               .map((t) => `<span class="tag">${escapeHtml(t)}</span>`)
               .join('');
+            // What is on one piece, and how many pieces: a pair of lines per order.
             const orders = s.orders
               .map((o) => {
                 const made = o.priced.order.pcbQty;
                 const asm = o.priced.order.assembly?.qty ?? 0;
-                return (
-                  `<div class="sc-order">${compositionChips(o.counts, keys, o.panel)}` +
-                  `<span class="sc-qty" title="${made} ${o.panel ? 'panels' : 'boards'} made, ${asm} assembled">` +
-                  `<b>${made}</b> made · <b>${asm}</b> assembled</span></div>`
-                );
+                const spare = made - asm;
+                const what = compositionChips(o.counts, keys, o.panel);
+                // Of the pieces made, some are assembled and the rest arrive bare.
+                const qty =
+                  `<b>${made}</b> ${o.panel ? 'panel' : 'board'}${made === 1 ? '' : 's'}<span class="sep">:</span>` +
+                  (asm > 0 ? `<b>${asm}</b> assembled` : 'all bare') +
+                  (spare > 0 && asm > 0 ? `<span class="sep">,</span><b>${spare}</b> bare` : '');
+                return o.panel
+                  ? `<dt>panel</dt><dd class="sc-panel">${what}</dd><dt>order</dt><dd class="sc-qty">${qty}</dd>`
+                  : `<dt>order</dt><dd class="sc-qty">${what}${qty}</dd>`;
               })
               .join('');
+            const shows = loadsOntoPanel(s) ? 'Loads this panel onto the plate' : 'Shows these orders on the plate; your panel stays as it is';
             return (
-              `<div class="scenario${s.id === state.scenario ? ' selected' : ''}" data-scenario="${escapeHtml(s.id)}" role="button" tabindex="0" title="${escapeHtml(`${s.title}: ${s.summary}`)}">` +
+              `<div class="scenario${s.id === state.scenario ? ' selected' : ''}" data-scenario="${escapeHtml(s.id)}" role="button" tabindex="0" title="${escapeHtml(`${SCENARIO_MEANING[s.kind]}\n${shows}.`)}">` +
               `<span class="sc-rank">${i + 1}</span>` +
               `<div class="sc-main">` +
-              `<div class="sc-name">${SCENARIO_LABEL[s.kind]}${tags}</div>` +
-              orders +
-              `<div class="sc-got">${s.received.map((r) => receivedMarks(r, boardColor(keys, r.key))).join('')}` +
-              (s.warnings.length > 0 ? `<span class="sc-warn" title="${escapeHtml(s.warnings.join('\n'))}">${s.warnings.length} !</span>` : '') +
-              `</div></div>` +
+              `<div class="sc-name">${icon(s.kind)}<span>${SCENARIO_LABEL[s.kind]}</span>${tags}</div>` +
+              `<dl class="sc-facts">${orders}` +
+              `<dt>you get</dt><dd class="sc-got">${s.received.map((r) => receivedMarks(r, boardColor(keys, r.key))).join('')}</dd></dl>` +
+              `</div>` +
               `<div class="sc-cost"><div class="sc-total">${money(s.total)}</div>` +
               `<div class="sc-per">${money(s.costPerNeededBoard)} / board ${flag(s.estimate)}</div>` +
-              `<span class="meter"><i style="width:${Math.round((s.total / dearest) * 100)}%"></i></span></div>` +
-              `</div>`
+              `<span class="meter"><i style="width:${Math.round((s.total / dearest) * 100)}%"></i></span>` +
+              (s.warnings.length > 0
+                ? `<div class="sc-warn" title="${escapeHtml(s.warnings.join('\n'))}">${s.warnings.length} note${s.warnings.length === 1 ? '' : 's'}</div>`
+                : '') +
+              `</div></div>`
             );
           })
           .join('');
+        const anyBare = quote.scenarios.some((s) => s.orders.some((o) => o.counts.some((c) => c.populated > 0 && c.populated < c.total)));
         els.scenarioList.innerHTML =
-          `<div class="sc-legend"><span><i class="pip pip-met"></i> needed</span><span><i class="pip pip-over"></i> extra</span>` +
-          `<span><span class="chip chip-key">S ×1</span> populated</span><span><span class="chip chip-key chip-bare">S ×1</span> bare</span></div>` +
+          `<div class="sc-legend"><b>you get</b> = assembled boards delivered:` +
+          `<span><i class="pip pip-met"></i> one you need</span><span><i class="pip pip-over"></i> one extra</span>` +
+          (anyBare ? `<span><span class="chip chip-key chip-bare">S ×1</span> left bare</span>` : '') +
+          `</div>` +
           `<div class="scenarios">${rows}</div>${rejected}`;
       },
     );
@@ -386,7 +431,8 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
       }
       els.scenarioDetail.innerHTML =
         `<div class="detail" id="scenario-lines">` +
-        `<h3>${SCENARIO_LABEL[selected.kind]}</h3>` +
+        `<h3>${icon(selected.kind)}${SCENARIO_LABEL[selected.kind]}</h3>` +
+        `<p class="meaning">${escapeHtml(SCENARIO_MEANING[selected.kind])}</p>` +
         (state.scenarioMsg ? `<div class="msg${state.scenarioMsg.problem ? ' msg-problem' : ''}">${escapeHtml(state.scenarioMsg.text)}</div>` : '') +
         costGroups(selected.lines, selected.total, selected.estimate, 'scenario', open) +
         notesBlock(selected.warnings, 'note', 'scenario/notes', open) +
