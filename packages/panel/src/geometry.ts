@@ -30,6 +30,8 @@ import { SIDES } from './types.js';
 const EPS = 0.01;
 /** Tabs keep this far from the end of the straight stretch they sit on. */
 const TAB_CORNER_MARGIN = 1;
+/** Two tabs on one edge are at least this far apart. */
+const TAB_MIN_GAP = 2;
 /** Tabs and rails overlap what they join by this much so the union is one piece. */
 const WELD = 0.01;
 
@@ -310,8 +312,8 @@ export function tabCentres(lo: number, hi: number, width: number, pitch: number)
   if (usable < width) return [(lo + hi) / 2];
   let n = Math.max(1, Math.ceil(len / pitch));
   // One tab in the middle of an edge lets the board rock: give it two as soon
-  // as two fit with room between them.
-  if (n === 1 && len >= 3 * width) n = 2;
+  // as two fit, clear of the corners and with a gap between them.
+  if (n === 1 && len >= 2 * width + 2 * TAB_CORNER_MARGIN + TAB_MIN_GAP - EPS) n = 2;
   while (n > 1 && usable / n < width) n--;
   const out: number[] = [];
   for (let i = 0; i < n; i++) out.push(lo + (len * (i + 0.5)) / n);

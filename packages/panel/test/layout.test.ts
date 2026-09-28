@@ -143,6 +143,22 @@ describe('arrange', () => {
     expect(fixed.instances.every((i) => i.rotation === 0)).toBe(true);
   });
 
+  it('arranging again and again never leaves a board without tabs', () => {
+    // Boards added one at a time, arranged after each, as the + button does:
+    // rotations pile up from one arrange to the next.
+    const conn = plainBoard('conn', 22, 16);
+    conn.components.push(comp('J1', EDGE_CONN, 0.5, 8, { rotation: 270 })); // overhangs W
+    const c = resolved('C', conn);
+    let panel = panelOf([a, c], [['A', 0, 0]]);
+    for (let n = 1; n <= 7; n++) {
+      panel = applyAll(panel, { op: 'addInstance', source: 'C' });
+      panel = arranged(panel, [a, c], arrange(panel, [a, c], LIMITS));
+      const g = computeGeometry(panel, [a, c]);
+      expect([...tabCounts(g)].filter(([, t]) => t === 0).map(([id]) => id), `after adding C${n}`).toEqual([]);
+      expect(errors(panel, [a, c]), `after adding C${n}`).toEqual([]);
+    }
+  });
+
   it('keeps two overhanging parts clear of each other', () => {
     const conn = plainBoard('conn', 22, 16);
     conn.components.push(comp('J1', EDGE_CONN, 11, 0.5)); // overhangs S by 1.5 mm
@@ -357,7 +373,8 @@ describe('rails, tabs, fiducials and tooling holes', () => {
 
   it('spreads tabs along an edge', () => {
     expect(tabCentres(0, 12, 5, 50)).toEqual([6]);
-    expect(tabCentres(0, 16, 5, 50)).toEqual([4, 12]);
+    expect(tabCentres(0, 13, 5, 50)).toEqual([6.5]);
+    expect(tabCentres(0, 14, 5, 50)).toEqual([3.5, 10.5]);
     expect(tabCentres(0, 40, 5, 50)).toEqual([10, 30]);
     expect(tabCentres(0, 120, 5, 50)).toEqual([20, 60, 100]);
     expect(tabCentres(0, 4, 5, 50)).toEqual([]);
