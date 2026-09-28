@@ -1,0 +1,543 @@
+/*
+ * Flamingo panel view.
+ *
+ * Monochrome. Structure comes from spacing, weight and line style; state is
+ * carried by line weight, dashes, hatching and labels. No colour, no shadows,
+ * no gradients, no transitions. Desktop only.
+ */
+
+@font-face {
+  font-family: 'Space Mono';
+  src: url('/fonts/SpaceMono-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Space Mono';
+  src: url('/fonts/SpaceMono-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+}
+
+:root {
+  --ink: #000;
+  --paper: #fff;
+  --mono: 'Space Mono', 'Menlo', 'Courier New', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: hidden;
+}
+
+#panel-app {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  grid-template-rows: 32px minmax(0, 1fr) 24px;
+  grid-template-areas:
+    'bar bar'
+    'plate side'
+    'status status';
+  width: 100%;
+  height: 100%;
+}
+
+/* ---- bars ---------------------------------------------------------------- */
+
+.bar {
+  grid-area: bar;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--ink);
+}
+
+.bar-app {
+  font-weight: 700;
+}
+
+.bar-view {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.bar-name {
+  font-weight: 700;
+}
+
+.bar-spacer {
+  flex: 1;
+}
+
+.bar-link {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.status {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 0 12px;
+  border-top: 1px solid var(--ink);
+  white-space: nowrap;
+}
+
+/* ---- plate --------------------------------------------------------------- */
+
+.plate {
+  grid-area: plate;
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+#plate-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: default;
+}
+
+.plate-empty {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 520px;
+  padding: 16px;
+  border: 1px dashed var(--ink);
+  background: var(--paper);
+  white-space: pre-line;
+}
+
+/* ---- context menu -------------------------------------------------------- */
+
+.menu {
+  position: absolute;
+  min-width: 190px;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+  padding: 2px 0;
+  z-index: 10;
+}
+
+.menu-title {
+  padding: 3px 10px;
+  font-weight: 700;
+  border-bottom: 1px solid var(--ink);
+}
+
+.menu button {
+  display: block;
+  width: 100%;
+  padding: 4px 10px;
+  border: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu button:hover:not(:disabled),
+.menu button:focus-visible {
+  background: var(--ink);
+  color: var(--paper);
+  outline: none;
+}
+
+.menu button:disabled {
+  text-decoration: line-through;
+  cursor: default;
+}
+
+/* ---- sidebar ------------------------------------------------------------- */
+
+.side {
+  grid-area: side;
+  border-left: 1px solid var(--ink);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.block {
+  padding: 12px;
+  border-bottom: 1px solid var(--ink);
+}
+
+.block h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.tag {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px dashed var(--ink);
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  vertical-align: 1px;
+}
+
+.count {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.hint {
+  white-space: pre-line;
+}
+
+.btn {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 2px solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled),
+.btn:focus-visible {
+  background: var(--ink);
+  color: var(--paper);
+  outline: none;
+}
+
+.btn:disabled {
+  border-style: dashed;
+  font-weight: 400;
+  cursor: default;
+}
+
+.btn kbd {
+  float: right;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  font: inherit;
+  font-weight: 400;
+}
+
+.msg {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--ink);
+  white-space: pre-line;
+}
+
+.msg-problem {
+  border-width: 2px;
+}
+
+.msg a {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+/* ---- boards -------------------------------------------------------------- */
+
+.board {
+  padding: 8px 0;
+  border-top: 1px dotted var(--ink);
+}
+
+.board:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.board-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.board-key {
+  font-weight: 700;
+  min-width: 22px;
+}
+
+.board-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-meta {
+  margin: 1px 0 6px 30px;
+}
+
+.board-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  margin-left: 30px;
+}
+
+.board-controls .count-control {
+  flex: 0 0 100%;
+}
+
+.board-controls label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.stepper {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--ink);
+}
+
+.stepper button {
+  width: 22px;
+  border: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.stepper button:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.stepper button:disabled {
+  text-decoration: line-through;
+  cursor: default;
+}
+
+.stepper output {
+  min-width: 28px;
+  padding: 0 4px;
+  border-left: 1px solid var(--ink);
+  border-right: 1px solid var(--ink);
+  text-align: center;
+}
+
+input.qty {
+  width: 52px;
+  padding: 1px 4px;
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+
+input.qty:focus {
+  outline: 2px solid var(--ink);
+  outline-offset: 0;
+}
+
+/* ---- cost ---------------------------------------------------------------- */
+
+.total {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.total-amount {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.order-line {
+  margin-bottom: 8px;
+}
+
+table.lines {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+table.lines td {
+  padding: 1px 0;
+  vertical-align: top;
+}
+
+table.lines td.amount {
+  padding-left: 8px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+table.lines td.flag {
+  width: 34px;
+  padding-left: 6px;
+  white-space: nowrap;
+}
+
+table.lines tr.sum td {
+  padding-top: 3px;
+  border-top: 1px solid var(--ink);
+  font-weight: 700;
+}
+
+table.lines tr.group td {
+  padding-top: 6px;
+  font-weight: 700;
+}
+
+.received {
+  margin-top: 8px;
+}
+
+.notes {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notes li {
+  padding-left: 12px;
+  text-indent: -12px;
+}
+
+.legend {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dotted var(--ink);
+}
+
+/* ---- scenarios ----------------------------------------------------------- */
+
+table.scenarios {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+table.scenarios th {
+  padding: 2px 4px 2px 0;
+  border-bottom: 1px solid var(--ink);
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+}
+
+table.scenarios td {
+  padding: 4px 4px 4px 0;
+  border-bottom: 1px dotted var(--ink);
+  vertical-align: top;
+}
+
+table.scenarios th.num,
+table.scenarios td.num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+table.scenarios tbody tr {
+  cursor: pointer;
+}
+
+table.scenarios tbody tr:hover td {
+  text-decoration: underline;
+}
+
+table.scenarios tbody tr.selected td {
+  border-top: 2px solid var(--ink);
+  border-bottom: 2px solid var(--ink);
+  font-weight: 700;
+}
+
+table.scenarios tbody tr.selected td:first-child {
+  border-left: 2px solid var(--ink);
+  padding-left: 4px;
+}
+
+table.scenarios tbody tr.selected td:last-child {
+  border-right: 2px solid var(--ink);
+}
+
+.scenario-sub {
+  font-weight: 400;
+}
+
+.detail {
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid var(--ink);
+}
+
+.detail h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* ---- issues -------------------------------------------------------------- */
+
+.issue {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px dotted var(--ink);
+}
+
+.issue:first-child {
+  border-top: 0;
+}
+
+.issue-level {
+  flex: 0 0 56px;
+  font-size: 10px;
+  line-height: 18px;
+  text-align: center;
+  align-self: flex-start;
+}
+
+.issue-error .issue-level {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 700;
+}
+
+.issue-warning .issue-level {
+  border: 1px solid var(--ink);
+  font-weight: 700;
+}
+
+.issue-info .issue-level {
+  border: 1px dotted var(--ink);
+}
+
+.issue-error .issue-text {
+  font-weight: 700;
+}
