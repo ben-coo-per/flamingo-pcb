@@ -248,6 +248,18 @@ body {
   vertical-align: 1px;
 }
 
+.tag-btn {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.tag-btn:hover:not(:disabled),
+.tag-btn:focus-visible {
+  border-style: solid;
+}
+
 .count {
   font-weight: 400;
   text-transform: none;

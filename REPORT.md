@@ -662,7 +662,7 @@ thing and did not add a control.
 | How do boards get onto a panel from the browser? | They do not. An empty panel says how to add them over MCP or the CLI. |
 | Should a board be removable from the list? | No control. Count 0 leaves the board listed; `panel_remove_board` removes it. |
 | Should panel settings (rails, spacing, separation, layers) be editable in the view? | No. `panel_set_settings`. Loading a scenario does change them. |
-| Should a stale board have a "refresh" button? | No. It is tagged and listed; `panel_refresh_boards` clears it. |
+| Should a stale board have a "refresh" button? | Yes, since 2026-09-29 at Ben's request: the `stale ↻` tag on a board's row is a button that accepts the board as it is on disk (`/api/panel/refresh`, one undo step). `panel_refresh_boards` does the same over MCP. |
 | Should a stackup mismatch offer a "promote" button? | No. The message names the fix. |
 | Should the ranking objective be selectable? | No. Always total cost. |
 | Should Export be able to waive errors? | No. Refused with reasons. |

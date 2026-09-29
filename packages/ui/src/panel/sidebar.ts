@@ -71,6 +71,7 @@ export interface SidebarActions {
   selectOption(id: string): void;
   selectInstance(id: string): void;
   addBoard(path: string): void;
+  refreshBoard(key: string): void;
 }
 
 /**
@@ -241,6 +242,10 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
     input.value = String(value);
     actions.setQuantity(input.dataset.board!, input.dataset.field as 'needed' | 'niceToHave', value);
   });
+  els.boardList.addEventListener('click', (ev) => {
+    const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-refresh]');
+    if (btn && !btn.disabled) actions.refreshBoard(btn.dataset.refresh!);
+  });
   els.boardAdd.addEventListener('click', (ev) => {
     const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-path]');
     if (btn && !btn.disabled) actions.addBoard(btn.dataset.path!);
@@ -287,8 +292,13 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
           const size = s.geometry
             ? `${mm(s.geometry.width)} × ${mm(s.geometry.height)} mm · ${s.geometry.copperLayers}-layer`
             : escapeHtml(s.error ?? 'not resolved');
-          const tags = [s.stale ? '<span class="tag">stale</span>' : '', s.error ? '<span class="tag">missing</span>' : ''].join(' ');
           const k = escapeHtml(s.key);
+          const tags = [
+            s.stale
+              ? `<button type="button" class="tag tag-btn" data-refresh="${k}" title="This board changed on disk since it was added. The panel already uses it as it is now; click to accept the change and clear the warning">stale ↻</button>`
+              : '',
+            s.error ? '<span class="tag">missing</span>' : '',
+          ].join(' ');
           return (
             `<div class="board" data-key="${k}" style="--board:${boardColor(keys, s.key)}">` +
             `<div class="board-head"><span class="swatch">${k}</span><span class="board-name" title="${escapeHtml(s.path)}">${escapeHtml(s.name)}</span>${tags}<span class="board-meta">${size}</span></div>` +

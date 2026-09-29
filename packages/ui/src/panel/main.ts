@@ -250,6 +250,13 @@ async function addBoardToPanel(path: string): Promise<void> {
   store.set({ busy: false, boardMsg: isError(added) ? { text: added.error, problem: true } : null });
 }
 
+async function refreshBoard(key: string): Promise<void> {
+  if (store.get().busy) return;
+  store.set({ busy: true, boardMsg: null });
+  const r = await api.refresh([key]);
+  store.set({ busy: false, boardMsg: isError(r) ? { text: r.error, problem: true } : null });
+}
+
 function removeSelected(): void {
   const id = store.get().selection;
   if (!id) return;
@@ -567,6 +574,7 @@ const renderSidebar = createSidebar(
     selectOption: (id) => void selectOption(id),
     selectInstance: (id) => store.set({ selection: id, menu: null }),
     addBoard: (path) => void addBoardToPanel(path),
+    refreshBoard: (key) => void refreshBoard(key),
   },
 );
 
