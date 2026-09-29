@@ -34,6 +34,8 @@ export const api = {
   rotate: (id: string) => post<{ ok: true }>('/api/panel/rotate', { id, by: 90 }),
   duplicate: (id: string) => post<{ ok: true; created: string[] }>('/api/panel/duplicate', { id }),
   applyScenario: (id: string) => post<{ ok: true; loaded: boolean }>('/api/panel/apply-scenario', { id }),
+  /** Accept source boards as they are on disk now, which clears `stale`. */
+  refresh: (boards: string[]) => post<{ ok: true; refreshed: string[] }>('/api/panel/refresh', { boards }),
 
   async quote(): Promise<QuoteResult | ApiError> {
     try {
