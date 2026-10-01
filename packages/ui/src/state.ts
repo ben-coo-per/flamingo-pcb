@@ -8,7 +8,7 @@
  * module has no dependency on canvas/DOM.
  */
 
-import type { Board, LayerId, Point, RatLine } from '@flamingo/engine';
+import type { Board, CheckLevel, LayerId, Point, RatLine } from '@flamingo/engine';
 import type { EditTarget } from './hit-test.js';
 import type { RouteStatus } from './ws.js';
 
@@ -70,9 +70,13 @@ export interface AppState {
   layerVisibility: Record<LayerKey, boolean>;
   /** WebSocket connection status for the status bar. */
   connected: boolean;
-  /** Violation locations from the last "Run DRC" (panels.ts); drawn as red
-   * rings by renderer.ts. Persist until the next run. */
-  drcMarkers: Point[];
+  /** Finding locations from the last checks run (checks/drawer.ts), drawn
+   * as rings by renderer.ts in their level's colour. Persist until the next
+   * run or "Clear markers". */
+  checkMarkers: CheckMarker[];
+  /** Key of the finding hovered or selected in the Checks drawer: its ring is
+   * drawn heavier. Null when none. */
+  checkMarkerFocus: string | null;
   /** Cursor position in world mm, for the status bar readout. Null when the
    * pointer is outside the canvas. */
   cursorMm: Point | null;
@@ -96,6 +100,13 @@ export interface AppState {
   measureMm: number | null;
   /** Latest autoroute status broadcast from the server, or null when no route is/has been running this session. */
   routeStatus: RouteStatus | null;
+}
+
+/** One check finding's ring on the canvas. `key` is checks/model.ts findingKey. */
+export interface CheckMarker {
+  at: Point;
+  level: CheckLevel;
+  key: string;
 }
 
 export const MIN_SCALE = 0.5;
@@ -122,7 +133,8 @@ function initialState(): AppState {
     view: { scale: 10, originPxX: 0, originPxY: 0, flipped: false },
     layerVisibility: { [SILK_KEY]: true, [RATSNEST_KEY]: true, [ZONES_KEY]: true, [LABEL_PADS_KEY]: true, [LABEL_NETS_KEY]: true, [DIMS_KEY]: true },
     connected: false,
-    drcMarkers: [],
+    checkMarkers: [],
+    checkMarkerFocus: null,
     cursorMm: null,
     hasFitOnce: false,
     activeTool: 'select',
