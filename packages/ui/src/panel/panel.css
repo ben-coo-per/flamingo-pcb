@@ -1177,6 +1177,11 @@ fieldset.cable-map textarea {
   margin-top: 4px;
 }
 
+/* "+ another end" is a small action, not a full-width button. */
+.cable-form .cable-field > .tag-btn {
+  justify-self: start;
+}
+
 .cable-check {
   margin-top: 10px;
 }

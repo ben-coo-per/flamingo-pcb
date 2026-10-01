@@ -31,7 +31,7 @@ const linksSig = (links: PanelLink[] | undefined): string => JSON.stringify(link
 
 export function createCables(root: HTMLElement, deps: CablesDeps): (state: PanelState) => void {
   root.innerHTML =
-    '<h3>Cables <span class="count" data-el="count"></span></h3>' +
+    '<h2>Cables <span class="count" data-el="count"></span></h2>' +
     '<p class="meaning">Ribbons and leads between the boards. Checking them compares the nets at both ends, pin by pin.</p>' +
     '<div class="cable-list" data-el="list"></div>' +
     '<details class="cable-add" data-el="add"><summary>Add cable</summary>' +
