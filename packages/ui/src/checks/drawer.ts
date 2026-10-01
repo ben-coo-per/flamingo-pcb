@@ -18,6 +18,7 @@ import { store } from '../state.js';
 import * as api from './api.js';
 import {
   LEVELS,
+  boardSig,
   buildMarkers,
   collect,
   countLevels,
@@ -247,10 +248,10 @@ export function createChecksDrawer(deps: ChecksDrawerDeps): ChecksDrawer {
     model.runs[name] = { status: 'running' };
     renderChips();
     publish();
-    const before = board();
+    const sig = boardSig(board());
     try {
       const result = await api.runCheck(name);
-      model.runs[name] = { status: 'done', result, at: Date.now(), board: before };
+      model.runs[name] = { status: 'done', result, at: Date.now(), sig };
     } catch (err) {
       model.runs[name] = { status: 'failed', error: err instanceof Error ? err.message : String(err) };
     }
@@ -385,7 +386,15 @@ export function createChecksDrawer(deps: ChecksDrawerDeps): ChecksDrawer {
       for (const f of g.findings) sec.appendChild(findingRow(f, groupMode === 'severity'));
       list.appendChild(sec);
     }
-    if (waived.length > 0) list.appendChild(waivedSection(waived));
+    // Waived findings follow the text filter (not the level toggles: a waived
+    // finding is listed for its waiver, whatever its level).
+    const waivedShown = filterFindings(
+      waived.map((w) => w.finding),
+      { levels: new Set(LEVELS), text: filter.text },
+    );
+    const keep = new Set(waivedShown);
+    const waivedList = waived.filter((w) => keep.has(w.finding));
+    if (waivedList.length > 0) list.appendChild(waivedSection(waivedList));
   }
 
   function findingRow(f: CheckFinding, showRule: boolean): HTMLElement {
@@ -420,7 +429,10 @@ export function createChecksDrawer(deps: ChecksDrawerDeps): ChecksDrawer {
       store.set({ checkMarkerFocus: key });
       Array.from(list.querySelectorAll('.chk-row.selected')).forEach((r) => r.classList.remove('selected'));
       row.classList.add('selected');
-      if (at) deps.focusPoint(at);
+      if (!at) return;
+      // Full width (narrow screens) hides the canvas: step aside to show it.
+      if (window.matchMedia('(max-width: 900px)').matches) close();
+      deps.focusPoint(at);
     };
     row.addEventListener('click', activate);
     row.addEventListener('keydown', (ev) => {
@@ -611,7 +623,13 @@ export function createChecksDrawer(deps: ChecksDrawerDeps): ChecksDrawer {
     p.appendChild(el('div', 'chk-subtitle', 'SPICE templates'));
     const tl = el('dl', 'chk-templates');
     for (const t of sim.templates) {
-      tl.append(el('dt', '', t.name), el('dd', '', t.description));
+      const dd = el('dd', '', t.description);
+      if (t.config) {
+        const cfg = el('div', 'chk-template-cfg');
+        cfg.append('config: ', el('code', '', t.config));
+        dd.appendChild(cfg);
+      }
+      tl.append(el('dt', '', t.name), dd);
     }
     p.appendChild(tl);
     const hint = el('div', 'chk-muted');

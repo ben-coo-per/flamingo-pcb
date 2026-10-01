@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { newBoard } from '@flamingo/engine';
 import type { Board, CheckFinding } from '@flamingo/engine';
 import {
+  boardSig,
   buildMarkers,
   collect,
   countsText,
@@ -72,7 +73,7 @@ function boardWithR1(): Board {
 function modelWith(board: Board | null, runs: Record<string, CheckFinding[]>): ChecksModel {
   const m = emptyModel(CHECKS);
   for (const [name, findings] of Object.entries(runs)) {
-    m.runs[name] = { status: 'done', result: result(findings), at: 1000, board };
+    m.runs[name] = { status: 'done', result: result(findings), at: 1000, sig: boardSig(board) };
   }
   return m;
 }
@@ -130,7 +131,11 @@ describe('model, summary and staleness', () => {
     const m = modelWith(b1, { drc: [], erc: [f('erc', 'polarity', 'error'), f('erc', 'd', 'warn')] });
     expect(summarize(m, b1)).toEqual({ text: '1 error · 1 warning', kind: 'err' });
     expect(isStale(m, b1)).toBe(false);
-    const b2 = { ...b1 };
+    // A fresh object with the same content (every websocket push) is not a change.
+    expect(isStale(m, { ...b1 })).toBe(false);
+    // Nor is a waiver: it cannot change what a check finds.
+    expect(isStale(m, { ...b1, checkWaivers: [{ rule: 'r', items: ['X'], reason: 'ok' }] })).toBe(false);
+    const b2 = { ...b1, name: 'renamed' };
     expect(isStale(m, b2)).toBe(true);
     expect(summarize(m, b2)).toEqual({ text: '1 error · 1 warning · stale since last edit', kind: 'stale' });
     expect(runText(m.runs.drc)).toBe('clean · 1.5 s');
@@ -157,8 +162,8 @@ describe('model, summary and staleness', () => {
   it('collects findings and waived findings across runs in registry order', () => {
     const m = emptyModel(CHECKS);
     const w = { finding: f('erc', 'unconnected-ic-pin', 'warn', ['J6.9']), waiver: { rule: 'unconnected-ic-pin', items: ['J6.9'], reason: 'MISO open' } };
-    m.runs.erc = { status: 'done', result: result([f('erc', 'a', 'warn')], [w]), at: 1, board: null };
-    m.runs.drc = { status: 'done', result: result([f('drc', 'b', 'error')]), at: 2, board: null };
+    m.runs.erc = { status: 'done', result: result([f('erc', 'a', 'warn')], [w]), at: 1, sig: '' };
+    m.runs.drc = { status: 'done', result: result([f('drc', 'b', 'error')]), at: 2, sig: '' };
     const { findings, waived } = collect(m);
     expect(findings.map((x) => x.check)).toEqual(['drc', 'erc']);
     expect(waived).toEqual([w]);

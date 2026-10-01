@@ -17,7 +17,7 @@ const LEVEL_ORDER: Record<CheckLevel, number> = { error: 0, warn: 1, info: 2 };
 export type CheckRun =
   | { status: 'idle' }
   | { status: 'running' }
-  | { status: 'done'; result: CheckRunResult; at: number; board: Board | null }
+  | { status: 'done'; result: CheckRunResult; at: number; sig: string }
   | { status: 'failed'; error: string };
 
 export interface ChecksModel {
@@ -146,9 +146,30 @@ export function countsText(findings: CheckFinding[]): string {
   return parts.join(' · ');
 }
 
-/** True when the board has changed since any finished run was made. */
+const sigCache = new WeakMap<Board, string>();
+
+/**
+ * What a check's result depends on, as a string: the whole board except its
+ * waivers. Waiving a finding is a board op, but it cannot change what any
+ * check finds, so it must not make the other checks' results stale. Every
+ * websocket push is a fresh object, hence a value comparison; cached per
+ * board object so it is computed once per board version.
+ */
+export function boardSig(board: Board | null): string {
+  if (!board) return '';
+  let s = sigCache.get(board);
+  if (s === undefined) {
+    const { checkWaivers: _w, ...rest } = board;
+    s = JSON.stringify(rest);
+    sigCache.set(board, s);
+  }
+  return s;
+}
+
+/** True when the board has changed (waivers aside) since any finished run was made. */
 export function isStale(model: ChecksModel, board: Board | null): boolean {
-  return Object.values(model.runs).some((r) => r.status === 'done' && r.board !== board);
+  const now = boardSig(board);
+  return Object.values(model.runs).some((r) => r.status === 'done' && r.sig !== now);
 }
 
 export interface Summary {

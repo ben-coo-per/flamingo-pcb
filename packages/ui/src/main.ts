@@ -106,10 +106,15 @@ function focusComponent(refdes: string): void {
   });
 }
 
-/** Center the view on a board point (DRC violation click-through). */
-function focusPoint(p: Point): void {
+/**
+ * Center the view on a board point (check-finding click-through). `insetRight`
+ * is how many px on the canvas's right are covered (the Checks drawer), so the
+ * point lands in the middle of what is still visible.
+ */
+function focusPoint(p: Point, insetRight = 0): void {
   const rect = canvas.getBoundingClientRect();
-  store.set({ view: centerOn(store.get().view, p, rect.width, rect.height) });
+  const w = Math.max(rect.width - insetRight, rect.width / 4);
+  store.set({ view: centerOn(store.get().view, p, w, rect.height) });
 }
 
 /** Fit the view to a net: the pads of its pins plus any routed tracks/vias. */
@@ -210,7 +215,7 @@ const panels = initPanels(
     focusNet,
     boardOpened,
     sendOp: (op) => wsApi.sendOp(op),
-    focusPoint,
+    focusPoint: (p) => focusPoint(p),
     showChecks: () => checksDrawer.showFindings(),
   },
 );
@@ -223,7 +228,16 @@ const panels = initPanels(
 
 const checksSummaryEl = document.getElementById('checks-summary');
 const checksDrawer = createChecksDrawer({
-  focusPoint,
+  focusPoint: (p) => {
+    // Only the part of the canvas the drawer overlaps is hidden (it also
+    // covers the right panel), so inset by the overlap, not its width.
+    const drawer = document.getElementById('checks-drawer');
+    const covers =
+      drawer && !drawer.hidden
+        ? Math.max(0, canvas.getBoundingClientRect().right - drawer.getBoundingClientRect().left)
+        : 0;
+    focusPoint(p, covers);
+  },
   download: downloadBlob,
   onSummary: (s) => {
     if (!checksSummaryEl) return;

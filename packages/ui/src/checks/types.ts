@@ -43,6 +43,8 @@ export interface SimSpecInfo {
 export interface SimTemplateInfo {
   name: string;
   description: string;
+  /** The config keys the template reads, as one line of help. */
+  config?: string;
 }
 
 /** GET /api/sim/specs */

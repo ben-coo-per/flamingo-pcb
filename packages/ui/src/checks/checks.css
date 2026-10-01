@@ -643,6 +643,11 @@
   margin: 0 0 0 12px;
   color: var(--ink-soft);
 }
+.chk-template-cfg {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--ink-faint);
+}
 .chk-drawer code {
   font-family: var(--mono);
   background: var(--paper-2);
