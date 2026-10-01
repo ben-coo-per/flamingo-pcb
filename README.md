@@ -153,7 +153,7 @@ node packages/server/dist/cli.js serve combo.plamingo    # prints "Flamingo v0.1
 
 A panel file is served the way a board file is: one file, one server, its view
 at `http://localhost:4242` (`FLAMINGO_PORT` to change the port), the file
-created if it is missing. The server has the 23 panel tools at `/mcp` and no
+created if it is missing. The server has the 26 panel tools at `/mcp` and no
 board tools; boards are edited in servers of their own, and the panel notices
 when one of its boards changes on disk.
 
@@ -176,7 +176,7 @@ boards + quantities → quote_order → panel_apply_scenario → panel_check →
 
 ### Panel MCP tools
 
-23 tools, served at the same `/mcp` endpoint as the 35 board tools:
+26 tools, served at the same `/mcp` endpoint as the 35 board tools:
 
 | Group | Tool | What it does |
 | --- | --- | --- |
@@ -198,6 +198,9 @@ boards + quantities → quote_order → panel_apply_scenario → panel_check →
 | | `panel_arrange` | Pack every unpinned instance into the smallest panel that fits the limits. |
 | | `panel_check` | Report everything wrong with the panel, as data. |
 | | `panel_screenshot` | Render the panel to a PNG. |
+| **Cables** | `panel_add_link` | Declare a cable between boards: `"<key>:<refdes>"` to one or more headers, straight or through a pad map, with net-name aliases. Never changes fab output. |
+| | `panel_remove_link` | Remove a cable by id. |
+| | `check_interconnect` | Check every cable pin by pin (ground to ground, same supply, no supply on a signal, names agree, no pin connected on one end only); optionally compare markdown pin tables with the copper. Findings as data. |
 | **History** | `panel_undo`, `panel_redo` | Walk the panel's op log. |
 | **Cost** | `quote_order` | Ranked order scenarios with itemized fees, plus the cost of the panel as it stands. |
 | | `panel_apply_scenario` | Load the panel a scenario implies onto the panel. |

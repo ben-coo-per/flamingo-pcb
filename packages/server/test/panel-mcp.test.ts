@@ -189,6 +189,27 @@ describe('panel MCP tools', () => {
     expect(r.text).toContain('instances: S1, M1');
   });
 
+  it('panel_add_link, check_interconnect and panel_remove_link', async () => {
+    await build();
+    expect(await ok('check_interconnect')).toContain('No links on this panel');
+    expect(await ok('panel_add_link', { from: 'S:R1', to: ['M:R1'], aliases: { A: 'B' } })).toContain('Added link L1');
+    const report = await ok('check_interconnect');
+    expect(report).toContain('L1 S:R1 -> M:R1: 2 of 2 pins agree');
+    expect(report).toContain('0 errors');
+    const bad = await call('panel_add_link', { from: 'Q:J1', to: ['M:R1'] });
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toContain('unknown source "Q"');
+    const missing = await call('check_interconnect', { docs: ['nope.md'] });
+    expect(missing.isError).toBe(true);
+    await writeFile(join(dir, 'pins.md'), '| Pin | Signal | Pin | Signal |\n|---|---|---|---|\n| 1 | X | 2 | Y |\n');
+    expect(await ok('check_interconnect', { docs: ['pins.md'] })).toContain('pin table 1 in pins.md disagrees');
+    await ok('panel_save');
+    const saved = parsePanel(await readFile(join(dir, 'combo.plamingo'), 'utf8'));
+    expect(saved.links?.[0]).toMatchObject({ id: 'L1', from: 'S:R1', to: ['M:R1'], map: 'straight', aliases: { A: 'B' } });
+    expect(await ok('panel_remove_link', { id: 'L1' })).toContain('Removed link L1');
+    expect((await call('panel_remove_link', { id: 'L1' })).isError).toBe(true);
+  });
+
   it('detects a source board edited on disk, and panel_refresh_boards accepts it', async () => {
     await build();
     expect(await ok('panel_check')).not.toContain('source-stale');
