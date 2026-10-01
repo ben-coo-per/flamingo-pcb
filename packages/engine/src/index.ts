@@ -117,3 +117,6 @@ export type { ParsedValue, ValueUnit, ValueKind } from './values.js';
 
 // Netlist-driven logic simulation with invariants.
 export * from './logic/index.js';
+
+// SPICE: netlist export from a board, and templates for recurring circuits.
+export * from './spice/index.js';
