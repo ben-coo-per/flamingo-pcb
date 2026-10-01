@@ -15,3 +15,7 @@ export { exportFab } from './exportFab.js';
 export { strokeText } from './strokefont.js';
 export type { LegendStroke } from './legend.js';
 export { legendStrokes } from './legend.js';
+export type { PrintOptions, ExportPrintResult } from './print/layout.js';
+export { exportPrint, printPages } from './print/layout.js';
+export type { Paper } from './print/pdf.js';
+export { writePdf, pageSvg, PrintPage, PAPER } from './print/pdf.js';

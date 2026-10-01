@@ -63,7 +63,7 @@ function stepsForChordError(r: number, sweepAngle: number): number {
 }
 
 /** Tessellate a full circle into >=16 points (chord-error bound applied). */
-function tessellateCircle(center: Point, radius: number): Point[] {
+export function tessellateCircle(center: Point, radius: number): Point[] {
   const n = stepsForChordError(radius, 2 * Math.PI);
   const pts: Point[] = [];
   for (let i = 0; i < n; i++) {
@@ -113,7 +113,7 @@ function tessellateArc(seg: Extract<PathSeg, { type: 'arc' }>): Point[] {
 }
 
 /** Tessellate any PathSeg into a polyline from start to end (inclusive). */
-function tessellateSeg(seg: PathSeg): Point[] {
+export function tessellateSeg(seg: PathSeg): Point[] {
   if (seg.type === 'line') return [seg.start, seg.end];
   return tessellateArc(seg);
 }
