@@ -14,7 +14,7 @@ node packages/server/dist/cli.js serve board.flamingo   # prints "Flamingo v0.1.
 
 - Serves the live UI at `http://localhost:4242`, streams board changes over
   `/ws`, and exposes the MCP endpoint at `/mcp`.
-- `.mcp.json` (repo root) wires the `flamingo` MCP server to `/mcp` — its **34
+- `.mcp.json` (repo root) wires the `flamingo` MCP server to `/mcp` — its **35
   tools are available only while the server is running**. Start the server
   first, then use the tools.
 - Port override: `FLAMINGO_PORT`. Autoroute timeout override:
@@ -53,10 +53,10 @@ and order cost" in `README.md` for every tool and the matching `flamingo panel`
 CLI commands. It is served in one of two ways:
 
 - `flamingo serve combo.plamingo`: like a board file, on its own. The panel
-  view is at `http://localhost:4242`, and `/mcp` has the 23 panel tools and
+  view is at `http://localhost:4242`, and `/mcp` has the 26 panel tools and
   **no board tools**. The file is created if it is missing.
 - `flamingo serve board.flamingo --panel combo.plamingo`: the board's server
-  with the panel added. All 57 tools at one `/mcp`; the panel view is at
+  with the panel added. All 61 tools at one `/mcp`; the panel view is at
   `/panel`. Use this when one session designs boards and panelizes them.
 
 Two servers on one machine need two ports (`FLAMINGO_PORT`); `.mcp.json` points

@@ -105,6 +105,7 @@ const TOOL_NAMES = [
   'autoroute',
   'export_fab',
   'export_step',
+  'export_print',
   'screenshot',
 ];
 
@@ -141,11 +142,26 @@ describe('MCP endpoint', () => {
     await rm(projectDir, { recursive: true, force: true });
   });
 
-  it('tools/list returns all 34 core tools', async () => {
+  it('tools/list returns all 35 core tools', async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([...TOOL_NAMES].sort());
-    expect(tools).toHaveLength(34);
+    expect(tools).toHaveLength(35);
+  });
+
+  it('export_print writes a 1:1 PDF into <projectDir>/print', async () => {
+    await client.callTool({
+      name: 'set_board_outline',
+      arguments: { shape: 'rect', width: 20, height: 10 },
+    });
+    await client.callTool({ name: 'place_component', arguments: { lcsc: 'C25804', refdes: 'R1', x: 10, y: 5 } });
+    const r = await client.callTool({ name: 'export_print', arguments: { svg: true } });
+    expect(r.isError).toBeFalsy();
+    const text = textOf(r as any);
+    expect(text).toContain(join(projectDir, 'print', 'mcptest.print.pdf'));
+    const pdf = await readFile(join(projectDir, 'print', 'mcptest.print.pdf'));
+    expect(pdf.subarray(0, 8).toString('latin1')).toBe('%PDF-1.4');
+    expect(text).toContain('.print-p1.svg');
   });
 
   it('place_component (mocked part) then get_board_state reflects it', async () => {

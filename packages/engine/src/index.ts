@@ -54,6 +54,8 @@ export {
   footprintHoles,
   allHoles,
   capsulePolygon,
+  tessellateSeg,
+  tessellateCircle,
 } from './geometry.js';
 export type { PolyGroup } from './geometry.js';
 

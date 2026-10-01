@@ -12,6 +12,7 @@ export type {
   Separation,
   PanelSource,
   PanelInstance,
+  PanelLink,
   RailSettings,
   TabSettings,
   FiducialSettings,
@@ -22,7 +23,16 @@ export type {
 } from './types.js';
 export { SIDES } from './types.js';
 
-export { PANEL_EXTENSION, DEFAULT_SETTINGS, newPanel, serializePanel, parsePanel, mergeSettings } from './panel.js';
+export {
+  PANEL_EXTENSION,
+  DEFAULT_SETTINGS,
+  newPanel,
+  serializePanel,
+  parsePanel,
+  mergeSettings,
+  parseEndpoint,
+  validateLink,
+} from './panel.js';
 
 export type { PanelOp, PanelOpResult, PanelOpError, SettingsPatch, InstancePlacement } from './ops.js';
 export { applyPanelOp, suggestSourceKey, nextInstanceId } from './ops.js';
@@ -130,3 +140,6 @@ export { quoteOrder, layoutMatches, OBJECTIVES } from './scenarios.js';
 export type { SourceView, LimitView, OrderMinimums, PanelView } from './view.js';
 
 export { BOARD_COLORS, BOARD_TINT, boardColorAt, boardColor, tint } from './colors.js';
+
+export type { NetKind, InterconnectOptions } from './interconnect.js';
+export { checkInterconnect, canonicalNet, netKind, parsePinTables } from './interconnect.js';
