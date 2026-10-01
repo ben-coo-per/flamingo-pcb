@@ -380,6 +380,40 @@
   font-weight: 400;
 }
 
+/*
+ * Finding rows are the shared finding-row component (finding-row.ts); the
+ * drawer colours its badges and gives rows the drawer's list layout.
+ */
+.chk-drawer {
+  --finding-error-bg: var(--signal-red);
+  --finding-error-ink: var(--paper);
+  --finding-warn-bg: var(--chk-warn);
+  --finding-warn-ink: var(--paper);
+  --finding-info-bg: var(--paper-3);
+  --finding-info-ink: var(--ink-soft);
+  --finding-info-border: solid;
+}
+.chk-drawer .finding-row {
+  border-top: 0;
+}
+.chk-drawer .finding-row:hover .finding-message,
+.chk-drawer .finding-row:focus-visible .finding-message {
+  text-decoration: none;
+}
+.chk-drawer .finding-rule {
+  font-weight: 400;
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+.chk-drawer .finding-item {
+  font-family: var(--mono);
+  color: var(--ink-soft);
+  border: 1px solid var(--rule);
+  background: var(--paper);
+}
+.chk-row-norule .finding-rule {
+  display: none;
+}
 .chk-row {
   padding: 6px 4px 6px 8px;
   border-bottom: 1px solid var(--rule-soft);

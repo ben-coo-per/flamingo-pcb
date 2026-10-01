@@ -13,6 +13,7 @@
  */
 
 import './checks.css';
+import { renderFindingRow } from './finding-row.js';
 import type { Board, Point } from '@flamingo/engine';
 import { store } from '../state.js';
 import * as api from './api.js';
@@ -399,30 +400,13 @@ export function createChecksDrawer(deps: ChecksDrawerDeps): ChecksDrawer {
 
   function findingRow(f: CheckFinding, showRule: boolean): HTMLElement {
     const key = findingKey(f);
-    const row = el('div', `chk-row chk-row-${f.level}`);
-    row.tabIndex = 0;
-    row.dataset.key = key;
-    if (key === focusKey) row.classList.add('selected');
-    const line = el('div', 'chk-row-line');
-    line.appendChild(badge(f.level));
-    if (showRule) line.appendChild(el('span', 'chk-row-rule', `${f.check}/${f.rule}`));
-    line.appendChild(el('span', 'chk-row-msg', f.message));
+    const at = locate(f, board());
     const waiveBtn = button('chk-link', 'Waive…', () => {
       waiveDraft = { key, items: [...f.items], reason: '', error: '', busy: false };
       renderFindings();
       list.querySelector<HTMLTextAreaElement>(`.chk-waive textarea`)?.focus();
     });
     waiveBtn.addEventListener('click', (ev) => ev.stopPropagation());
-    line.appendChild(waiveBtn);
-    row.appendChild(line);
-    if (f.items.length > 0) {
-      const items = el('div', 'chk-items');
-      for (const it of f.items) items.appendChild(el('span', 'chk-item', it));
-      row.appendChild(items);
-    }
-    const at = locate(f, board());
-    if (!at) row.classList.add('no-loc');
-    row.title = at ? 'Show on the board' : 'No location on the board';
 
     const activate = (): void => {
       focusKey = key;
@@ -434,18 +418,19 @@ export function createChecksDrawer(deps: ChecksDrawerDeps): ChecksDrawer {
       if (window.matchMedia('(max-width: 900px)').matches) close();
       deps.focusPoint(at);
     };
-    row.addEventListener('click', activate);
+    const row = renderFindingRow(f, { onClick: activate, actions: [waiveBtn] });
+    row.classList.add('chk-row');
+    // Grouped by check and rule, the group heading already names the rule.
+    if (!showRule) row.classList.add('chk-row-norule');
+    row.dataset.key = key;
+    if (key === focusKey) row.classList.add('selected');
+    if (!at) row.classList.add('no-loc');
+    row.title = at ? 'Show on the board' : 'No location on the board';
     row.addEventListener('keydown', (ev) => {
-      if (ev.target !== row) return;
-      if (ev.key === 'Enter' || ev.key === ' ') {
-        ev.preventDefault();
-        activate();
-      } else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
-        ev.preventDefault();
-        const rows = Array.from(list.querySelectorAll<HTMLElement>('.chk-row'));
-        const i = rows.indexOf(row);
-        rows[i + (ev.key === 'ArrowDown' ? 1 : -1)]?.focus();
-      }
+      if (ev.target !== row || (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp')) return;
+      ev.preventDefault();
+      const rows = Array.from(list.querySelectorAll<HTMLElement>('.chk-row'));
+      rows[rows.indexOf(row) + (ev.key === 'ArrowDown' ? 1 : -1)]?.focus();
     });
     row.addEventListener('mouseenter', () => store.set({ checkMarkerFocus: key }));
     row.addEventListener('mouseleave', () => store.set({ checkMarkerFocus: focusKey }));
@@ -528,13 +513,6 @@ export function createChecksDrawer(deps: ChecksDrawerDeps): ChecksDrawer {
     });
     det.appendChild(el('summary', 'chk-waived-head', `Waived (${waived.length})`));
     for (const w of waived) {
-      const row = el('div', 'chk-row chk-row-waived');
-      const line = el('div', 'chk-row-line');
-      line.append(
-        badge(w.finding.level),
-        el('span', 'chk-row-rule', `${w.finding.check}/${w.finding.rule}`),
-        el('span', 'chk-row-msg', w.finding.message),
-      );
       const remove = button('chk-link', 'Remove waiver', () => {
         const index = waiverIndex(board(), w.waiver);
         if (index < 0) {
@@ -553,8 +531,8 @@ export function createChecksDrawer(deps: ChecksDrawerDeps): ChecksDrawer {
           }
         })();
       });
-      line.appendChild(remove);
-      row.appendChild(line);
+      const row = renderFindingRow(w.finding, { actions: [remove] });
+      row.classList.add('chk-row', 'chk-row-waived');
       row.appendChild(el('div', 'chk-reason', `“${w.waiver.reason}”`));
       det.appendChild(row);
     }

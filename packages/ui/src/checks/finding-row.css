@@ -37,8 +37,11 @@
 }
 
 .finding-badge {
+  flex: none;
   display: inline-block;
-  min-width: 16px;
+  min-width: 36px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   padding: 0 3px;
   border: 1px solid currentColor;
   font-size: 10px;
@@ -47,18 +50,29 @@
   text-align: center;
 }
 
+/*
+ * Monochrome by default. A page can colour the badges with
+ * --finding-{error,warn,info}-{bg,ink}; unset, they fall back to ink.
+ */
 .finding-badge-error {
-  background: currentColor;
+  background: var(--finding-error-bg, currentColor);
+  border-color: var(--finding-error-bg, currentColor);
+  /* The text on a filled badge: the page background, whatever it is. */
+  color: inherit;
+  -webkit-text-fill-color: var(--finding-error-ink, var(--paper, #fff));
 }
 
-/* The letter on a filled badge: the page background, whatever it is. */
-.finding-badge-error {
-  color: inherit;
-  -webkit-text-fill-color: var(--paper, #fff);
+.finding-badge-warn {
+  background: var(--finding-warn-bg, transparent);
+  border-color: var(--finding-warn-bg, currentColor);
+  -webkit-text-fill-color: var(--finding-warn-ink, currentColor);
 }
 
 .finding-badge-info {
-  border-style: dotted;
+  background: var(--finding-info-bg, transparent);
+  border-color: var(--finding-info-bg, currentColor);
+  border-style: var(--finding-info-border, dotted);
+  -webkit-text-fill-color: var(--finding-info-ink, currentColor);
   font-weight: 400;
 }
 
@@ -78,7 +92,7 @@
 }
 
 .finding-message {
-  margin: 2px 0 0 22px;
+  margin: 2px 0 0 42px;
   overflow-wrap: anywhere;
 }
 
@@ -86,7 +100,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 3px;
-  margin: 3px 0 0 22px;
+  margin: 3px 0 0 42px;
 }
 
 .finding-item {

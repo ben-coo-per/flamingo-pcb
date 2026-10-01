@@ -4,7 +4,8 @@
  * view's cable check, so a finding looks the same wherever it is shown.
  *
  * Self-contained: it brings its own styles (finding-row.css), drawn in
- * currentColor so the row takes the ink of the page it sits on.
+ * currentColor so the row takes the ink of the page it sits on. A page that
+ * wants colour sets the --finding-* variables (the editor's drawer does).
  */
 
 import type { CheckFinding } from '@flamingo/engine';
@@ -22,9 +23,9 @@ export interface FindingRowOptions {
 }
 
 const BADGE: Record<CheckFinding['level'], { text: string; label: string }> = {
-  error: { text: 'E', label: 'error' },
-  warn: { text: 'W', label: 'warning' },
-  info: { text: 'i', label: 'info' },
+  error: { text: 'error', label: 'error' },
+  warn: { text: 'warn', label: 'warning' },
+  info: { text: 'info', label: 'info' },
 };
 
 export function renderFindingRow(f: CheckFinding, opts: FindingRowOptions = {}): HTMLElement {
@@ -86,6 +87,8 @@ export function renderFindingRow(f: CheckFinding, opts: FindingRowOptions = {}):
       go();
     });
     row.addEventListener('keydown', (ev) => {
+      // Only the row itself: keys typed into a form inside the row are the form's.
+      if (ev.target !== row) return;
       if (ev.key === 'Enter' || ev.key === ' ') {
         ev.preventDefault();
         go();
