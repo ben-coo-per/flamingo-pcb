@@ -1,0 +1,110 @@
+/*
+ * A check finding (finding-row.ts). Drawn in currentColor on the page's own
+ * background, so it reads on the panel view's black-on-white and on the
+ * editor alike. Errors are carried by a filled badge and bold rule, warnings
+ * by an outlined badge, info by a dotted one: no colour needed.
+ */
+
+.finding-row {
+  padding: 5px 0 6px;
+  border-top: 1px dotted currentColor;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.finding-row:first-child {
+  border-top: 0;
+}
+
+.finding-clickable {
+  cursor: pointer;
+}
+
+.finding-clickable:hover .finding-message,
+.finding-clickable:focus-visible .finding-message {
+  text-decoration: underline;
+}
+
+.finding-clickable:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 1px;
+}
+
+.finding-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.finding-badge {
+  display: inline-block;
+  min-width: 16px;
+  padding: 0 3px;
+  border: 1px solid currentColor;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+.finding-badge-error {
+  background: currentColor;
+}
+
+/* The letter on a filled badge: the page background, whatever it is. */
+.finding-badge-error {
+  color: inherit;
+  -webkit-text-fill-color: var(--paper, #fff);
+}
+
+.finding-badge-info {
+  border-style: dotted;
+  font-weight: 400;
+}
+
+.finding-rule {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.finding-info .finding-rule {
+  font-weight: 400;
+}
+
+.finding-actions {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.finding-message {
+  margin: 2px 0 0 22px;
+  overflow-wrap: anywhere;
+}
+
+.finding-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin: 3px 0 0 22px;
+}
+
+.finding-item {
+  padding: 0 4px;
+  border: 1px dashed currentColor;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+button.finding-item {
+  cursor: pointer;
+}
+
+button.finding-item:hover,
+button.finding-item:focus-visible {
+  border-style: solid;
+  outline: none;
+}

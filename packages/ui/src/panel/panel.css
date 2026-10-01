@@ -1033,3 +1033,158 @@ table.lines tr.order td {
   border-left: 1px solid var(--ink);
   font-size: 11px;
 }
+
+/* ---- cables -------------------------------------------------------------- */
+
+.cable {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 5px 0;
+  border-top: 1px dotted var(--ink);
+}
+
+.cable:first-child {
+  border-top: 0;
+}
+
+.cable-id {
+  min-width: 20px;
+  font-weight: 700;
+}
+
+.cable-ends {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+}
+
+.cable-arrow {
+  padding: 0 2px;
+}
+
+.cable-how {
+  font-size: 10px;
+}
+
+.cable .tag-btn {
+  margin-left: auto;
+}
+
+.cable-extra {
+  flex-basis: 100%;
+  margin-left: 28px;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.cable-add {
+  margin-top: 8px;
+}
+
+.cable-add > summary {
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cable-form {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 4px;
+  padding: 8px;
+  border: 1px solid var(--ink);
+}
+
+.cable-field {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: start;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.cable-label {
+  padding-top: 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+fieldset.cable-map {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+}
+
+fieldset.cable-map legend {
+  float: left;
+  padding: 3px 0 0;
+}
+
+fieldset.cable-map label,
+fieldset.cable-map textarea {
+  grid-column: 2;
+}
+
+.cable-end-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 3px;
+}
+
+.cable-tos > div {
+  display: grid;
+}
+
+.cable-form select,
+.cable-form input[type='text'],
+.cable-form textarea {
+  min-width: 0;
+  padding: 2px 4px;
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+
+.cable-form select {
+  flex: 1 1 auto;
+  max-width: 220px;
+}
+
+.cable-form input[data-part='refdes'] {
+  flex: 0 0 64px;
+  width: 64px;
+}
+
+.cable-form textarea {
+  resize: vertical;
+}
+
+.cable-form select:focus,
+.cable-form input:focus,
+.cable-form textarea:focus {
+  outline: 1px solid var(--ink);
+  outline-offset: 0;
+}
+
+.cable-form .btn {
+  margin-top: 4px;
+}
+
+.cable-check {
+  margin-top: 10px;
+}
+
+.cable-findings:empty {
+  display: none;
+}
+
+.cable-findings {
+  margin-top: 6px;
+}
