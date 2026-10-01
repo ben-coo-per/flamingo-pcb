@@ -98,6 +98,7 @@ const TOOL_NAMES = [
   'add_via',
   'get_ratsnest',
   'run_drc',
+  'run_erc',
   'undo',
   'redo',
   'unroute',
@@ -141,11 +142,11 @@ describe('MCP endpoint', () => {
     await rm(projectDir, { recursive: true, force: true });
   });
 
-  it('tools/list returns all 34 core tools', async () => {
+  it('tools/list returns all 35 core tools', async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([...TOOL_NAMES].sort());
-    expect(tools).toHaveLength(34);
+    expect(tools).toHaveLength(35);
   });
 
   it('place_component (mocked part) then get_board_state reflects it', async () => {
