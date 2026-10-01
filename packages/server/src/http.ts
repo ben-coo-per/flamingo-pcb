@@ -18,6 +18,7 @@ import { Doc } from './document.js';
 import type { McpContext, PartsApi } from './mcp.js';
 import { createMcpServer, resolveFabOutDir } from './mcp.js';
 import { ercFindings, writeChecksReport } from './checks-tools.js';
+import { handleChecksApi } from './checks-api.js';
 import type { RouteRunner } from './route.js';
 import { defaultRouteRunner } from './route.js';
 import type { ScreenshotOpts } from './screenshot.js';
@@ -303,10 +304,16 @@ async function handleApi(
   // drain it so the connection can be reused instead of stalling on unread data.
   const readsBody =
     method === 'POST' &&
-    (pathname === '/api/op' || pathname === '/api/export' || pathname === '/api/route' || pathname === '/api/open');
+    (pathname === '/api/op' ||
+      pathname === '/api/export' ||
+      pathname === '/api/route' ||
+      pathname === '/api/open' ||
+      pathname === '/api/sim/run');
   if (!readsBody) {
     req.resume();
   }
+
+  if (await handleChecksApi(ctx, method, pathname, url, req, res)) return true;
 
   if (method === 'GET' && pathname === '/api/board') {
     sendJSON(res, 200, doc.board);
