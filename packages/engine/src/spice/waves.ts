@@ -93,13 +93,18 @@ export function parseMeasures(log: string): Record<string, number> {
       if (Number.isFinite(v)) out[m[1]!] = v;
       continue;
     }
-    m = /^([A-Za-z_][\w.]*)\s*=\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)(?:\s|$)/.exec(line);
+    // A .measure result: "name = value", then the end of the line or the
+    // measurement's own fields (targ=, trig=, at=, from=, ...). That keeps
+    // ngspice's statistics ("Stack = 0 bytes.") out.
+    m = /^([A-Za-z_][\w.]*)\s*=\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*(?:$|(?:targ|trig|at|from|to|when)\s*=)/i.exec(line);
     if (m) {
       out[m[1]!.toLowerCase()] = Number(m[2]);
       continue;
     }
-    m = /^(?:Error:\s*)?\.?meas(?:ure)?\w*\s+(\S+)\s+failed/i.exec(line) ?? /measure\s+'?(\w+)'?\s+failed/i.exec(line);
-    if (m) out[m[1]!.toLowerCase()] = NaN;
+    // A failed one: "Error: measure  tf  trig(TRIG) : out of interval", or
+    // ".measure tran tf trig ... failed!".
+    m = /^Error:\s*measure\s+(\S+)/i.exec(line) ?? /^\.meas\w*\s+\w+\s+(\S+)\s.*\bfailed/i.exec(line);
+    if (m && !(m[1]!.toLowerCase() in out)) out[m[1]!.toLowerCase()] = NaN;
   }
   return out;
 }

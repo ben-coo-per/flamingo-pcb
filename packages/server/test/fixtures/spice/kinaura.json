@@ -1,0 +1,55 @@
+{
+  "description": "SPICE runs for the KinAura boards. Board paths are relative to KINAURA_PCB; the boards are not in this repo.",
+  "boards": {
+    "ScaleController": "scale-controller-flamingo/ScaleController.flamingo",
+    "DriverBank": "driver-bank/DriverBank.flamingo"
+  },
+  "runs": [
+    {
+      "template": "i2c",
+      "config": {
+        "controller": "ScaleController",
+        "device": "DriverBank",
+        "copies": 2,
+        "rail": "3V3",
+        "modulePullups": true,
+        "lines": [
+          { "name": "SDA", "controllerNet": "I2C_SDA", "connectorNet": "BUS_SDA", "deviceNet": "SDA" },
+          { "name": "SCL", "controllerNet": "I2C_SCL", "connectorNet": "BUS_SCL", "deviceNet": "SCL" }
+        ]
+      }
+    },
+    {
+      "template": "single-wire-uart",
+      "config": {
+        "host": "ScaleController",
+        "txNet": "TMC_TX",
+        "rxNet": "TMC_RX",
+        "lineNet": "TMC_UART",
+        "device": "DriverBank",
+        "channelNet": "UART0",
+        "copies": 2,
+        "whatIfTxRx": [2200]
+      }
+    },
+    {
+      "template": "rc-filter",
+      "config": { "board": "ScaleController", "inputNet": "5V", "outputNet": "AVDD", "claimHz": 240 }
+    },
+    {
+      "template": "ldo-step",
+      "config": { "board": "ScaleController", "inNet": "5V", "outNet": "3V3", "sourceDiode": true },
+      "params": { "i_input_extra": 0.1 }
+    },
+    {
+      "template": "hot-plug",
+      "config": {
+        "board": "DriverBank",
+        "rails": [
+          { "net": "VM", "terminalNet": "VM_RAW", "supplyV": 12, "maxV": 29 },
+          { "net": "5V_SERVO", "supplyV": 5, "maxV": 6 }
+        ]
+      }
+    }
+  ]
+}

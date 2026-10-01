@@ -12,6 +12,7 @@ import { startServer } from '../src/http.js';
 import type { StartedServer } from '../src/http.js';
 import type { PartsApi } from '../src/mcp.js';
 import type { RouteRunner } from '../src/route.js';
+import { SIM_TOOL_NAMES } from '../src/sim-tools.js';
 
 const FIXTURE_FOOTPRINT: Footprint = {
   name: 'R0603',
@@ -106,6 +107,7 @@ const TOOL_NAMES = [
   'export_fab',
   'export_step',
   'screenshot',
+  ...SIM_TOOL_NAMES,
 ];
 
 function textOf(result: { content: Array<{ type: string; text?: string }> }): string {
@@ -145,7 +147,7 @@ describe('MCP endpoint', () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([...TOOL_NAMES].sort());
-    expect(tools).toHaveLength(34);
+    expect(tools).toHaveLength(34 + SIM_TOOL_NAMES.length);
   });
 
   it('place_component (mocked part) then get_board_state reflects it', async () => {

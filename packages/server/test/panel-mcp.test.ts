@@ -13,6 +13,7 @@ import { Doc } from '../src/document.js';
 import { startServer } from '../src/http.js';
 import type { StartedServer } from '../src/http.js';
 import { PANEL_TOOL_NAMES } from '../src/panel/mcp.js';
+import { SIM_TOOL_NAMES } from '../src/sim-tools.js';
 import { miniBoard, sensorBoard, startPanelServer, writeBoards } from './panel-helpers.js';
 
 function textOf(r: CallToolResult): string {
@@ -63,7 +64,7 @@ describe('panel MCP tools', () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
     for (const n of PANEL_TOOL_NAMES) expect(names).toContain(n);
-    expect(tools).toHaveLength(34 + PANEL_TOOL_NAMES.length);
+    expect(tools).toHaveLength(34 + SIM_TOOL_NAMES.length + PANEL_TOOL_NAMES.length);
     for (const t of tools.filter((x) => (PANEL_TOOL_NAMES as readonly string[]).includes(x.name))) {
       expect(t.description, t.name).toBeTruthy();
       const props = (t.inputSchema as { properties?: Record<string, { description?: string }> }).properties ?? {};
@@ -77,7 +78,7 @@ describe('panel MCP tools', () => {
     try {
       await c.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${plain.port}/mcp`)));
       const { tools } = await c.listTools();
-      expect(tools).toHaveLength(34);
+      expect(tools).toHaveLength(34 + SIM_TOOL_NAMES.length);
       expect(tools.some((t) => t.name.startsWith('panel_'))).toBe(false);
       expect((await fetch(`http://localhost:${plain.port}/api/panel`)).status).toBe(404);
     } finally {

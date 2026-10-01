@@ -79,8 +79,11 @@ describe('waves and measures', () => {
       'tr                  =  3.000000e-07 targ=  1.30e-06 trig=  1.00e-06',
       'vmax                =  3.31e+00 at=  2.0e-06',
       'RESULT corner 245.5',
-      'Error: measure  tf  failed!',
+      'Error: measure  tf  trig(TRIG) : out of interval',
+      ' .measure tran tf trig v(out) val=5 rise=1 targ v(out) val=6 rise=1 failed!',
       'Doing analysis at TEMP = 27.000000',
+      'Stack = 0 bytes.',
+      'Error: measure  tf  failed!',
     ].join('\n');
     const m = parseMeasures(log);
     expect(m.tr).toBeCloseTo(3e-7);
