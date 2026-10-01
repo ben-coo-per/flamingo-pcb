@@ -12,7 +12,8 @@ import { store, type AppState } from './state.js';
 import { prepareBoard } from './board-prep.js';
 import { attachViewControls, centerOn, fitToBoard, flipView, screenToWorld } from './view.js';
 import { createRenderer } from './renderer.js';
-import { initPanels } from './panels.js';
+import { downloadBlob, initPanels } from './panels.js';
+import { createChecksDrawer } from './checks/drawer.js';
 import { connectWs, type RouteStatus } from './ws.js';
 import { showToast } from './toast.js';
 import { hitTest } from './hit-test.js';
@@ -105,10 +106,15 @@ function focusComponent(refdes: string): void {
   });
 }
 
-/** Center the view on a board point (DRC violation click-through). */
-function focusPoint(p: Point): void {
+/**
+ * Center the view on a board point (check-finding click-through). `insetRight`
+ * is how many px on the canvas's right are covered (the Checks drawer), so the
+ * point lands in the middle of what is still visible.
+ */
+function focusPoint(p: Point, insetRight = 0): void {
   const rect = canvas.getBoundingClientRect();
-  store.set({ view: centerOn(store.get().view, p, rect.width, rect.height) });
+  const w = Math.max(rect.width - insetRight, rect.width / 4);
+  store.set({ view: centerOn(store.get().view, p, w, rect.height) });
 }
 
 /** Fit the view to a net: the pads of its pins plus any routed tracks/vias. */
@@ -202,16 +208,44 @@ const panels = initPanels(
     saveBtn: document.getElementById('save-btn') as HTMLButtonElement,
     searchInput: document.getElementById('search-input') as HTMLInputElement,
     searchResults: document.getElementById('search-results')!,
-    drcBtn: document.getElementById('drc-btn') as HTMLButtonElement,
-    drcStatus: document.getElementById('drc-status')!,
-    drcList: document.getElementById('drc-list')!,
-    ercBtn: document.getElementById('erc-btn') as HTMLButtonElement,
-    ercStatus: document.getElementById('erc-status')!,
-    ercList: document.getElementById('erc-list')!,
   },
   toolManager,
-  { focusComponent, focusNet, boardOpened, sendOp: (op) => wsApi.sendOp(op), focusPoint },
+  {
+    focusComponent,
+    focusNet,
+    boardOpened,
+    sendOp: (op) => wsApi.sendOp(op),
+    focusPoint: (p) => focusPoint(p),
+    showChecks: () => checksDrawer.showFindings(),
+  },
 );
+
+// ---------------------------------------------------------------------------
+// Checks workspace (checks/drawer.ts): the right panel's Checks section shows
+// its one-line summary and opens it; C toggles it, Esc (handled inside the
+// drawer) closes it.
+// ---------------------------------------------------------------------------
+
+const checksSummaryEl = document.getElementById('checks-summary');
+const checksDrawer = createChecksDrawer({
+  focusPoint: (p) => {
+    // Only the part of the canvas the drawer overlaps is hidden (it also
+    // covers the right panel), so inset by the overlap, not its width.
+    const drawer = document.getElementById('checks-drawer');
+    const covers =
+      drawer && !drawer.hidden
+        ? Math.max(0, canvas.getBoundingClientRect().right - drawer.getBoundingClientRect().left)
+        : 0;
+    focusPoint(p, covers);
+  },
+  download: downloadBlob,
+  onSummary: (s) => {
+    if (!checksSummaryEl) return;
+    checksSummaryEl.textContent = s.text;
+    checksSummaryEl.className = `chk-summary ${s.kind}`;
+  },
+});
+document.getElementById('checks-open-btn')?.addEventListener('click', () => checksDrawer.open('findings'));
 
 const renderer = createRenderer(canvas, () => store.get(), (ctx2d, view, state) => {
   toolManager.active().drawOverlay?.(ctx2d, view, state);
@@ -377,6 +411,11 @@ const TOOL_SHORTCUTS: Record<string, string> = {
 };
 
 window.addEventListener('keydown', (ev) => {
+  if (ev.code === 'Escape' && checksDrawer.isOpen()) {
+    // Focus is outside the drawer (its own Esc handler stops propagation): close it.
+    checksDrawer.close();
+    return;
+  }
   if (ev.code === 'Escape') {
     // Escape always wins, even while typing in a tool-owned input (e.g. silk's inline text box).
     toolManager.setActive('select');
@@ -409,6 +448,11 @@ window.addEventListener('keydown', (ev) => {
 
   // Modifier chords (⌘S, ⌘C, …) are never tool shortcuts.
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+
+  if (ev.code === 'KeyC') {
+    checksDrawer.toggle();
+    return;
+  }
 
   const toolId = TOOL_SHORTCUTS[ev.code];
   if (toolId) {

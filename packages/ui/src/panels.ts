@@ -9,7 +9,7 @@
  * highlight and the status bar update unconditionally on every state change.
  */
 
-import type { Board, CheckFinding, ComponentInst, DrcViolation, Keepout, LayerId, MountingHole, Op, Point, SilkText, Zone } from '@flamingo/engine';
+import type { Board, ComponentInst, Keepout, LayerId, MountingHole, Op, Point, SilkText, Zone } from '@flamingo/engine';
 import { copperLayersOf } from '@flamingo/engine';
 import {
   DIMS_KEY,
@@ -60,12 +60,6 @@ export interface PanelEls {
   saveBtn: HTMLButtonElement;
   searchInput: HTMLInputElement;
   searchResults: HTMLElement;
-  drcBtn: HTMLButtonElement;
-  drcStatus: HTMLElement;
-  drcList: HTMLElement;
-  ercBtn: HTMLButtonElement;
-  ercStatus: HTMLElement;
-  ercList: HTMLElement;
 }
 
 /** Actions the panels trigger that need canvas/view access (owned by main.ts). */
@@ -79,6 +73,8 @@ export interface PanelActions {
   sendOp(op: Op): void;
   /** Center the view on a board point (DRC violation click-through). */
   focusPoint(p: Point): void;
+  /** Open the Checks drawer on its findings and run the checks (export gate's "Show in Checks"). */
+  showChecks(): void;
 }
 
 // Swatch colors for the two label pseudo-layers, matching the overlay colors in
@@ -106,7 +102,7 @@ function layerSwatchColor(key: string): string {
 }
 
 /** Save `blob` via a synthetic anchor click, naming it from a content-disposition header when present. */
-function downloadBlob(blob: Blob, disposition: string, fallbackName: string): void {
+export function downloadBlob(blob: Blob, disposition: string, fallbackName: string): void {
   const m = /filename="?([^"]+)"?/.exec(disposition);
   const name = m ? m[1] : fallbackName;
   const url = URL.createObjectURL(blob);
@@ -1542,6 +1538,12 @@ export function initPanels(els: PanelEls, toolManager: ToolManager, actions: Pan
             .map((x) => (typeof x === 'string' ? x : (x.message ?? JSON.stringify(x))))
             .join(' · ');
           setStatus(`DRC blocks export: ${v.length} violation(s). ${first}`, 'err');
+          const show = document.createElement('button');
+          show.type = 'button';
+          show.className = 'chk-gate-link';
+          show.textContent = 'Show in Checks';
+          show.addEventListener('click', () => actions.showChecks());
+          status.appendChild(show);
           armed = true;
           btn.classList.add('confirm');
           btn.textContent = 'Export anyway';
@@ -1668,119 +1670,8 @@ export function initPanels(els: PanelEls, toolManager: ToolManager, actions: Pan
   wireToolbarControls();
   wireProjectControls();
   wireProjectRename();
-  // ---------------------------------------------------------------------------
-  // DRC panel: GET /api/drc (server runs the check on the *filled* board, same
-  // as the export gate), list the violations, and push their locations into
-  // store.drcMarkers so the canvas draws red rings. Clicking a row centers the
-  // view on that violation. Markers/list persist until the next run.
-  // ---------------------------------------------------------------------------
-
-  function wireDrcControls(): void {
-    const btn = els.drcBtn;
-    let busy = false;
-
-    function setStatus(text: string, kind: 'ok' | 'err' | 'busy'): void {
-      els.drcStatus.replaceChildren();
-      const el = document.createElement('div');
-      el.className = kind === 'busy' ? 'route-busy' : `route-result ${kind}`;
-      el.textContent = text;
-      els.drcStatus.appendChild(el);
-    }
-
-    function showViolations(violations: DrcViolation[]): void {
-      els.drcList.replaceChildren();
-      for (const v of violations) {
-        const row = document.createElement('div');
-        row.className = 'drc-list-item';
-        row.textContent = `${v.rule}: ${v.message}`;
-        row.title = `${v.message}\n@ (${v.at.x.toFixed(2)}, ${v.at.y.toFixed(2)}) — ${v.items.join(', ')}`;
-        row.addEventListener('click', () => actions.focusPoint(v.at));
-        els.drcList.appendChild(row);
-      }
-      store.set({ drcMarkers: violations.map((v) => v.at) });
-    }
-
-    btn.addEventListener('click', () => {
-      if (busy) return;
-      busy = true;
-      btn.disabled = true;
-      setStatus('Checking…', 'busy');
-      void (async () => {
-        try {
-          const res = await fetch('/api/drc');
-          const body = (await res.json()) as { ok: boolean; violations?: DrcViolation[]; error?: string };
-          if (!res.ok || !body.ok) throw new Error(body.error ?? res.statusText);
-          const violations = body.violations ?? [];
-          showViolations(violations);
-          setStatus(violations.length === 0 ? 'No violations.' : `${violations.length} violation(s).`, violations.length === 0 ? 'ok' : 'err');
-        } catch (err) {
-          setStatus(`DRC failed: ${err instanceof Error ? err.message : String(err)}`, 'err');
-        } finally {
-          busy = false;
-          btn.disabled = false;
-        }
-      })();
-    });
-  }
-
-  // ---------------------------------------------------------------------------
-  // ERC panel: GET /api/erc. Errors and warnings are listed (info is left out
-  // to keep the list short); rows with a location center the view on it.
-  // ---------------------------------------------------------------------------
-
-  function wireErcControls(): void {
-    const btn = els.ercBtn;
-    let busy = false;
-
-    function setStatus(text: string, kind: 'ok' | 'err' | 'busy'): void {
-      els.ercStatus.replaceChildren();
-      const el = document.createElement('div');
-      el.className = kind === 'busy' ? 'route-busy' : `route-result ${kind}`;
-      el.textContent = text;
-      els.ercStatus.appendChild(el);
-    }
-
-    btn.addEventListener('click', () => {
-      if (busy) return;
-      busy = true;
-      btn.disabled = true;
-      setStatus('Checking…', 'busy');
-      void (async () => {
-        try {
-          const res = await fetch('/api/erc');
-          const body = (await res.json()) as { ok: boolean; findings?: CheckFinding[]; error?: string };
-          if (!res.ok || !body.ok) throw new Error(body.error ?? res.statusText);
-          const shown = (body.findings ?? []).filter((f) => f.level !== 'info');
-          els.ercList.replaceChildren();
-          for (const f of shown) {
-            const row = document.createElement('div');
-            row.className = 'drc-list-item';
-            row.textContent = `${f.level === 'error' ? 'ERROR' : 'warn'} ${f.rule}: ${f.message}`;
-            row.title = `${f.message}\n${f.items.join(', ')}`;
-            const at = f.at;
-            if (at) row.addEventListener('click', () => actions.focusPoint(at));
-            els.ercList.appendChild(row);
-          }
-          const errors = shown.filter((f) => f.level === 'error').length;
-          const warns = shown.length - errors;
-          setStatus(
-            shown.length === 0 ? 'No errors or warnings.' : `${errors} error(s), ${warns} warning(s).`,
-            errors === 0 ? 'ok' : 'err',
-          );
-        } catch (err) {
-          setStatus(`ERC failed: ${err instanceof Error ? err.message : String(err)}`, 'err');
-        } finally {
-          busy = false;
-          btn.disabled = false;
-        }
-      })();
-    });
-  }
-
   wireSearch();
   wireRouteControls();
-  wireDrcControls();
-  wireErcControls();
   wireRipAllControls();
   wireExportFabControls();
   wireExportStepControls();
