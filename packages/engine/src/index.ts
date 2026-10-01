@@ -114,3 +114,6 @@ export { runDRC, buildCopperItems, groupFillRings } from './drc/drc.js';
 export * from './checks/index.js';
 export { parseValue, kindFromRefdes, formatSi } from './values.js';
 export type { ParsedValue, ValueUnit, ValueKind } from './values.js';
+
+// Netlist-driven logic simulation with invariants.
+export * from './logic/index.js';
