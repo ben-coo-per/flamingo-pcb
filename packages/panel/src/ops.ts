@@ -8,8 +8,8 @@
  */
 
 import type { Point } from '@flamingo/engine';
-import { mergeSettings } from './panel.js';
-import type { Panel, PanelInstance, PanelSettings, PanelSource, Rotation } from './types.js';
+import { mergeSettings, validateLink } from './panel.js';
+import type { Panel, PanelInstance, PanelLink, PanelSettings, PanelSource, Rotation } from './types.js';
 
 /** Recursive partial of the settings: patch one number without restating its group. */
 export type SettingsPatch = {
@@ -39,6 +39,9 @@ export type PanelOp =
   /** Replace every instance (and optionally the settings): what loading a scenario emits. */
   | { op: 'setLayout'; instances: PanelInstance[]; settings?: SettingsPatch }
   | { op: 'setSettings'; settings: SettingsPatch }
+  /** Declare a cable between boards. The new link's id is in `created`. */
+  | { op: 'addLink'; link: Omit<PanelLink, 'id'> & { id?: string } }
+  | { op: 'removeLink'; id: string }
   | { op: 'transaction'; ops: PanelOp[] };
 
 export interface PanelOpResult {
@@ -194,6 +197,12 @@ export function applyPanelOp(p: Panel, op: PanelOp): PanelOpResult | PanelOpErro
       if (idx === -1) return err(`Unknown source "${op.key}"`);
       panel.sources.splice(idx, 1);
       panel.instances = panel.instances.filter((i) => i.source !== op.key);
+      // A cable to a board that is gone describes nothing.
+      if (panel.links) {
+        const touches = (ep: string): boolean => ep.split(':')[0] === op.key;
+        panel.links = panel.links.filter((l) => !touches(l.from) && !l.to.some(touches));
+        if (panel.links.length === 0) delete panel.links;
+      }
       return ok(panel, created);
     }
 
@@ -333,6 +342,34 @@ export function applyPanelOp(p: Panel, op: PanelOp): PanelOpResult | PanelOpErro
       const problem = validateSettings(next);
       if (problem) return err(problem);
       panel.settings = next;
+      return ok(panel, created);
+    }
+
+    case 'addLink': {
+      const keys = new Set(panel.sources.map((s) => s.key));
+      const problem = validateLink(op.link, keys);
+      if (problem) return err(problem);
+      const links = panel.links ?? [];
+      let id = op.link.id;
+      if (id !== undefined && links.some((l) => l.id === id)) return err(`Link "${id}" already exists`);
+      if (id === undefined) {
+        const used = new Set(links.map((l) => l.id));
+        let n = 1;
+        while (used.has(`L${n}`)) n++;
+        id = `L${n}`;
+      }
+      const { from, to, map, aliases, note } = op.link;
+      links.push({ id, from, to: [...to], map, ...(aliases ? { aliases } : {}), ...(note !== undefined ? { note } : {}) });
+      panel.links = links;
+      created.push(id);
+      return ok(panel, created);
+    }
+
+    case 'removeLink': {
+      const idx = (panel.links ?? []).findIndex((l) => l.id === op.id);
+      if (idx === -1) return err(`Unknown link "${op.id}"`);
+      panel.links!.splice(idx, 1);
+      if (panel.links!.length === 0) delete panel.links;
       return ok(panel, created);
     }
 

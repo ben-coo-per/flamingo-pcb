@@ -124,6 +124,35 @@ export interface PanelSettings {
   copperLayers: 'auto' | 2 | 4 | 6;
 }
 
+/**
+ * A cable between boards on the panel: header `from` on one board joined to
+ * header(s) `to` on others (a daisy-chained ribbon has several). It describes
+ * the system the boards make up, not anything fabricated: links never change
+ * the panel's fab output, cost or staleness. `check_interconnect` uses them.
+ *
+ * Endpoints are `<source key>:<refdes>`, e.g. `S:J5`.
+ */
+export interface PanelLink {
+  /** `L<n>`, unique on the panel. */
+  id: string;
+  from: string;
+  to: string[];
+  /**
+   * `straight`: pad N meets pad N (a keyed IDC ribbon, every connector crimped
+   * the same way up). Otherwise a map from `from` pad numbers to `to` pad
+   * numbers; pads not in the map are not carried by the cable.
+   */
+  map: 'straight' | Record<string, string>;
+  /**
+   * Net names that mean the same signal on different boards, mapped to one
+   * name: `{ "BUS_SDA": "SDA", "M_EN": "MOTION_EN" }`. Matching is
+   * case-insensitive; ground nets always match each other.
+   */
+  aliases?: Record<string, string>;
+  /** Free text: what the cable is ("14-way ribbon, 2 x 0.5 m"). */
+  note?: string;
+}
+
 export interface Panel {
   formatVersion: 1;
   kind: 'flamingo-panel';
@@ -131,6 +160,8 @@ export interface Panel {
   sources: PanelSource[];
   instances: PanelInstance[];
   settings: PanelSettings;
+  /** Cables between boards. Absent on panels that declare none. */
+  links?: PanelLink[];
 }
 
 /** Axis-aligned box. */
