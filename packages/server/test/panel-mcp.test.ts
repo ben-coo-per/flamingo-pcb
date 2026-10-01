@@ -59,11 +59,11 @@ describe('panel MCP tools', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('serves the panel tools next to the 35 board tools', async () => {
+  it('serves the panel tools next to the 36 board tools', async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
     for (const n of PANEL_TOOL_NAMES) expect(names).toContain(n);
-    expect(tools).toHaveLength(35 + PANEL_TOOL_NAMES.length);
+    expect(tools).toHaveLength(36 + PANEL_TOOL_NAMES.length);
     for (const t of tools.filter((x) => (PANEL_TOOL_NAMES as readonly string[]).includes(x.name))) {
       expect(t.description, t.name).toBeTruthy();
       const props = (t.inputSchema as { properties?: Record<string, { description?: string }> }).properties ?? {};
@@ -77,7 +77,7 @@ describe('panel MCP tools', () => {
     try {
       await c.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${plain.port}/mcp`)));
       const { tools } = await c.listTools();
-      expect(tools).toHaveLength(35);
+      expect(tools).toHaveLength(36);
       expect(tools.some((t) => t.name.startsWith('panel_'))).toBe(false);
       expect((await fetch(`http://localhost:${plain.port}/api/panel`)).status).toBe(404);
     } finally {

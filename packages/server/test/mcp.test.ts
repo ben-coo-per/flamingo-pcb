@@ -98,6 +98,7 @@ const TOOL_NAMES = [
   'add_via',
   'get_ratsnest',
   'run_drc',
+  'run_erc',
   'undo',
   'redo',
   'unroute',
@@ -146,7 +147,7 @@ describe('MCP endpoint', () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([...TOOL_NAMES].sort());
-    expect(tools).toHaveLength(35);
+    expect(tools).toHaveLength(36);
   });
 
   it('export_print writes a 1:1 PDF into <projectDir>/print', async () => {

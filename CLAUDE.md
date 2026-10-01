@@ -39,8 +39,12 @@ node packages/server/dist/cli.js serve board.flamingo   # prints "Flamingo v0.1.
 5. **Route.** `autoroute` (Freerouting; `passes`, optional `nets`). `unroute` /
    `get_ratsnest` to iterate.
 6. **Check.** `run_drc` returns violations as data (never a tool error).
-7. **Export.** `export_fab` writes `gerbers.zip` + `bom.csv` + `cpl.csv`
-   (+ `board.render.svg`) for JLCPCB.
+   `run_erc` checks the circuit: power pins, floating inputs, decoupling,
+   LED/diode polarity, ESP32-S3 straps, USB-C CC. Fix its errors before export;
+   record a deliberate exception in `board.checkWaivers` with a reason.
+7. **Export.** `export_fab` writes `gerbers.zip` + `bom.csv` + `cpl.csv` +
+   `checks.json` (+ `board.render.svg`) for JLCPCB, gated on DRC and ERC.
+   `flamingo check board.flamingo` runs the same checks headless.
 
 `screenshot` renders a PNG whenever you want to see the board. `get_board_state`
 / `describe_connections` give text summaries. `undo` / `redo` walk the op log.
@@ -56,7 +60,7 @@ CLI commands. It is served in one of two ways:
   view is at `http://localhost:4242`, and `/mcp` has the 26 panel tools and
   **no board tools**. The file is created if it is missing.
 - `flamingo serve board.flamingo --panel combo.plamingo`: the board's server
-  with the panel added. All 61 tools at one `/mcp`; the panel view is at
+  with the panel added. All 62 tools at one `/mcp`; the panel view is at
   `/panel`. Use this when one session designs boards and panelizes them.
 
 Two servers on one machine need two ports (`FLAMINGO_PORT`); `.mcp.json` points

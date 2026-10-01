@@ -8,6 +8,7 @@ import { startServer } from './http.js';
 import { PanelDoc } from './panel/doc.js';
 import { PANEL_EXTENSION } from '@flamingo/panel';
 import { PANEL_USAGE, runPanelCli } from './panel/cli.js';
+import { CHECK_USAGE, runCheckCli } from './check-cli.js';
 import { PanelSession } from './panel/session.js';
 import { fetchPart } from '@flamingo/parts';
 
@@ -152,11 +153,15 @@ async function main(): Promise<void> {
     process.exitCode = await exportPrintCli(args.slice(1));
     return;
   }
+  if (command === 'check') {
+    process.exitCode = await runCheckCli(args.slice(1));
+    return;
+  }
 
   if (command !== 'serve') {
     console.error(
       `Usage: flamingo serve [file.flamingo] [--panel file${PANEL_EXTENSION}]    the board editor, with a panel at /panel\n` +
-        `       flamingo serve <file${PANEL_EXTENSION}>    the panel view\n\n${PANEL_USAGE}\n\n${PRINT_USAGE}`,
+        `       flamingo serve <file${PANEL_EXTENSION}>    the panel view\n\n${CHECK_USAGE}\n\n${PANEL_USAGE}\n\n${PRINT_USAGE}`,
     );
     process.exitCode = 1;
     return;
