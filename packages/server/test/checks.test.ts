@@ -185,3 +185,44 @@ describe('run_erc and the export gate', () => {
     }
   });
 });
+
+describe('interconnect through flamingo check', () => {
+  let dir: string;
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'flamingo-link-'));
+  });
+  afterAll(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  /** A board whose 2-pin header J1 carries `nets` on pads 1 and 2. */
+  function headerBoard(name: string, nets: [string, string]): Board {
+    const b = newBoard(name, 2);
+    b.components.push(twoPad('J1', 'C1', 5));
+    b.nets.push({ name: nets[0], class: 'default', pins: ['J1.1'] }, { name: nets[1], class: 'default', pins: ['J1.2'] });
+    return b;
+  }
+
+  it('reports a cable whose pins disagree, and passes one that matches', async () => {
+    await writeFile(join(dir, 'a.flamingo'), serializeBoard(headerBoard('a', ['SDA', 'GND'])));
+    await writeFile(join(dir, 'ok.flamingo'), serializeBoard(headerBoard('ok', ['SDA', 'GND'])));
+    await writeFile(join(dir, 'swapped.flamingo'), serializeBoard(headerBoard('swapped', ['GND', 'SDA'])));
+    const write = async (file: string, to: string) => {
+      const panel = newPanel('cable');
+      panel.sources.push(
+        { key: 'A', path: 'a.flamingo', hash: 'sha256:0', name: 'a', needed: 1, niceToHave: 0 } as never,
+        { key: 'B', path: to, hash: 'sha256:0', name: 'b', needed: 1, niceToHave: 0 } as never,
+      );
+      panel.links = [{ id: 'L1', from: 'A:J1', to: ['B:J1'], map: 'straight' }];
+      await writeFile(join(dir, file), serializePanel(panel));
+    };
+    await write('good.plamingo', 'ok.flamingo');
+    await write('bad.plamingo', 'swapped.flamingo');
+
+    const good = capture();
+    expect(await runCheckCli([join(dir, 'good.plamingo'), '--only', 'interconnect'], good.io)).toBe(0);
+    const bad = capture();
+    expect(await runCheckCli([join(dir, 'bad.plamingo'), '--only', 'interconnect'], bad.io)).toBe(1);
+    expect(bad.out.join('\n')).toMatch(/ERROR {2}interconnect\//);
+  });
+});

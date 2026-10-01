@@ -19,7 +19,7 @@ import {
   type PinLookup,
   type SymbolPin,
 } from '@flamingo/engine';
-import type { Panel } from '@flamingo/panel';
+import { checkInterconnect, type Panel } from '@flamingo/panel';
 import { symbolPinsFromCache, type JlcStock } from '@flamingo/parts';
 import { checkStock } from './stock.js';
 
@@ -103,6 +103,16 @@ export function registerPanelCheck(check: PanelCheck): void {
 export function registeredPanelChecks(): PanelCheck[] {
   return [...panelRegistry.values()];
 }
+
+registerPanelCheck({
+  name: 'interconnect',
+  description: "Cables between the panel's boards (panel.links): net names, ground, supplies, unconnected pins",
+  run: (panel, boards) =>
+    checkInterconnect(
+      panel,
+      boards.map((b) => ({ key: b.key, path: b.path, name: b.board.name, recordedHash: '', stale: false, board: b.board })),
+    ),
+});
 
 /** Every check name `--only` accepts: board checks, then panel checks. */
 export function knownCheckNames(): string[] {
