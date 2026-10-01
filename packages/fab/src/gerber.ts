@@ -29,19 +29,15 @@ import {
   padCopperLayers,
   padOutline,
   padWorld,
-  componentTransformPoints,
-  componentTransformRotation,
-  componentLabelPlacement,
   fillAllZones,
   bufferPolygon,
   isSlot,
   holeSlotCenterline,
   allHoles,
   capsulePolygon,
-  RULESETS,
 } from '@flamingo/engine';
-import { strokeText } from './strokefont.js';
 import { buildDrills } from './excellon.js';
+import { legendStrokes } from './legend.js';
 
 export { buildDrills } from './excellon.js';
 export type { Drills } from './excellon.js';
@@ -387,74 +383,13 @@ function buildPaste(b: Board, side: 'F' | 'B', extras: GerberExtras): string {
 }
 
 function buildSilk(b: Board, side: 'F' | 'B', extras: GerberExtras): string {
-  const silkLayer: LayerId = side === 'F' ? 'F.Silk' : 'B.Silk';
-  const compSide: 'top' | 'bottom' = side === 'F' ? 'top' : 'bottom';
   const g = new GerberBuilder();
-
-  // Every silk stroke is floored at the fab tier's minimum legend line width
-  // (RuleSet.minSilkWidth -- 0.15mm on all JLCPCB tiers). Below it the fab
-  // thins or drops the legend outright, which costs exactly the labels needed
-  // for bring-up. Applied at the aperture so it covers footprint lines/arcs/
-  // circles and board-level silk lines as well as stroked text.
-  const minSilk = RULESETS[b.rules].minSilkWidth;
-  const silkAperture = (width: number): number => g.aperture(`C,${ap(Math.max(minSilk, width))}`);
-
-  const strokes = (polys: Point[][], width: number): void => {
-    g.select(silkAperture(width));
-    for (const poly of polys) g.drawPolyline(poly);
-  };
-
-  for (const comp of b.components) {
-    if (comp.side !== compSide) continue;
-    const mirror = comp.side === 'bottom';
-    for (const item of comp.footprint.silk) {
-      switch (item.kind) {
-        case 'line': {
-          const [s, e] = componentTransformPoints(comp, [item.start, item.end]);
-          g.select(silkAperture(item.width));
-          g.drawSeg({ type: 'line', start: s, end: e });
-          break;
-        }
-        case 'arc': {
-          const [s, e, ctr] = componentTransformPoints(comp, [item.start, item.end, item.center]);
-          g.select(silkAperture(item.width));
-          g.drawSeg({ type: 'arc', start: s, end: e, center: ctr, cw: mirror ? !item.cw : item.cw });
-          break;
-        }
-        case 'circle': {
-          const [ctr] = componentTransformPoints(comp, [item.center]);
-          g.select(silkAperture(item.width));
-          g.drawCircle(ctr, item.radius);
-          break;
-        }
-        case 'text': {
-          const [at] = componentTransformPoints(comp, [item.at]);
-          const rot = componentTransformRotation(comp, item.rotation);
-          strokes(strokeText(item.text, at, item.height, rot, mirror), item.height * 0.12);
-          break;
-        }
-      }
-    }
-    // refdes label (upright, adjacent to the component body, pad-avoiding —
-    // anchor shared with the SVG/canvas renderers and DRC)
-    const given = extras.labels?.get(comp.refdes);
-    const lp = given ?? { ...componentLabelPlacement(b, comp), text: comp.refdes };
-    strokes(strokeText(lp.text, lp.at, lp.height, lp.rotation, mirror), 0.15);
-  }
-
-  // Board-level silk text. B.Silk text is mirrored (x -> -x about its anchor,
-  // before rotation) like bottom-component text, so it reads correctly on the
-  // fabbed board's underside — matching the 3D viewer's B.Silk convention.
-  for (const s of b.silk) {
-    if (s.layer !== silkLayer) continue;
-    strokes(strokeText(s.text, s.at, s.height, s.rotation, side === 'B'), s.height * 0.12);
-  }
-
-  // Board-level silk lines (mechanical reference outlines) stroked at their width.
-  for (const line of b.silkLines) {
-    if (line.layer !== silkLayer) continue;
-    g.select(silkAperture(line.width));
-    g.drawSeg({ type: 'line', start: line.start, end: line.end });
+  // Widths arrive floored at the ruleset's minimum legend width (legend.ts).
+  for (const s of legendStrokes(b, side, extras.labels)) {
+    g.select(g.aperture(`C,${ap(s.width)}`));
+    if (s.kind === 'seg') g.drawSeg(s.seg);
+    else if (s.kind === 'circle') g.drawCircle(s.center, s.r);
+    else g.drawPolyline(s.pts);
   }
 
   const fn = side === 'F' ? 'Legend,Top' : 'Legend,Bot';

@@ -13,3 +13,5 @@ export { generateCPL } from './cpl.js';
 export type { ExportFabResult } from './exportFab.js';
 export { exportFab } from './exportFab.js';
 export { strokeText } from './strokefont.js';
+export type { LegendStroke } from './legend.js';
+export { legendStrokes } from './legend.js';
