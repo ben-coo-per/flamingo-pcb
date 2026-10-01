@@ -47,6 +47,7 @@ import { pngDimensions, renderPNG } from './screenshot.js';
 import { checkStock, stockCheckEnabled } from './stock.js';
 import { exportStep } from './step.js';
 import { registerPanelTools } from './panel/mcp.js';
+import { registerPrintTools } from './print-tools.js';
 import type { PanelSession } from './panel/session.js';
 
 /**
@@ -1246,6 +1247,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
     },
   );
 
+  registerPrintTools(server, ctx);
   if (ctx.panel) registerPanelTools(server, ctx.panel);
 
   return server;

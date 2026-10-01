@@ -16,7 +16,7 @@ running DRC, and exporting a
 
 ## Features
 
-- **Prompt-first workflow over MCP** — 34 tools cover the whole flow: parts →
+- **Prompt-first workflow over MCP** — 35 tools cover the whole flow: parts →
   placement → nets → routing → DRC → fab export. No schematic step.
 - **Real parts** — LCSC keyword search plus EasyEDA footprint fetch/parse with
   real pad numbers and geometry, cached locally under `~/.flamingo/parts/`.
@@ -116,12 +116,18 @@ prompt → parts → place → connect → route → drc → export
    check) and writes the JLCPCB fileset — refusing on any violation unless
    `waiveDrc` is set.
 
+Before ordering, `export_print` (or `flamingo export-print board.flamingo`)
+writes the board as 1:1 printable sheets: the top side, the bottom side seen
+from below, and every footprint unrotated with pad numbers. Print at 100 %,
+check the scale bars, and lay the real parts on the paper to catch clone parts
+that don't match their footprints.
+
 `screenshot` renders the board to a PNG at any point so Claude can see what it's
 doing.
 
 ## MCP tools
 
-34 tools are served at `http://localhost:4242/mcp`:
+35 tools are served at `http://localhost:4242/mcp`:
 
 | Group | Tools |
 | --- | --- |
@@ -132,7 +138,7 @@ doing.
 | **Board features** | `set_board_outline`, `add_zone`, `add_keepout`, `add_mounting_hole`, `add_silk_text`, `add_silk_line`, `remove_item` |
 | **Routing / analysis** | `add_track`, `add_via`, `get_ratsnest`, `autoroute`, `unroute`, `widen_tracks`, `run_drc` |
 | **History** | `undo`, `redo` |
-| **Output** | `export_fab`, `export_step`, `screenshot` |
+| **Output** | `export_fab`, `export_step`, `export_print`, `screenshot` |
 
 ## Panels and order cost
 
@@ -170,7 +176,7 @@ boards + quantities → quote_order → panel_apply_scenario → panel_check →
 
 ### Panel MCP tools
 
-23 tools, served at the same `/mcp` endpoint as the 34 board tools:
+23 tools, served at the same `/mcp` endpoint as the 35 board tools:
 
 | Group | Tool | What it does |
 | --- | --- | --- |
