@@ -16,7 +16,7 @@ running DRC, and exporting a
 
 ## Features
 
-- **Prompt-first workflow over MCP** — 36 tools cover the whole flow: parts →
+- **Prompt-first workflow over MCP** — 39 tools cover the whole flow: parts →
   placement → nets → routing → DRC → fab export. No schematic step.
 - **Real parts** — LCSC keyword search plus EasyEDA footprint fetch/parse with
   real pad numbers and geometry, cached locally under `~/.flamingo/parts/`.
@@ -128,7 +128,7 @@ doing.
 
 ## MCP tools
 
-36 tools are served at `http://localhost:4242/mcp`:
+39 tools are served at `http://localhost:4242/mcp`:
 
 | Group | Tools |
 | --- | --- |
@@ -141,6 +141,7 @@ doing.
 | **Checks** | `run_erc` |
 | **History** | `undo`, `redo` |
 | **Output** | `export_fab`, `export_step`, `export_print`, `screenshot` |
+| **Simulation** | `export_spice`, `run_spice`, `simulate_logic` (see [docs/simulation.md](docs/simulation.md)) |
 
 ## Electrical checks
 
@@ -217,7 +218,7 @@ boards + quantities → quote_order → panel_apply_scenario → panel_check →
 
 ### Panel MCP tools
 
-26 tools, served at the same `/mcp` endpoint as the 36 board tools:
+26 tools, served at the same `/mcp` endpoint as the 39 board tools:
 
 | Group | Tool | What it does |
 | --- | --- | --- |

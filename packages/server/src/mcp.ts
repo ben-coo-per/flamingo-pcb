@@ -52,6 +52,7 @@ import { registerPanelTools } from './panel/mcp.js';
 import { registerPrintTools } from './print-tools.js';
 import { ercFindings, registerCheckTools, writeChecksReport } from './checks-tools.js';
 import { drcFindings } from './checks.js';
+import { registerSimTools } from './sim-tools.js';
 import type { PanelSession } from './panel/session.js';
 
 /**
@@ -1277,6 +1278,8 @@ export function createMcpServer(ctx: McpContext): McpServer {
   );
 
   registerPrintTools(server, ctx);
+  registerSimTools(server, ctx);
+
   if (ctx.panel) registerPanelTools(server, ctx.panel);
   registerCheckTools(server, ctx);
 
