@@ -491,8 +491,10 @@ export function createMcpServer(ctx: McpContext): McpServer {
       lines.push(`Footprint: ${footprint.name} (${footprint.pads.length} pad(s))`);
       for (const pad of footprint.pads) {
         const drill = pad.drill ? `, drill ${fmt(pad.drill.diameter)}mm${pad.drill.plated ? '' : ' (unplated)'}` : '';
+        const pin = footprint.pins?.[pad.number];
+        const named = pin?.name && pin.name !== pad.number ? ` [${pin.name}${pin.type !== 'undefined' ? `, ${pin.type}` : ''}]` : '';
         lines.push(
-          `  pad ${pad.number}: ${pad.shape} at (${fmt(pad.at.x)}, ${fmt(pad.at.y)}) size ${fmt(pad.size.w)}x${fmt(pad.size.h)}mm, ${pad.layer}${drill}`,
+          `  pad ${pad.number}${named}: ${pad.shape} at (${fmt(pad.at.x)}, ${fmt(pad.at.y)}) size ${fmt(pad.size.w)}x${fmt(pad.size.h)}mm, ${pad.layer}${drill}`,
         );
       }
       return textResult(lines.join('\n'));

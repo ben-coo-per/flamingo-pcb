@@ -7,6 +7,8 @@ export type {
   SilkItem,
   Footprint,
   FootprintHole,
+  SymbolPin,
+  PinType,
   ComponentInst,
   Net,
   NetClass,
@@ -107,3 +109,8 @@ export type { RuleSet } from './drc/rules.js';
 export { RULESETS } from './drc/rules.js';
 export type { DrcViolation, CopperItem } from './drc/types.js';
 export { runDRC, buildCopperItems, groupFillRings } from './drc/drc.js';
+
+// Electrical checks: shared types, and component values as numbers.
+export * from './checks/index.js';
+export { parseValue, kindFromRefdes, formatSi } from './values.js';
+export type { ParsedValue, ValueUnit, ValueKind } from './values.js';

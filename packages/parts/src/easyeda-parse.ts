@@ -19,7 +19,7 @@
  *   fixture's ground-truth POLYGON points exactly under this transform.
  */
 
-import type { Footprint, FootprintHole, Pad, SilkItem, Point } from '@flamingo/engine';
+import type { Footprint, FootprintHole, Pad, PinType, SilkItem, SymbolPin, Point } from '@flamingo/engine';
 
 export interface PartInfo {
   lcsc: string;
@@ -386,7 +386,11 @@ interface RawResult {
   description?: string;
   lcsc?: { number?: string; stock?: number; price?: number };
   szlcsc?: { number?: string; stock?: number; price?: number };
-  dataStr?: { head?: { c_para?: Record<string, string> } };
+  dataStr?: {
+    head?: { c_para?: Record<string, string> };
+    shape?: string[];
+    subparts?: { dataStr?: { shape?: string[] } }[];
+  };
   packageDetail?: {
     title?: string;
     dataStr?: {
@@ -394,6 +398,46 @@ interface RawResult {
       shape?: string[];
     };
   };
+}
+
+const PIN_TYPES: Record<string, PinType> = {
+  '0': 'undefined',
+  '1': 'input',
+  '2': 'output',
+  '3': 'bidirectional',
+  '4': 'power',
+};
+
+/**
+ * Pin names and electrical types from the schematic symbol (`result.dataStr`),
+ * keyed by pin number.
+ *
+ * An EasyEDA pin shape is `^^`-separated segments:
+ *   P~show~<elec>~<number>~x~y~rot~id~locked ^^ dot ^^ path ^^ 1~x~y~rot~<NAME>~… ^^ …
+ * Segment 0 field 3 is the number, field 2 the electrical type; segment 3
+ * field 4 is the name. Multi-unit symbols keep their units under `subparts`.
+ * Never throws: a symbol that cannot be read yields `{}`.
+ */
+export function parseEasyedaSymbolPins(apiJson: unknown): Record<string, SymbolPin> {
+  const pins: Record<string, SymbolPin> = {};
+  let root: RawResult;
+  try {
+    root = unwrap(apiJson);
+  } catch {
+    return pins;
+  }
+  const shapes: unknown[] = [...(root.dataStr?.shape ?? [])];
+  for (const sub of root.dataStr?.subparts ?? []) shapes.push(...(sub?.dataStr?.shape ?? []));
+  for (const s of shapes) {
+    if (typeof s !== 'string' || !s.startsWith('P~')) continue;
+    const segs = s.split('^^');
+    const head = segs[0]!.split('~');
+    const number = (head[3] ?? '').trim();
+    if (!number) continue;
+    const name = (segs[3]?.split('~')[4] ?? '').trim();
+    pins[number] = { name, type: PIN_TYPES[head[2] ?? ''] ?? 'undefined' };
+  }
+  return pins;
 }
 
 /** Unwrap the { success, result } envelope, or accept a bare result object. */
@@ -638,5 +682,7 @@ export function parseEasyedaFootprint(
     courtyard,
     ...(holes.length > 0 ? { holes } : {}),
   };
+  const pins = parseEasyedaSymbolPins(apiJson);
+  if (Object.keys(pins).length > 0) footprint.pins = pins;
   return { footprint, info };
 }
