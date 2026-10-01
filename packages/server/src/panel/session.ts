@@ -95,6 +95,11 @@ function safeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]+/g, '_') || 'panel';
 }
 
+/** Connectors per source board, as `GET /api/panel/headers` returns them. */
+export interface PanelHeaders {
+  boards: { key: string; name: string; headers: { refdes: string; pads: number; value: string }[]; error?: string }[];
+}
+
 export class PanelSession extends EventEmitter {
   readonly doc: PanelDoc;
   readonly projectDir: string;
@@ -591,6 +596,23 @@ export class PanelSession extends EventEmitter {
    * interconnect.ts). `docs` are markdown files, relative to the project
    * directory, whose pin tables are compared with the copper.
    */
+  /**
+   * The connectors on each source board, for picking cable ends: components
+   * whose refdes starts with J or P, in refdes order. A board that cannot be
+   * read is listed with no headers and its error.
+   */
+  async headers(): Promise<PanelHeaders> {
+    const boards: PanelHeaders['boards'] = [];
+    for (const src of await this.resolved()) {
+      const headers = (src.board?.components ?? [])
+        .filter((c) => /^[JP]\d/i.test(c.refdes))
+        .map((c) => ({ refdes: c.refdes, pads: c.footprint.pads.length, value: c.fields.value ?? '' }))
+        .sort((a, b) => a.refdes.localeCompare(b.refdes, undefined, { numeric: true }));
+      boards.push({ key: src.key, name: src.name, headers, ...(src.error ? { error: src.error } : {}) });
+    }
+    return { boards };
+  }
+
   async checkInterconnect(docs: string[] = []): Promise<Outcome<{ findings: CheckFinding[] }>> {
     const texts: { name: string; text: string }[] = [];
     for (const d of docs) {

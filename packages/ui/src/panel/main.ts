@@ -20,6 +20,7 @@ import { drawPlate } from './draw.js';
 import { loadsOntoPanel, mm, previewLine, quoteKey } from './format.js';
 import { OWN, buildOptions, rankOf, scenarioOnPlate } from './options.js';
 import { DRAG_THRESHOLD_PX, contentBox, dropPosition, hitInstance, platePlaces, platesBox } from './hit.js';
+import { createCables } from './cables.js';
 import { createSidebar } from './sidebar.js';
 import { PanelStore } from './store.js';
 import { connectPanelWs } from './ws.js';
@@ -578,6 +579,8 @@ const renderSidebar = createSidebar(
   },
 );
 
+const renderCables = createCables($('cables'), { op: (op) => api.op(op) });
+
 // A board made in the editor since this page loaded should be on offer.
 window.addEventListener('focus', () => refreshBoardFiles(store.get().view, true));
 
@@ -604,6 +607,7 @@ $('export-btn').addEventListener('click', () => void exportFab());
 store.subscribe((state, previous) => {
   requestDraw();
   renderSidebar(state);
+  renderCables(state);
   if (state.menu !== previous.menu || state.view !== previous.view) renderMenu();
   if (state.preview !== previous.preview || state.quote !== previous.quote || state.view !== previous.view) renderBanner();
 });
@@ -615,6 +619,7 @@ new ResizeObserver(() => {
 }).observe(plate);
 resize();
 renderSidebar(store.get());
+renderCables(store.get());
 
 // A read-only handle for scripted checks (packages/server/scripts/verify-panel-ui.ts):
 // where things are on the plate cannot be read from the DOM, because the plate is a canvas.

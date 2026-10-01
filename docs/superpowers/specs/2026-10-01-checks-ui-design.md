@@ -90,6 +90,7 @@ All JSON. Errors are `{ ok: false, error }` with a 4xx or 5xx status.
 | `POST /api/sim/run` | `{ path }` (one from `/api/sim/specs`; paths outside the board directory are refused) | logic: `{ ok, kind: 'logic', states, results: [{ name, pass, counterexample?: Record<string, string> }], findings }`; spice: `{ ok, kind: 'spice', backend, runs: [{ template, summary: string[] }], findings }` |
 | `GET /api/export.print` | `?paper=a4\|letter` | `application/pdf`, `content-disposition: attachment; filename="<board>.print.pdf"` |
 | `GET /api/panel/interconnect` | | `{ ok, findings: CheckFinding[] }` |
+| `GET /api/panel/headers` | | `{ ok, boards: [{ key, name, headers: [{ refdes, pads, value }], error? }] }`: connectors per source board, meaning components whose refdes starts with J or P followed by a digit, in refdes order |
 | `POST /api/panel/op` | `{ op: 'addLink', link }` / `{ op: 'removeLink', id }` | the existing panel op route |
 
 `/api/drc` and `/api/erc` stay, for compatibility and the MCP screenshots.
