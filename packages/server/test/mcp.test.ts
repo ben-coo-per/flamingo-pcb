@@ -81,6 +81,8 @@ const TOOL_NAMES = [
   'parts_get',
   'datasheet_get',
   'place_component',
+  'place_builtin',
+  'set_do_not_place',
   'move_component',
   'remove_component',
   'connect_pins',
@@ -141,11 +143,11 @@ describe('MCP endpoint', () => {
     await rm(projectDir, { recursive: true, force: true });
   });
 
-  it('tools/list returns all 34 core tools', async () => {
+  it('tools/list returns all 36 core tools', async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([...TOOL_NAMES].sort());
-    expect(tools).toHaveLength(34);
+    expect(tools).toHaveLength(36);
   });
 
   it('place_component (mocked part) then get_board_state reflects it', async () => {
@@ -166,6 +168,45 @@ describe('MCP endpoint', () => {
     expect(doc.board.components).toHaveLength(1);
     expect(doc.board.components[0]?.refdes).toBe('R1');
     expect(doc.board.components[0]?.at).toEqual({ x: 12, y: 8 });
+  });
+
+  it('place_builtin places a bridged solder jumper with no LCSC part', async () => {
+    const r = await client.callTool({
+      name: 'place_builtin',
+      arguments: { kind: 'solder-jumper-2', refdes: 'JP1', bridge: '1-2', x: 3, y: 4 },
+    });
+    expect(r.isError).toBeFalsy();
+    expect(textOf(r as any)).toContain('no LCSC');
+    const jp = doc.board.components.find((c) => c.refdes === 'JP1')!;
+    expect(jp.lcsc).toBe('');
+    expect(jp.footprint.netTie).toEqual(['1', '2']);
+    expect(jp.footprint.pads.map((p) => p.number)).toEqual(['1', '2']);
+
+    const tp = await client.callTool({ name: 'place_builtin', arguments: { kind: 'test-point', refdes: 'TP1', diameter: 1.5 } });
+    expect(tp.isError).toBeFalsy();
+    expect(doc.board.components.find((c) => c.refdes === 'TP1')!.footprint.pads[0]!.size).toEqual({ w: 1.5, h: 1.5 });
+  });
+
+  it('place_builtin rejects options that do not fit the kind', async () => {
+    const a = await client.callTool({ name: 'place_builtin', arguments: { kind: 'solder-jumper-2', refdes: 'JP1', bridge: '2-3' } });
+    expect(a.isError).toBe(true);
+    const b = await client.callTool({ name: 'place_builtin', arguments: { kind: 'test-point', refdes: 'TP1', bridge: '1-2' } });
+    expect(b.isError).toBe(true);
+    const c = await client.callTool({ name: 'place_builtin', arguments: { kind: 'test-point', refdes: 'TP1', diameter: 9 } });
+    expect(c.isError).toBe(true);
+    expect(doc.board.components).toHaveLength(0);
+  });
+
+  it('set_do_not_place marks a part and place_component takes dnp', async () => {
+    await client.callTool({ name: 'place_component', arguments: { lcsc: 'C25804', refdes: 'R1', dnp: true } });
+    expect(doc.board.components[0]!.fields.dnp).toBe(true);
+    const r = await client.callTool({ name: 'set_do_not_place', arguments: { refdes: 'R1', dnp: false } });
+    expect(r.isError).toBeFalsy();
+    expect(doc.board.components[0]!.fields.dnp).toBe(false);
+    const on = await client.callTool({ name: 'set_do_not_place', arguments: { refdes: 'R1', dnp: true } });
+    expect(textOf(on as any)).toContain('do not place');
+    const missing = await client.callTool({ name: 'set_do_not_place', arguments: { refdes: 'R9', dnp: true } });
+    expect(missing.isError).toBe(true);
   });
 
   it('place_component auto-positions when x/y are omitted', async () => {

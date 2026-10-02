@@ -15,7 +15,7 @@
  */
 
 import type { Board, ComponentInst, Point } from '@flamingo/engine';
-import { componentTransformPoints, outlineToPolygon, padOutline, pointInPolygon } from '@flamingo/engine';
+import { componentTransformPoints, isAssembled, outlineToPolygon, padOutline, pointInPolygon } from '@flamingo/engine';
 import type { PanelLimits } from './config.js';
 import { boxOf } from './transform.js';
 import type { Box, Side } from './types.js';
@@ -83,7 +83,6 @@ export interface SourceGeometry {
 }
 
 const EPS = 0.01;
-const LCSC_ID = /^C\d+$/i;
 
 function polygonArea(pts: Point[]): number {
   let s = 0;
@@ -120,7 +119,7 @@ function nearestSide(p: Point, bbox: Box): Side {
 function collectParts(board: Board): PartLine[] {
   const byLcsc = new Map<string, PartLine>();
   for (const c of board.components) {
-    if (!LCSC_ID.test(c.lcsc)) continue; // test points, mechanical items: nothing to place
+    if (!isAssembled(c)) continue; // test points, do-not-place parts: nothing to place
     let line = byLcsc.get(c.lcsc);
     if (!line) {
       const tht = c.footprint.pads.filter((p) => p.layer === 'through' && p.drill?.plated !== false).length;
@@ -237,7 +236,7 @@ export function resolveSourceGeometry(board: Board, limits: PanelLimits): Source
     edgeKeepouts,
     parts: collectParts(board),
     componentCount: board.components.length,
-    hasBottomParts: board.components.some((c) => c.side === 'bottom' && LCSC_ID.test(c.lcsc)),
+    hasBottomParts: board.components.some((c) => c.side === 'bottom' && isAssembled(c)),
   };
 }
 

@@ -18,9 +18,13 @@
  * Designators within a group are joined with a bare comma ("R1,R2,R5"), no
  * space, sorted in natural order (numeric run compared as a number, so
  * R2 < R10) since plain lexicographic sort would put R10 before R2.
+ *
+ * Parts JLCPCB does not assemble (no LCSC number, or marked do-not-place)
+ * get no row; the CPL leaves them out too.
  */
 
 import type { Board, ComponentInst } from '@flamingo/engine';
+import { isAssembled } from '@flamingo/engine';
 
 const CRLF = '\r\n';
 const GROUP_SEP = ' ';
@@ -78,6 +82,7 @@ export function generateBOM(b: Board): string {
   const groups = new Map<string, BomGroup>();
 
   for (const c of b.components) {
+    if (!isAssembled(c)) continue; // no LCSC number, or do not place
     const comment = commentOf(c);
     const key = c.lcsc + GROUP_SEP + comment;
     let g = groups.get(key);
