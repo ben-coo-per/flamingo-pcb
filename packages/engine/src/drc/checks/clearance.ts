@@ -69,8 +69,21 @@ function closestApproach(a: Point[], b: Point[]): Point {
   return at;
 }
 
+/** Pad refs that may touch each other (a footprint's netTie), keyed by pad ref. */
+function tiedPads(b: Board): Map<string, Set<string>> {
+  const tied = new Map<string, Set<string>>();
+  for (const c of b.components) {
+    const tie = c.footprint.netTie;
+    if (!tie || tie.length < 2) continue;
+    const refs = new Set(tie.map((n) => `${c.refdes}.${n}`));
+    for (const r of refs) tied.set(r, refs);
+  }
+  return tied;
+}
+
 export function check(b: Board, rules: RuleSet, items: CopperItem[]): DrcViolation[] {
   const violations: DrcViolation[] = [];
+  const tied = tiedPads(b);
   const withBbox = items.map((it) => ({ it, bbox: bboxOf(it.polygon) }));
 
   for (let i = 0; i < withBbox.length; i++) {
@@ -79,6 +92,7 @@ export function check(b: Board, rules: RuleSet, items: CopperItem[]): DrcViolati
       const c = withBbox[j];
       if (a.it.layer !== c.it.layer) continue;
       if (a.it.net === c.it.net) continue; // same-net (or both unassigned) — not a clearance violation
+      if (a.it.kind === 'pad' && c.it.kind === 'pad' && tied.get(a.it.ref)?.has(c.it.ref)) continue; // net tie
 
       const required = Math.max(rules.minClearance, netClearance(b, a.it.net), netClearance(b, c.it.net));
 

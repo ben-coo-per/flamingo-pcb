@@ -5,6 +5,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type {
   Board,
+  BuiltinFootprintSpec,
   ComponentInst,
   DrcViolation,
   Footprint,
@@ -25,7 +26,9 @@ import type {
 } from '@flamingo/engine';
 import {
   boardBBox,
+  builtinFootprint,
   fillAllZones,
+  isAssembled,
   isFullyRouted,
   LABEL_NETS_LAYER,
   LABEL_PADS_LAYER,
@@ -46,6 +49,8 @@ import { formatAutorouteSummary, runAutorouteBroadcast } from './autoroute.js';
 import { pngDimensions, renderPNG } from './screenshot.js';
 import { checkStock, stockCheckEnabled } from './stock.js';
 import { exportStep } from './step.js';
+import { registerPanelTools } from './panel/mcp.js';
+import type { PanelSession } from './panel/session.js';
 
 /**
  * Parts API injected into the MCP context so tests can supply a mock (no
@@ -68,6 +73,14 @@ export interface McpContext {
    * jar in the unit suite). Production wires up the real runner from route.ts.
    */
   route: RouteRunner;
+  /**
+   * Panel session. When present, the panel tools (panel_*, quote_order,
+   * export_panel_fab) are served next to the board tools; when absent the
+   * tool list is exactly the board tools.
+   */
+  panel?: PanelSession;
+  /** The server was started on a panel file: panel tools only. */
+  panelOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,7 +114,8 @@ function applyAndReport(
 function formatComponent(c: ComponentInst): string {
   const pkg = c.fields.package ?? c.footprint.name ?? '?';
   const value = c.fields.value ? ` ${c.fields.value}` : '';
-  return `${c.refdes} (${c.lcsc}, ${pkg}${value}) at (${fmt(c.at.x)}, ${fmt(c.at.y)}) rot ${fmt(c.rotation)} ${c.side}`;
+  const dnp = isAssembled(c) || !c.lcsc ? '' : ', do not place';
+  return `${c.refdes} (${c.lcsc || 'no LCSC'}, ${pkg}${value}${dnp}) at (${fmt(c.at.x)}, ${fmt(c.at.y)}) rot ${fmt(c.rotation)} ${c.side}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -342,6 +356,12 @@ const regionSchema = z.object({
 export function createMcpServer(ctx: McpContext): McpServer {
   const server = new McpServer({ name: 'flamingo', version: '0.1.0' });
 
+  // A server started on a panel file has no board of its own to work on.
+  if (ctx.panelOnly && ctx.panel) {
+    registerPanelTools(server, ctx.panel);
+    return server;
+  }
+
   server.registerTool(
     'new_board',
     {
@@ -535,9 +555,13 @@ export function createMcpServer(ctx: McpContext): McpServer {
           .string()
           .optional()
           .describe('Plain-English note on what this part is for on this board, e.g. "Decouples the 3V3 rail at U2" or "I2C pull-up on SDA". Shown in the UI selection panel; never exported to the BOM — per-instance context goes here, not in value.'),
+        dnp: z
+          .boolean()
+          .optional()
+          .describe('Do not place (default false): the footprint is on the board but JLCPCB fits nothing, so the part is left out of the BOM, the CPL and the stock check. Change it later with set_do_not_place.'),
       },
     },
-    async ({ lcsc, refdes, x, y, rotation, side, value, role }) => {
+    async ({ lcsc, refdes, x, y, rotation, side, value, role, dnp }) => {
       let footprint: Footprint;
       let info: PartInfo;
       try {
@@ -562,11 +586,101 @@ export function createMcpServer(ctx: McpContext): McpServer {
           mfr: info.mfr,
           package: info.package,
           basic: info.basic,
+          ...(dnp ? { dnp: true } : {}),
         },
       };
       return applyAndReport(ctx, op, (result) => {
         const comp = result.board.components.find((c) => c.refdes === refdes)!;
         return `Placed ${formatComponent(comp)}`;
+      });
+    },
+  );
+
+  server.registerTool(
+    'place_builtin',
+    {
+      description:
+        'Place a footprint that has no LCSC part: a solder jumper or a test-point pad. These are copper only, get no solder paste, and stay out of the BOM, the CPL and the stock check. ' +
+        'Solder jumpers have 1.0x1.5mm pads with a 0.3mm gap. "solder-jumper-2" has pads 1 and 2; "solder-jumper-3" has pads 1, 2, 3 with pad 2 the common one. ' +
+        'Open (bridge "none"): close it by bridging the gap with solder. Bridged: a copper link joins two pads, cut it to open the jumper. A bridged jumper\'s pads stay separate nets, so connect each pad to its own net; DRC allows the link. ' +
+        '"test-point" is one round bare SMD pad (pad 1) for a probe. "test-point-th" is a plated through-hole pad (pad 1) on every copper layer, for a probe, a test hook or a soldered wire loop.',
+      inputSchema: {
+        kind: z.enum(['solder-jumper-2', 'solder-jumper-3', 'test-point', 'test-point-th']).describe('Which footprint'),
+        refdes: z.string().describe('Reference designator, e.g. "JP1" or "TP1" — must be unique on the board'),
+        bridge: z
+          .enum(['none', '1-2', '2-3'])
+          .optional()
+          .describe('Solder jumpers only: which pads the copper link joins (default "none", open). "1-2" for a 2-pad jumper closes it; "2-3" is for 3-pad jumpers only.'),
+        diameter: z
+          .number()
+          .optional()
+          .describe('Test points only: pad diameter in mm. "test-point": 0.5 to 3 (default 1.0). "test-point-th": up to 5, leaving at least a 0.15mm ring around the drill (default 2.0).'),
+        drill: z.number().optional().describe('"test-point-th" only: hole diameter in mm, 0.3 to 3 (default 1.0)'),
+        x: z.number().optional().describe('X position in mm. Omit to auto-place.'),
+        y: z.number().optional().describe('Y position in mm. Omit to auto-place.'),
+        rotation: z.number().optional().describe('Rotation in degrees CCW (default 0)'),
+        side: sideSchema.optional().describe('Board side (default "top")'),
+        role: z.string().optional().describe('Plain-English note on what this is for, e.g. "Selects I2C address 0x3D when closed"'),
+      },
+    },
+    ({ kind, refdes, bridge, diameter, drill, x, y, rotation, side, role }) => {
+      let spec: BuiltinFootprintSpec;
+      if (drill !== undefined && kind !== 'test-point-th') return errorResult('drill applies to "test-point-th" only');
+      if (kind === 'test-point' || kind === 'test-point-th') {
+        if (bridge !== undefined) return errorResult('bridge applies to solder jumpers only');
+        spec = { kind, ...(diameter !== undefined ? { diameter } : {}), ...(drill !== undefined ? { drill } : {}) };
+      } else {
+        if (diameter !== undefined) return errorResult('diameter applies to test points only');
+        if (kind === 'solder-jumper-2') {
+          if (bridge === '2-3') return errorResult('a 2-pad solder jumper has pads 1 and 2: use bridge "1-2" or "none"');
+          spec = { kind, bridged: bridge === '1-2' };
+        } else {
+          spec = { kind, bridged: bridge ?? 'none' };
+        }
+      }
+      let part;
+      try {
+        part = builtinFootprint(spec);
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : String(err));
+      }
+      const n = ctx.doc.board.components.length;
+      const op: Op = {
+        op: 'placeComponent',
+        refdes,
+        lcsc: '',
+        footprint: part.footprint,
+        at: { x: x ?? 5 + 5 * n, y: y ?? 5 },
+        rotation: rotation ?? 0,
+        side: side ?? 'top',
+        fields: { value: part.value, description: part.description, role, package: part.package },
+      };
+      return applyAndReport(ctx, op, (result) => {
+        const comp = result.board.components.find((c) => c.refdes === refdes)!;
+        const pads = comp.footprint.pads.map((p) => p.number).join(', ');
+        return `Placed ${formatComponent(comp)}\nPads: ${pads}. ${part.description}.`;
+      });
+    },
+  );
+
+  server.registerTool(
+    'set_do_not_place',
+    {
+      description:
+        'Mark a placed part do-not-place, or clear the mark. A do-not-place part keeps its footprint and nets but JLCPCB fits nothing there: it is left out of the BOM, the CPL and the stock check. Use it for an empty footprint (a 0R to fit by hand later, an optional part).',
+      inputSchema: {
+        refdes: z.string().describe('Reference designator of the part'),
+        dnp: z.boolean().describe('true = do not place; false = place it again'),
+      },
+    },
+    ({ refdes, dnp }) => {
+      const comp = ctx.doc.board.components.find((c) => c.refdes === refdes);
+      if (!comp) return errorResult(`Unknown refdes "${refdes}"`);
+      const op: Op = { op: 'setComponentFields', refdes, fields: { dnp } };
+      return applyAndReport(ctx, op, (result) => {
+        const c = result.board.components.find((c2) => c2.refdes === refdes)!;
+        const note = c.lcsc ? '' : ' (it has no LCSC part, so it is never placed either way)';
+        return `${refdes} is ${dnp ? 'do not place' : 'placed'}${note}: ${formatComponent(c)}`;
       });
     },
   );
@@ -1227,6 +1341,8 @@ export function createMcpServer(ctx: McpContext): McpServer {
       };
     },
   );
+
+  if (ctx.panel) registerPanelTools(server, ctx.panel);
 
   return server;
 }

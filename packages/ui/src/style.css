@@ -976,6 +976,23 @@ input[type='text'].props-inline-input {
   white-space: nowrap;
 }
 
+.bom-tag {
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 0 3px;
+  border: 1px dashed var(--ink-faint);
+  color: var(--ink-faint);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.bom-row-unfitted .bom-title {
+  color: var(--ink-faint);
+}
+.bom-row-unfitted .bom-ref {
+  border-style: dashed;
+  background: transparent;
+}
+
 .bom-qty {
   color: var(--ink-faint);
   font-size: 10px;
