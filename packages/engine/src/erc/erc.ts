@@ -29,6 +29,12 @@ export interface ErcOptions {
   decouplingMm?: number;
   /** Also return waived findings, at level 'info' with the waiver's reason appended. */
   includeWaived?: boolean;
+  /**
+   * Leave board.checkWaivers unapplied and return every finding as found
+   * (default false). For callers that split kept from waived themselves,
+   * like the editor's Checks workspace.
+   */
+  ignoreWaivers?: boolean;
 }
 
 export const ERC_RULES = [
@@ -67,6 +73,7 @@ export function runErc(board: Board, opts: ErcOptions = {}): CheckFinding[] {
     ...usbCc(nl),
   );
 
+  if (opts.ignoreWaivers) return findings;
   const { kept, waived } = applyWaivers(findings, board.checkWaivers?.filter((w) => !w.check || w.check === 'erc'));
   if (!opts.includeWaived) return kept;
   return [

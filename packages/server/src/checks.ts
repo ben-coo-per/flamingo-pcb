@@ -30,6 +30,11 @@ export interface CheckContext {
   fetchStock?: (lcsc: string) => Promise<JlcStock>;
   /** Directory of the board file, for checks that read files beside it. */
   boardDir?: string;
+  /**
+   * Return findings without applying board.checkWaivers, for a caller that
+   * splits kept from waived itself (the Checks workspace). Default false.
+   */
+  ignoreWaivers?: boolean;
 }
 
 export interface BoardCheck {
@@ -72,7 +77,7 @@ registerCheck({
 registerCheck({
   name: 'erc',
   description: 'Electrical rules on the netlist: power pins, floating inputs, decoupling, polarity, part facts',
-  run: (board, ctx) => runErc(board, { pins: ctx.pins }),
+  run: (board, ctx) => runErc(board, { pins: ctx.pins, ...(ctx.ignoreWaivers ? { ignoreWaivers: true } : {}) }),
 });
 
 /** A board on a panel, as panel checks see it. */

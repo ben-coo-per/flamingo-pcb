@@ -3,6 +3,7 @@
  * the Vite dev proxy and when served by the Flamingo server itself.
  */
 
+import type { CheckFinding } from '@flamingo/engine';
 import type { ArrangeResult, PanelOp, QuoteResult } from '@flamingo/panel';
 
 export interface ApiError {
@@ -62,6 +63,28 @@ export const api = {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   },
+};
+
+async function get<T>(path: string): Promise<T | ApiError> {
+  try {
+    const res = await fetch(path);
+    return (await res.json()) as T | ApiError;
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export interface BoardHeaders {
+  key: string;
+  name: string;
+  headers: { refdes: string; pads: number; value: string }[];
+  error?: string;
+}
+
+/** The cable check, and what the cable form needs to offer ends. */
+export const cablesApi = {
+  check: () => get<{ ok: true; findings: CheckFinding[] }>('/api/panel/interconnect'),
+  headers: () => get<{ ok: true; boards: BoardHeaders[] }>('/api/panel/headers'),
 };
 
 export function isError(r: unknown): r is ApiError {

@@ -95,7 +95,8 @@ export function islandsFor(board: Board, net: string): NetIsland[] {
   }
   return islandCache.islands;
 }
-const DRC_COLOR = '#FF0000';
+// Check-finding rings, by level: error red, warn amber, info grey.
+const CHECK_COLORS = { error: '#FF3B30', warn: '#FFB020', info: '#9A9A9A' } as const;
 const KEEPOUT_COLOR = '#FF6600';
 const HOVER_COLOR = '#ffffffcc';
 // Matches SELECT_COLOR in tools/select.ts (the drag ghost) so "selected" reads
@@ -861,8 +862,20 @@ export function draw(board: Board, state: AppState, ctx: CanvasRenderingContext2
     }
   }
 
-  // ---- DRC markers (locations from the last "Run DRC" panel check) ----
-  for (const m of state.drcMarkers) strokeCircle(ctx, view, m, 0.5, DRC_COLOR, 0.15);
+  // ---- Check markers (locations from the last Checks run). Info under warn
+  // under error so the worst finding's ring is on top; the focused one last
+  // and heavier. ----
+  const order = { info: 0, warn: 1, error: 2 } as const;
+  const markers = [...state.checkMarkers].sort((a, b) => order[a.level] - order[b.level]);
+  let focused: (typeof markers)[number] | undefined;
+  for (const m of markers) {
+    if (m.key === state.checkMarkerFocus) focused = m;
+    else strokeCircle(ctx, view, m.at, 0.5, CHECK_COLORS[m.level], 0.15);
+  }
+  if (focused) {
+    strokeCircle(ctx, view, focused.at, 0.8, CHECK_COLORS[focused.level], 0.35);
+    strokeCircle(ctx, view, focused.at, 0.25, CHECK_COLORS[focused.level], 0.15);
+  }
 
   ctx.restore();
 }
