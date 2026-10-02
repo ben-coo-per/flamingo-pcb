@@ -56,6 +56,22 @@ describe('builtinFootprint', () => {
     expect(footprint.name).toBe('TestPoint_Pad_D1.5mm');
     expect(() => builtinFootprint({ kind: 'test-point', diameter: 4 })).toThrow();
   });
+
+  it('a through-hole test point is a plated pad on every layer', () => {
+    const { footprint } = builtinFootprint({ kind: 'test-point-th' });
+    expect(footprint.pads).toEqual([
+      expect.objectContaining({ layer: 'through', size: { w: 2, h: 2 }, drill: { diameter: 1, plated: true } }),
+    ]);
+    expect(footprint.name).toBe('TestPoint_THT_D2mm_Drill1mm');
+    expect(footprint.lcsc).toBe('');
+  });
+
+  it('a through-hole test point needs a 0.15mm ring and a drillable hole', () => {
+    expect(() => builtinFootprint({ kind: 'test-point-th', diameter: 1.3, drill: 1.0 })).not.toThrow();
+    expect(() => builtinFootprint({ kind: 'test-point-th', diameter: 1.2, drill: 1.0 })).toThrow(/ring/);
+    expect(() => builtinFootprint({ kind: 'test-point-th', drill: 0.2 })).toThrow(/drill/);
+    expect(() => builtinFootprint({ kind: 'test-point-th', diameter: 6, drill: 3 })).toThrow(/5mm/);
+  });
 });
 
 describe('DRC with solder jumpers', () => {
@@ -92,10 +108,12 @@ describe('DRC with solder jumpers', () => {
     const b = board(
       place('JP1', builtinFootprint({ kind: 'solder-jumper-3' }).footprint, 10),
       place('TP1', builtinFootprint({ kind: 'test-point' }).footprint, 20),
+      place('TP2', builtinFootprint({ kind: 'test-point-th' }).footprint, 30),
     );
     const rules = new Set(runDRC(b).map((v) => v.rule));
     expect(rules.has('silk-over-pad')).toBe(false);
     expect(rules.has('courtyard-overlap')).toBe(false);
+    expect(rules.has('drill')).toBe(false);
   });
 });
 

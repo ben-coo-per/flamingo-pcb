@@ -587,15 +587,19 @@ export function createMcpServer(ctx: McpContext): McpServer {
         'Place a footprint that has no LCSC part: a solder jumper or a test-point pad. These are copper only, get no solder paste, and stay out of the BOM, the CPL and the stock check. ' +
         'Solder jumpers have 1.0x1.5mm pads with a 0.3mm gap. "solder-jumper-2" has pads 1 and 2; "solder-jumper-3" has pads 1, 2, 3 with pad 2 the common one. ' +
         'Open (bridge "none"): close it by bridging the gap with solder. Bridged: a copper link joins two pads, cut it to open the jumper. A bridged jumper\'s pads stay separate nets, so connect each pad to its own net; DRC allows the link. ' +
-        '"test-point" is one round bare pad (pad 1) for a probe.',
+        '"test-point" is one round bare SMD pad (pad 1) for a probe. "test-point-th" is a plated through-hole pad (pad 1) on every copper layer, for a probe, a test hook or a soldered wire loop.',
       inputSchema: {
-        kind: z.enum(['solder-jumper-2', 'solder-jumper-3', 'test-point']).describe('Which footprint'),
+        kind: z.enum(['solder-jumper-2', 'solder-jumper-3', 'test-point', 'test-point-th']).describe('Which footprint'),
         refdes: z.string().describe('Reference designator, e.g. "JP1" or "TP1" — must be unique on the board'),
         bridge: z
           .enum(['none', '1-2', '2-3'])
           .optional()
           .describe('Solder jumpers only: which pads the copper link joins (default "none", open). "1-2" for a 2-pad jumper closes it; "2-3" is for 3-pad jumpers only.'),
-        diameter: z.number().optional().describe('Test points only: pad diameter in mm, 0.5 to 3 (default 1.0)'),
+        diameter: z
+          .number()
+          .optional()
+          .describe('Test points only: pad diameter in mm. "test-point": 0.5 to 3 (default 1.0). "test-point-th": up to 5, leaving at least a 0.15mm ring around the drill (default 2.0).'),
+        drill: z.number().optional().describe('"test-point-th" only: hole diameter in mm, 0.3 to 3 (default 1.0)'),
         x: z.number().optional().describe('X position in mm. Omit to auto-place.'),
         y: z.number().optional().describe('Y position in mm. Omit to auto-place.'),
         rotation: z.number().optional().describe('Rotation in degrees CCW (default 0)'),
@@ -603,11 +607,12 @@ export function createMcpServer(ctx: McpContext): McpServer {
         role: z.string().optional().describe('Plain-English note on what this is for, e.g. "Selects I2C address 0x3D when closed"'),
       },
     },
-    ({ kind, refdes, bridge, diameter, x, y, rotation, side, role }) => {
+    ({ kind, refdes, bridge, diameter, drill, x, y, rotation, side, role }) => {
       let spec: BuiltinFootprintSpec;
-      if (kind === 'test-point') {
+      if (drill !== undefined && kind !== 'test-point-th') return errorResult('drill applies to "test-point-th" only');
+      if (kind === 'test-point' || kind === 'test-point-th') {
         if (bridge !== undefined) return errorResult('bridge applies to solder jumpers only');
-        spec = { kind, ...(diameter !== undefined ? { diameter } : {}) };
+        spec = { kind, ...(diameter !== undefined ? { diameter } : {}), ...(drill !== undefined ? { drill } : {}) };
       } else {
         if (diameter !== undefined) return errorResult('diameter applies to test points only');
         if (kind === 'solder-jumper-2') {

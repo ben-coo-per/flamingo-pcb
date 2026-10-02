@@ -35,6 +35,7 @@ function boardWith(...components: ComponentInst[]): Board {
 
 const jumper = builtinFootprint({ kind: 'solder-jumper-2', bridged: true }).footprint;
 const testPoint = builtinFootprint({ kind: 'test-point' }).footprint;
+const testPointTh = builtinFootprint({ kind: 'test-point-th' }).footprint;
 
 describe('parts JLCPCB does not assemble', () => {
   const b = boardWith(
@@ -42,6 +43,7 @@ describe('parts JLCPCB does not assemble', () => {
     comp('R2', 'C25804', R0603, 10, { dnp: true }),
     comp('JP1', '', jumper, 15, { value: 'SJ closed' }),
     comp('TP1', '', testPoint, 20, { value: 'TP' }),
+    comp('TP2', '', testPointTh, 25, { value: 'TP' }),
   );
 
   it('the BOM lists only the assembled part', () => {
@@ -66,6 +68,13 @@ describe('parts JLCPCB does not assemble', () => {
     // Polygon pads are drawn as regions.
     expect(files.get('jp.GTL')).toContain('G36*');
     expect(files.get('jp.GTS')).toContain('G36*');
+  });
+
+  it('a through-hole test point is drilled as a plated hole', () => {
+    const files = generateGerbers(boardWith(comp('TP2', '', testPointTh, 25))).files;
+    const pth = files.get('jp-PTH.DRL')!;
+    expect(pth).toMatch(/T\d+C1\.0/);
+    expect(files.has('jp-NPTH.DRL')).toBe(false);
   });
 
   it('the router gets a tied pad as its plain rectangle', () => {

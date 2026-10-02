@@ -32,7 +32,8 @@ node packages/server/dist/cli.js serve board.flamingo   # prints "Flamingo v0.1.
 2. **Lay out.** `new_board` (2/4/6 layers) → `set_board_outline` (rect with
    `cornerRadius`, polygon, or raw path) → `place_component` / `move_component`.
    `place_builtin` adds parts with no LCSC number: solder jumpers (open, or
-   bridged by a cuttable copper link) and test-point pads. `set_do_not_place`
+   bridged by a cuttable copper link) and test points (SMD pad, or
+   through-hole with `test-point-th`). `set_do_not_place`
    (or `place_component dnp: true`) keeps a part's footprint but leaves it out
    of the BOM and CPL.
 3. **Connect.** `connect_pins` (net + `REFDES.PAD` refs) builds nets.

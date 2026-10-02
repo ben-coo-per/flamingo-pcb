@@ -4,7 +4,7 @@
  *
  * Units mm, y-up, footprint origin at the centre. None of these get solder
  * paste, so an open jumper cannot bridge in reflow and a test point stays
- * flat bare copper for a probe. A part without an LCSC number is never
+ * flat bare copper for a probe (a through-hole test point gets none anyway). A part without an LCSC number is never
  * assembled: it stays out of the BOM, the CPL and the stock check.
  *
  * Solder jumper geometry follows KiCad's SolderJumper-*_P1.3mm_*_RectPad1.0x1.5mm:
@@ -20,7 +20,8 @@ import type { ComponentInst, Footprint, Pad, Point, SilkItem } from './types.js'
 export type BuiltinFootprintSpec =
   | { kind: 'solder-jumper-2'; bridged?: boolean }
   | { kind: 'solder-jumper-3'; bridged?: 'none' | '1-2' | '2-3' }
-  | { kind: 'test-point'; diameter?: number };
+  | { kind: 'test-point'; diameter?: number }
+  | { kind: 'test-point-th'; diameter?: number; drill?: number };
 
 const PAD_W = 1.0;
 const PAD_H = 1.5;
@@ -31,6 +32,11 @@ const SILK_GAP = 0.25;
 const SILK_W = 0.15;
 const COURTYARD_GAP = 0.25;
 export const TEST_POINT_DEFAULT_DIAMETER = 1.0;
+/** Through-hole test point: takes a probe tip, a test hook or a wire loop. */
+export const TEST_POINT_TH_DEFAULT_DIAMETER = 2.0;
+export const TEST_POINT_TH_DEFAULT_DRILL = 1.0;
+/** Smallest annular ring the through-hole test point accepts (JLCPCB's is 0.13mm). */
+const TEST_POINT_TH_MIN_RING = 0.15;
 
 function rectPad(number: string, x: number): Pad {
   return { number, shape: 'rect', at: { x, y: 0 }, rotation: 0, size: { w: PAD_W, h: PAD_H }, layer: 'top' };
@@ -162,6 +168,43 @@ export function builtinFootprint(spec: BuiltinFootprintSpec): BuiltinPart {
         value: 'TP',
         package: name,
         description: `Test point: a bare ${parseFloat(d.toFixed(2))}mm copper pad for a probe`,
+      };
+    }
+    case 'test-point-th': {
+      const d = spec.diameter ?? TEST_POINT_TH_DEFAULT_DIAMETER;
+      const drill = spec.drill ?? TEST_POINT_TH_DEFAULT_DRILL;
+      if (!(drill >= 0.3 && drill <= 3)) throw new Error(`test point drill ${drill}mm is outside 0.3 to 3mm`);
+      if (!(d <= 5)) throw new Error(`test point diameter ${d}mm is above 5mm`);
+      if (!((d - drill) / 2 >= TEST_POINT_TH_MIN_RING - 1e-9)) {
+        throw new Error(
+          `test point diameter ${d}mm leaves less than a ${TEST_POINT_TH_MIN_RING}mm ring around a ${drill}mm drill: use at least ${drill + 2 * TEST_POINT_TH_MIN_RING}mm`,
+        );
+      }
+      const mm = (n: number): string => String(parseFloat(n.toFixed(2)));
+      const name = `TestPoint_THT_D${mm(d)}mm_Drill${mm(drill)}mm`;
+      const r = d / 2;
+      return {
+        footprint: {
+          name,
+          lcsc: '',
+          pads: [
+            {
+              number: '1',
+              shape: 'circle',
+              at: { x: 0, y: 0 },
+              rotation: 0,
+              size: { w: d, h: d },
+              drill: { diameter: drill, plated: true },
+              layer: 'through',
+            },
+          ],
+          silk: [],
+          courtyard: [box(r + COURTYARD_GAP, r + COURTYARD_GAP)],
+          noPaste: true,
+        },
+        value: 'TP',
+        package: name,
+        description: `Through-hole test point: a ${mm(d)}mm plated pad with a ${mm(drill)}mm hole, for a probe, a test hook or a wire loop`,
       };
     }
   }
