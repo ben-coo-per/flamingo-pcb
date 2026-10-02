@@ -270,6 +270,32 @@ describe('panel sync: MCP, HTTP and WebSocket act on one panel', () => {
     expect((await fetch(`${base}/api/panel/export.zip?waive=1`)).status).toBe(200);
   });
 
+  it('HTTP: exports a scenario of separate orders, one folder per order, leaving the plate alone', async () => {
+    await post('/api/panel/new', { name: 'combo' });
+    await post('/api/panel/add-board', { path: 'sensor.flamingo', needed: 1 });
+    await post('/api/panel/add-board', { path: 'mini.flamingo', needed: 5 });
+    const before = (await (await fetch(`${base}/api/panel`)).json()) as PanelView;
+
+    const res = await fetch(`${base}/api/panel/scenario-export.zip?id=separate`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-disposition')).toBe('attachment; filename="combo-separate-fab.zip"');
+    const zip = new AdmZip(Buffer.from(await res.arrayBuffer()));
+    const names = zip.getEntries().map((e) => e.entryName);
+    for (const folder of ['S-sensor', 'M-mini']) {
+      expect(names).toEqual(
+        expect.arrayContaining([`${folder}/gerbers.zip`, `${folder}/bom.csv`, `${folder}/cpl.csv`, `${folder}/board.render.svg`]),
+      );
+    }
+    // Each order's gerbers.zip is a board's own fileset, ready to upload.
+    const gerbers = new AdmZip(zip.getEntry('M-mini/gerbers.zip')!.getData()).getEntries().map((e) => e.entryName);
+    expect(gerbers.some((n) => n.endsWith('.GKO'))).toBe(true);
+    expect(zip.getEntry('orders.txt')!.getData().toString()).toMatch(/M-mini\/.*PCB qty 5/);
+
+    const after = (await (await fetch(`${base}/api/panel`)).json()) as PanelView;
+    expect(after.panel.instances).toEqual(before.panel.instances);
+    expect((await fetch(`${base}/api/panel/scenario-export.zip?id=nope`)).status).toBe(400);
+  });
+
   it('HTTP: lists files and serves the config with its unverified entries', async () => {
     await post('/api/panel/new', { name: 'combo' });
     await post('/api/panel/add-board', { path: 'mini.flamingo' });

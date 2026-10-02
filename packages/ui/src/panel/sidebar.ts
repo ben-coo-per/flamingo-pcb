@@ -467,10 +467,8 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
     els.plateEdit.hidden = showing || view.sources.length === 0;
     els.checks.hidden = showing;
     els.arrangeBtn.disabled = state.busy || empty || showing;
-    els.exportBtn.disabled = state.busy || empty || showing;
-    els.exportBtn.title = showing
-      ? 'What is shown is ordered board by board: export each from the board editor. Go back to your panel to export that.'
-      : '';
+    els.exportBtn.disabled = state.busy || (empty && !showing);
+    els.exportBtn.title = showing ? 'One folder per order, each with its own gerbers.zip, BOM and placement list.' : '';
 
     once('counts', JSON.stringify([view.sources.map((s) => [s.key, s.instances, s.populated, !!s.geometry]), state.busy]), () => {
       const keys = view.sources.map((s) => s.key);
