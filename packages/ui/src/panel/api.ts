@@ -47,10 +47,14 @@ export const api = {
     }
   },
 
-  /** Run the export and return the zip, or the findings that stopped it. */
-  async exportZip(): Promise<{ ok: true; blob: Blob; name: string } | ApiError> {
+  /**
+   * Run the export and return the zip, or the findings that stopped it. With a
+   * scenario id, export that scenario's orders, one folder each, instead of
+   * the panel on the plate.
+   */
+  async exportZip(scenario?: string): Promise<{ ok: true; blob: Blob; name: string } | ApiError> {
     try {
-      const res = await fetch('/api/panel/export.zip');
+      const res = await fetch(scenario ? `/api/panel/scenario-export.zip?id=${encodeURIComponent(scenario)}` : '/api/panel/export.zip');
       if (!res.ok) return (await res.json()) as ApiError;
       const disposition = res.headers.get('content-disposition') ?? '';
       const name = /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'panel-fab.zip';

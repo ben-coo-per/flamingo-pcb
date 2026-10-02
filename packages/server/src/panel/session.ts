@@ -16,7 +16,8 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { Resvg } from '@resvg/resvg-js';
 import type { Board, CheckFinding, DrcViolation } from '@flamingo/engine';
-import { fillAllZones, runDRC } from '@flamingo/engine';
+import { fillAllZones, renderSVG, runDRC } from '@flamingo/engine';
+import { generateBOM, generateCPL, generateGerbers } from '@flamingo/fab';
 import type {
   ArrangeResult,
   FeeTable,
@@ -81,6 +82,21 @@ export interface PanelSessionOptions {
 }
 
 export type { LimitView, PanelView, SourceView } from '@flamingo/panel';
+
+/** One order of a scenario, as the files it uploads to JLCPCB. */
+export interface ScenarioFab {
+  /** Folder in the download, e.g. `S-sensor` or `M-panel`. */
+  folder: string;
+  label: string;
+  /** Pieces fabricated, and how many of them are assembled. */
+  made: number;
+  assembled: number;
+  gerbers: Map<string, string>;
+  bom: string;
+  cpl: string;
+  svgName: string;
+  svg: string;
+}
 
 export type Outcome<T> = ({ ok: true } & T) | { ok: false; error: string };
 
@@ -174,19 +190,25 @@ export class PanelSession extends EventEmitter {
     for (const s of sources) {
       const instances = panel.instances.filter((i) => i.source === s.key).map((i) => i.id);
       if (instances.length === 0) continue;
-      const v = this.sourceDrc(s);
-      if (v.length === 0) continue;
-      const rules = [...new Set(v.map((x) => x.rule))];
-      issues.push({
-        code: 'source-drc',
-        severity: 'error',
-        message: `${s.key} (${s.name}) has ${v.length} DRC violation${v.length === 1 ? '' : 's'} of its own (${rules.join(', ')}). Fix them in the board, or waive to export anyway.`,
-        instances,
-        sources: [s.key],
-        data: { count: v.length, rules },
-      });
+      const issue = this.drcIssue(s, instances);
+      if (issue) issues.push(issue);
     }
     return issues;
+  }
+
+  /** A source board's own DRC violations as one issue, or null when it has none. */
+  private drcIssue(s: ResolvedSource, instances: string[]): PanelIssue | null {
+    const v = this.sourceDrc(s);
+    if (v.length === 0) return null;
+    const rules = [...new Set(v.map((x) => x.rule))];
+    return {
+      code: 'source-drc',
+      severity: 'error',
+      message: `${s.key} (${s.name}) has ${v.length} DRC violation${v.length === 1 ? '' : 's'} of its own (${rules.join(', ')}). Fix them in the board, or waive to export anyway.`,
+      instances,
+      sources: [s.key],
+      data: { count: v.length, rules },
+    };
   }
 
   /** Everything a client needs to draw and judge the panel. Cached until the next change. */
@@ -720,6 +742,79 @@ export class PanelSession extends EventEmitter {
     } catch (err) {
       return fail(err);
     }
+  }
+
+  /**
+   * The fab files of a scenario that is not one panel (separate orders, each
+   * design on its own panel, split by layer count), in memory: one fileset per
+   * order, each what that order uploads to JLCPCB. A single-board order gets
+   * the board's own export, as export_fab writes it; a panel order gets the
+   * panel export of the scenario's layout. The panel on the plate is untouched.
+   */
+  async buildScenarioFab(
+    id: string,
+    opts: { waive?: boolean; objective?: Objective } = {},
+  ): Promise<Outcome<{ scenario: Scenario; orders: ScenarioFab[]; waived: PanelIssue[] }> & { blocking?: PanelIssue[] }> {
+    const result = await this.quote(opts.objective);
+    const scenario = result.scenarios.find((s) => s.id === id);
+    if (!scenario) {
+      const rejected = result.rejected.find((r) => r.id === id);
+      return fail(rejected ? `Scenario "${id}" is not possible: ${rejected.reason}` : `Unknown scenario "${id}"`);
+    }
+    const sources = await this.resolved();
+    const blocking: PanelIssue[] = [];
+    const orders: ScenarioFab[] = [];
+    try {
+      for (const order of scenario.orders) {
+        const made = order.priced.order.pcbQty;
+        const assembled = order.priced.order.assembly?.qty ?? 0;
+        if (!order.panel) {
+          const key = order.designs[0]!;
+          const src = sources.find((s) => s.key === key);
+          if (!src?.board) return fail(src?.error ?? `Board ${key} is not resolved`);
+          const drc = this.drcIssue(src, []);
+          if (drc) blocking.push(drc);
+          const filled = fillAllZones(src.board);
+          orders.push({
+            folder: `${key}-${safeName(src.name)}`,
+            label: order.label,
+            made,
+            assembled,
+            gerbers: generateGerbers(filled).files,
+            bom: generateBOM(src.board),
+            cpl: generateCPL(src.board),
+            svgName: 'board.render.svg',
+            svg: renderSVG(filled),
+          });
+          continue;
+        }
+        if (!order.layout) return fail(`Order "${order.label}" has no panel layout`);
+        const applied = applyPanelOp(this.panel, { op: 'setLayout', instances: order.layout.instances, settings: order.layout.settings });
+        if (!applied.ok) return fail(applied.error);
+        const panel = applied.panel;
+        const geometry = computeGeometry(panel, sources);
+        const issues = [...checkPanel(panel, sources, this.limits, geometry), ...this.drcIssues(panel, sources)];
+        blocking.push(...issues.filter((i) => i.severity === 'error'));
+        const built = buildPanelFab(panel, sources, this.limits, { geometry, issues });
+        orders.push({
+          folder: `${order.designs.join('-')}-panel`,
+          label: order.label,
+          made,
+          assembled,
+          gerbers: built.gerbers,
+          bom: built.bom,
+          cpl: built.cpl,
+          svgName: 'panel.render.svg',
+          svg: built.svg,
+        });
+      }
+    } catch (err) {
+      return fail(err);
+    }
+    if (blocking.length > 0 && !opts.waive) {
+      return { ok: false, error: `${blocking.length} error(s) stop the export`, blocking };
+    }
+    return { ok: true, scenario, orders, waived: blocking };
   }
 
   hasErrors(issues: PanelIssue[]): boolean {

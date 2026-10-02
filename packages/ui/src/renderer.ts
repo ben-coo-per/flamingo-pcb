@@ -40,6 +40,7 @@ import {
   holeSlotCenterline,
   allHoles,
   capsulePolygon,
+  componentBodyBBox,
   componentLabelPlacement,
   labelFontMm,
   padLabelLayout,
@@ -633,6 +634,31 @@ export function draw(board: Board, state: AppState, ctx: CanvasRenderingContext2
         ctx.stroke();
       }
     }
+  }
+
+  // ---- do not place: a dashed cross over the part's body ----
+  // The footprint is still fabricated; the cross says nothing gets fitted.
+  // Shown with silk on or off, since it is about the order, not the legend.
+  for (const c of board.components) {
+    if (c.fields.dnp !== true || !c.lcsc) continue;
+    const bb = componentBodyBBox(c);
+    const corners = [
+      worldToScreen(view, { x: bb.minX, y: bb.minY }),
+      worldToScreen(view, { x: bb.maxX, y: bb.maxY }),
+      worldToScreen(view, { x: bb.minX, y: bb.maxY }),
+      worldToScreen(view, { x: bb.maxX, y: bb.minY }),
+    ];
+    ctx.save();
+    ctx.strokeStyle = silkColorFor(c.side);
+    ctx.lineWidth = Math.max(0.12 * view.scale, 1);
+    ctx.setLineDash([Math.max(0.3 * view.scale, 2), Math.max(0.2 * view.scale, 2)]);
+    ctx.beginPath();
+    ctx.moveTo(corners[0].x, corners[0].y);
+    ctx.lineTo(corners[1].x, corners[1].y);
+    ctx.moveTo(corners[2].x, corners[2].y);
+    ctx.lineTo(corners[3].x, corners[3].y);
+    ctx.stroke();
+    ctx.restore();
   }
 
   // ---- board outline ----

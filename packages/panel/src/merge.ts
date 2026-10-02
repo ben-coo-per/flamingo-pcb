@@ -33,7 +33,7 @@ import type {
   Via,
   Zone,
 } from '@flamingo/engine';
-import { componentLabelPlacement, fillAllZones } from '@flamingo/engine';
+import { componentLabelPlacement, fillAllZones, isAssembled } from '@flamingo/engine';
 import { targetLayers } from './check.js';
 import type { PanelLimits } from './config.js';
 import type { Fiducial, PanelGeometry } from './geometry.js';
@@ -256,7 +256,7 @@ export function mergePanel(
   const firstComment = new Map<string, string>();
   for (let i = 0; i < components.length; i++) {
     const c = components[i]!;
-    if (!c.lcsc || bare.has(c.refdes)) continue;
+    if (!isAssembled(c) || bare.has(c.refdes)) continue;
     const comment = commentOf(c);
     const first = firstComment.get(c.lcsc);
     if (first === undefined) {

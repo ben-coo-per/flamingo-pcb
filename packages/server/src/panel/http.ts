@@ -50,7 +50,20 @@ function objectiveOf(v: unknown): Objective {
   return typeof v === 'string' && (OBJECTIVES as readonly string[]).includes(v) ? (v as Objective) : 'total';
 }
 
-function streamZip(files: Map<string, string>, res: ServerResponse): Promise<void> {
+/** Zip a name -> content map into memory. */
+function zipBuffer(files: Map<string, string | Buffer>): Promise<Buffer> {
+  return new Promise((resolveP, reject) => {
+    const archive = new ZipArchive({ zlib: { level: 9 } });
+    const chunks: Buffer[] = [];
+    archive.on('data', (c: Buffer) => chunks.push(c));
+    archive.on('end', () => resolveP(Buffer.concat(chunks)));
+    archive.on('error', reject);
+    for (const [name, content] of files) archive.append(content, { name });
+    void archive.finalize();
+  });
+}
+
+function streamZip(files: Map<string, string | Buffer>, res: ServerResponse): Promise<void> {
   return new Promise((resolveP, reject) => {
     const archive = new ZipArchive({ zlib: { level: 9 } });
     let done = false;
@@ -145,6 +158,34 @@ export async function handlePanelApi(
         files.set('cpl.csv', built.files.cpl);
         files.set('panel.render.svg', built.files.svg);
         const name = `${session.panel.name.replace(/[^\w.-]+/g, '_') || 'panel'}-panel-fab.zip`;
+        res.writeHead(200, {
+          'content-type': 'application/zip',
+          'content-disposition': `attachment; filename="${name}"`,
+        });
+        await streamZip(files, res);
+        return true;
+      }
+      case 'scenario-export.zip': {
+        const id = url.searchParams.get('id') ?? '';
+        const built = await session.buildScenarioFab(id, { waive: url.searchParams.get('waive') === '1' });
+        if (!built.ok) {
+          sendJSON(res, 400, { ok: false, error: built.error, issues: built.blocking ?? [] });
+          return true;
+        }
+        // One folder per order, each holding what that order uploads to
+        // JLCPCB: its gerbers.zip as it is, the BOM, the placement list and a
+        // picture. orders.txt says what quantities to enter for each.
+        const files = new Map<string, string | Buffer>();
+        const plan = [`${built.scenario.title}`, ''];
+        for (const o of built.orders) {
+          files.set(`${o.folder}/gerbers.zip`, await zipBuffer(new Map(o.gerbers)));
+          files.set(`${o.folder}/bom.csv`, o.bom);
+          files.set(`${o.folder}/cpl.csv`, o.cpl);
+          files.set(`${o.folder}/${o.svgName}`, o.svg);
+          plan.push(`${o.folder}/  ${o.label}: PCB qty ${o.made}, ${o.assembled > 0 ? `assemble ${o.assembled}` : 'no assembly'}`);
+        }
+        files.set('orders.txt', `${plan.join('\n')}\n`);
+        const name = `${session.panel.name.replace(/[^\w.-]+/g, '_') || 'panel'}-${built.scenario.kind}-fab.zip`;
         res.writeHead(200, {
           'content-type': 'application/zip',
           'content-disposition': `attachment; filename="${name}"`,

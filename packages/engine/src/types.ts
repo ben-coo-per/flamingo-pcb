@@ -94,6 +94,14 @@ export interface Footprint {
    * and on parts whose symbol has no pins.
    */
   pins?: Record<string, SymbolPin>;
+  /**
+   * Pads whose copper touches on purpose although they sit on different nets
+   * (a bridged solder jumper). DRC skips clearance between them and the DSN
+   * hands the router each one at its `size` rectangle, without the bridge.
+   */
+  netTie?: string[];
+  /** No solder paste on any pad (solder jumpers, test points). */
+  noPaste?: boolean;
 }
 
 /** EasyEDA symbol pin electrical type. Most library parts leave it 'undefined'. */
@@ -122,6 +130,8 @@ export interface ComponentInst {
     mfr?: string;
     package?: string;
     basic?: boolean;
+    /** Do not place: left out of the BOM and the placement list (CPL). */
+    dnp?: boolean;
   };
 }
 

@@ -81,7 +81,7 @@ function previewed(): Scenario | undefined {
 /** Show the panel again. */
 function leavePreview(): void {
   if (!store.get().preview) return;
-  store.set({ preview: null });
+  store.set({ preview: null, exportMsg: null });
   const view = store.get().view;
   if (view) fit(view);
 }
@@ -269,7 +269,7 @@ function removeSelected(): void {
 async function selectOption(id: string): Promise<void> {
   const { view, quote } = store.get();
   if (!view) return;
-  store.set({ arrangeMsg: null, selection: null, menu: null, drag: null });
+  store.set({ arrangeMsg: null, exportMsg: null, selection: null, menu: null, drag: null });
   // The panel that is already on the plate: look at it.
   if (id === OWN || scenarioOnPlate(view, quote)?.id === id) {
     leavePreview();
@@ -312,8 +312,9 @@ let exportUrl: string | null = null;
 
 async function exportFab(): Promise<void> {
   if (store.get().busy) return;
+  const shown = previewed();
   store.set({ busy: true, exportMsg: { text: 'Exporting…', problem: false } });
-  const r = await api.exportZip();
+  const r = await api.exportZip(shown?.id);
   if (exportUrl) URL.revokeObjectURL(exportUrl);
   exportUrl = null;
   if (isError(r)) {
@@ -321,7 +322,9 @@ async function exportFab(): Promise<void> {
     store.set({
       busy: false,
       exportMsg: {
-        text: `Not exported: ${r.error}.${findings ? `\n${findings}` : ''}\nFix the errors listed under Warnings. To export regardless, use export_panel_fab with waive.`,
+        text: shown
+          ? `Not exported: ${r.error}.${findings ? `\n${findings}` : ''}\nFix them in the boards.`
+          : `Not exported: ${r.error}.${findings ? `\n${findings}` : ''}\nFix the errors listed under Warnings. To export regardless, use export_panel_fab with waive.`,
         problem: true,
       },
     });
@@ -331,7 +334,9 @@ async function exportFab(): Promise<void> {
   store.set({
     busy: false,
     exportMsg: {
-      text: `Exported: gerbers, drills, bom.csv, cpl.csv and a render, in one zip (${Math.max(1, Math.round(r.blob.size / 1024))} kB).`,
+      text: shown
+        ? `Exported: ${shown.orders.length} order${shown.orders.length === 1 ? '' : 's'}, a folder each with gerbers.zip, bom.csv, cpl.csv and a render; orders.txt has the quantities (${Math.max(1, Math.round(r.blob.size / 1024))} kB).`
+        : `Exported: gerbers, drills, bom.csv, cpl.csv and a render, in one zip (${Math.max(1, Math.round(r.blob.size / 1024))} kB).`,
       problem: false,
       link: { href: exportUrl, name: r.name, label: `Download ${r.name}` },
     },

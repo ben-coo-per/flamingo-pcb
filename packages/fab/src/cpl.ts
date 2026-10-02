@@ -2,7 +2,7 @@
  * Flamingo Fab - JLCPCB Component Placement List (CPL) CSV.
  *
  * Header is exactly `Designator,Mid X,Mid Y,Layer,Rotation`. One row per
- * component, Mid X/Y in mm formatted to 4 decimal places with no unit
+ * assembled component (see bom.ts), Mid X/Y in mm formatted to 4 decimal places with no unit
  * suffix (JLCPCB's CPL importer expects bare numbers). Layer is `Top` or
  * `Bottom`. Line endings are CRLF throughout, matching bom.ts.
  *
@@ -22,6 +22,7 @@
  */
 
 import type { Board, ComponentInst } from '@flamingo/engine';
+import { isAssembled } from '@flamingo/engine';
 
 const CRLF = '\r\n';
 
@@ -52,6 +53,7 @@ function rotationOf(c: ComponentInst): string {
 export function generateCPL(b: Board): string {
   const lines = ['Designator,Mid X,Mid Y,Layer,Rotation'];
   for (const c of b.components) {
+    if (!isAssembled(c)) continue; // matches the BOM
     const layer = c.side === 'bottom' ? 'Bottom' : 'Top';
     lines.push([c.refdes, mm4(c.at.x), mm4(c.at.y), layer, rotationOf(c)].join(','));
   }

@@ -659,12 +659,25 @@ async function main(): Promise<void> {
     assert((await separate.locator('.where-shown').innerText()).trim() === 'shown', 'the way shown is not marked');
     assert((await page.locator('#option-list .where-plate').count()) === 1, 'the panel on the plate lost its mark while another way is shown');
     assert((await page.locator('#option-list .scenario.selected').count()) === 1 && (await separate.getAttribute('class'))!.includes('selected'), 'the way in view is not the one framed');
-    // Step 3 is about what is shown: its cost, and nothing to change, check or export.
+    // Step 3 is about what is shown: its cost and its export, and nothing to change or check.
     const sepTotal = await state<number>("s.quote.scenarios.find((x) => x.id === 'separate').total");
     assert((await text('#cost-total')) === `$${sepTotal.toFixed(2)}`, 'step 3 does not show the cost of what is shown');
     assert(!(await page.locator('#plate-edit').isVisible()) && !(await page.locator('#checks').isVisible()), 'what is only shown has tools or checks');
-    assert(await page.locator('#export-btn').isDisabled(), 'what is only shown can be exported');
+    assert(!(await page.locator('#export-btn').isDisabled()), 'separate orders cannot be exported');
     await tidy('with separate orders shown');
+    {
+      await page.locator('#export-btn').click();
+      await page.locator('#export-link').waitFor();
+      const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#export-link').click()]);
+      assert(download.suggestedFilename() === 'combo-separate-fab.zip', `the download is called ${download.suggestedFilename()}`);
+      const zipPath = join(projectDir, 'separate.zip');
+      await download.saveAs(zipPath);
+      const names = new AdmZip(zipPath).getEntries().map((e) => e.entryName);
+      const folders = [...new Set(names.filter((n) => n.includes('/')).map((n) => n.split('/')[0]))];
+      assert(folders.length === 2 && folders.every((f) => names.includes(`${f}/gerbers.zip`) && names.includes(`${f}/bom.csv`)), `the zip holds ${names.join(', ')}`);
+      assert(JSON.stringify((await getView()).panel) === panelBefore, 'exporting separate orders changed the panel');
+      console.log(`  ${download.suggestedFilename()}: ${folders.join(', ')}`);
+    }
     // The plate shows two plates, one per order, each in its board's colour.
     const shotSeparate = await shot('10b-scenario-separate', 'Separate orders selected: the plate shows the two orders side by side, each a stack of single boards with its quantity, under a banner saying the panel is unchanged.');
     {
@@ -798,7 +811,7 @@ async function main(): Promise<void> {
     await writeFile(boardPath, JSON.stringify(edited, null, 2));
     started.panel!.touch();
     await until("v.sources.find((s) => s.key === 'M').stale === true", 'M stale in the page');
-    assert((await text('#board-list .board[data-key="M"] .tag')) === 'stale', 'the board list does not tag M as stale');
+    assert((await text('#board-list .board[data-key="M"] .tag')).startsWith('stale'), 'the board list does not tag M as stale');
     assert((await text('#issue-list .issue[data-code="source-stale"] .issue-title')) === 'Board changed on disk', 'the stale board is not listed under Checks');
     await page.keyboard.press('a');
     await until("v.issues.filter((i) => i.severity === 'error').length === 0", 'a clean panel');
