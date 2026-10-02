@@ -71,6 +71,16 @@ export {
 } from './labels.js';
 export type { ComponentLabelPlacement, ComponentLabelPosition } from './labels.js';
 
+// Re-export built-in footprints (no LCSC number)
+export type { BuiltinFootprintSpec, BuiltinPart } from './builtin.js';
+export {
+  builtinFootprint,
+  isAssembled,
+  TEST_POINT_DEFAULT_DIAMETER,
+  TEST_POINT_TH_DEFAULT_DIAMETER,
+  TEST_POINT_TH_DEFAULT_DRILL,
+} from './builtin.js';
+
 // Re-export ops
 export type { Op, OpResult, OpError } from './ops.js';
 export { applyOp } from './ops.js';
