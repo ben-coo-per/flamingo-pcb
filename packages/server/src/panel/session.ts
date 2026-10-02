@@ -15,7 +15,7 @@ import { existsSync } from 'node:fs';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { Resvg } from '@resvg/resvg-js';
-import type { Board, DrcViolation } from '@flamingo/engine';
+import type { Board, CheckFinding, DrcViolation } from '@flamingo/engine';
 import { fillAllZones, renderSVG, runDRC } from '@flamingo/engine';
 import { generateBOM, generateCPL, generateGerbers } from '@flamingo/fab';
 import type {
@@ -39,6 +39,7 @@ import type {
   SourceView,
 } from '@flamingo/panel';
 import {
+  checkInterconnect,
   PANEL_EXTENSION,
   applyPanelOp,
   arrange,
@@ -605,6 +606,24 @@ export class PanelSession extends EventEmitter {
 
   async check(): Promise<PanelIssue[]> {
     return (await this.view()).issues;
+  }
+
+  /**
+   * Check the cables declared on the panel (see @flamingo/panel
+   * interconnect.ts). `docs` are markdown files, relative to the project
+   * directory, whose pin tables are compared with the copper.
+   */
+  async checkInterconnect(docs: string[] = []): Promise<Outcome<{ findings: CheckFinding[] }>> {
+    const texts: { name: string; text: string }[] = [];
+    for (const d of docs) {
+      const path = isAbsolute(d) ? d : join(this.projectDir, d);
+      try {
+        texts.push({ name: d, text: await readFile(path, 'utf8') });
+      } catch (e) {
+        return fail(`cannot read ${d}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    return { ok: true, findings: checkInterconnect(this.doc.panel, await this.resolved(), { docs: texts }) };
   }
 
   async renderSvg(widthPx?: number): Promise<string> {

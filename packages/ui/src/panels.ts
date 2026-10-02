@@ -9,7 +9,7 @@
  * highlight and the status bar update unconditionally on every state change.
  */
 
-import type { Board, ComponentInst, DrcViolation, Keepout, LayerId, MountingHole, Op, Point, SilkText, Zone } from '@flamingo/engine';
+import type { Board, CheckFinding, ComponentInst, DrcViolation, Keepout, LayerId, MountingHole, Op, Point, SilkText, Zone } from '@flamingo/engine';
 import { copperLayersOf, isAssembled } from '@flamingo/engine';
 import {
   DIMS_KEY,
@@ -65,6 +65,9 @@ export interface PanelEls {
   drcBtn: HTMLButtonElement;
   drcStatus: HTMLElement;
   drcList: HTMLElement;
+  ercBtn: HTMLButtonElement;
+  ercStatus: HTMLElement;
+  ercList: HTMLElement;
 }
 
 /** Actions the panels trigger that need canvas/view access (owned by main.ts). */
@@ -1842,9 +1845,64 @@ export function initPanels(els: PanelEls, toolManager: ToolManager, actions: Pan
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // ERC panel: GET /api/erc. Errors and warnings are listed (info is left out
+  // to keep the list short); rows with a location center the view on it.
+  // ---------------------------------------------------------------------------
+
+  function wireErcControls(): void {
+    const btn = els.ercBtn;
+    let busy = false;
+
+    function setStatus(text: string, kind: 'ok' | 'err' | 'busy'): void {
+      els.ercStatus.replaceChildren();
+      const el = document.createElement('div');
+      el.className = kind === 'busy' ? 'route-busy' : `route-result ${kind}`;
+      el.textContent = text;
+      els.ercStatus.appendChild(el);
+    }
+
+    btn.addEventListener('click', () => {
+      if (busy) return;
+      busy = true;
+      btn.disabled = true;
+      setStatus('Checking…', 'busy');
+      void (async () => {
+        try {
+          const res = await fetch('/api/erc');
+          const body = (await res.json()) as { ok: boolean; findings?: CheckFinding[]; error?: string };
+          if (!res.ok || !body.ok) throw new Error(body.error ?? res.statusText);
+          const shown = (body.findings ?? []).filter((f) => f.level !== 'info');
+          els.ercList.replaceChildren();
+          for (const f of shown) {
+            const row = document.createElement('div');
+            row.className = 'drc-list-item';
+            row.textContent = `${f.level === 'error' ? 'ERROR' : 'warn'} ${f.rule}: ${f.message}`;
+            row.title = `${f.message}\n${f.items.join(', ')}`;
+            const at = f.at;
+            if (at) row.addEventListener('click', () => actions.focusPoint(at));
+            els.ercList.appendChild(row);
+          }
+          const errors = shown.filter((f) => f.level === 'error').length;
+          const warns = shown.length - errors;
+          setStatus(
+            shown.length === 0 ? 'No errors or warnings.' : `${errors} error(s), ${warns} warning(s).`,
+            errors === 0 ? 'ok' : 'err',
+          );
+        } catch (err) {
+          setStatus(`ERC failed: ${err instanceof Error ? err.message : String(err)}`, 'err');
+        } finally {
+          busy = false;
+          btn.disabled = false;
+        }
+      })();
+    });
+  }
+
   wireSearch();
   wireRouteControls();
   wireDrcControls();
+  wireErcControls();
   wireRipAllControls();
   wireExportFabControls();
   wireExportStepControls();

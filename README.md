@@ -16,7 +16,7 @@ running DRC, and exporting a
 
 ## Features
 
-- **Prompt-first workflow over MCP** — 36 tools cover the whole flow: parts →
+- **Prompt-first workflow over MCP** — 41 tools cover the whole flow: parts →
   placement → nets → routing → DRC → fab export. No schematic step.
 - **Real parts** — LCSC keyword search plus EasyEDA footprint fetch/parse with
   real pad numbers and geometry, cached locally under `~/.flamingo/parts/`.
@@ -112,16 +112,23 @@ prompt → parts → place → connect → route → drc → export
    violation; low stock (fewer than 100 boards buildable) and parts missing
    from the JLC library are non-gating advisories. Set
    `FLAMINGO_STOCK_CHECK=off` to skip the stock half (e.g. offline).
+   `run_erc` checks the circuit itself (see "Electrical checks" below).
 7. **export** — `export_fab` runs DRC (fills zones first, including the stock
-   check) and writes the JLCPCB fileset — refusing on any violation unless
-   `waiveDrc` is set.
+   check) and ERC, writes the JLCPCB fileset plus `checks.json` with every
+   finding, and refuses on any DRC violation or ERC error unless `waiveDrc` is set.
+
+Before ordering, `export_print` (or `flamingo export-print board.flamingo`)
+writes the board as 1:1 printable sheets: the top side, the bottom side seen
+from below, and every footprint unrotated with pad numbers. Print at 100 %,
+check the scale bars, and lay the real parts on the paper to catch clone parts
+that don't match their footprints.
 
 `screenshot` renders the board to a PNG at any point so Claude can see what it's
 doing.
 
 ## MCP tools
 
-36 tools are served at `http://localhost:4242/mcp`:
+41 tools are served at `http://localhost:4242/mcp`:
 
 | Group | Tools |
 | --- | --- |
@@ -131,8 +138,49 @@ doing.
 | **Connectivity** | `connect_pins`, `disconnect_pins`, `create_net_class`, `assign_net_class` |
 | **Board features** | `set_board_outline`, `add_zone`, `add_keepout`, `add_mounting_hole`, `add_silk_text`, `add_silk_line`, `remove_item` |
 | **Routing / analysis** | `add_track`, `add_via`, `get_ratsnest`, `autoroute`, `unroute`, `widen_tracks`, `run_drc` |
+| **Checks** | `run_erc` |
 | **History** | `undo`, `redo` |
-| **Output** | `export_fab`, `export_step`, `screenshot` |
+| **Output** | `export_fab`, `export_step`, `export_print`, `screenshot` |
+| **Simulation** | `export_spice`, `run_spice`, `simulate_logic` (see [docs/simulation.md](docs/simulation.md)) |
+
+## Electrical checks
+
+DRC asks whether the fab can make the board. The electrical checks ask whether
+the circuit is right. Flamingo has no schematic step, so they read the netlist
+directly, with pin names from each part's EasyEDA symbol (`footprint.pins`, or
+the parts cache for parts placed before footprints carried them) and pin roles
+from a cited table in `packages/engine/src/erc/part-facts.ts`.
+
+`run_erc` (and **Run ERC** in the editor) reports:
+
+| Rule | Level | What |
+|---|---|---|
+| `power-pins` | error | IC supply or ground pin unconnected, or on the wrong kind of net |
+| `single-pin-net` | warn | a net with one pin |
+| `unconnected-ic-pin` | warn / info | IC or connector pad on no net; warn when the pin's role is unknown |
+| `floating-input` | error / warn | a logic input nothing drives or pulls; warn when it is driven only through a connector |
+| `decoupling` | warn | supply pin with no capacitor to ground, or the nearest more than 10 mm away |
+| `polarity` | error / warn | an LED that can never light, a diode shorting a rail, a part note that contradicts the symbol's pad 1 |
+| `esp32` | error / warn | ESP32-S3 strapping pins, EN reset delay, octal-PSRAM GPIO |
+| `usb-cc` | error / warn | USB-C CC pins without 5.1k pull-downs |
+
+Findings are data (`error`, `warn`, `info`). Errors gate `export_fab` like DRC
+violations. A deliberate exception goes in the board's `checkWaivers`, with a
+reason: `{ "rule": "unconnected-ic-pin", "items": ["J6.9"], "reason": "MISO left open on purpose" }`.
+
+`flamingo check` runs the checks headless, for CI and before ordering:
+
+```bash
+flamingo check board.flamingo [more ...] [--json] [--quiet] [--only drc,erc] [--stock]
+flamingo check combo.plamingo          # every board on the panel, then the panel checks
+```
+
+It prints one line per finding and the board file's sha256, and exits 0 when
+clean, 1 on any error finding, 2 when the tool itself failed. The JLCPCB stock
+check needs the network, so it only runs with `--stock`. Checks are a registry
+(`packages/server/src/checks.ts`): a board check is
+`{ name, description, run(board, ctx) }` and a panel check
+`{ name, description, run(panel, boards, ctx) }`, both returning findings.
 
 ### Solder jumpers, test points and do-not-place parts
 
@@ -162,7 +210,7 @@ node packages/server/dist/cli.js serve combo.plamingo    # prints "Flamingo v0.1
 
 A panel file is served the way a board file is: one file, one server, its view
 at `http://localhost:4242` (`FLAMINGO_PORT` to change the port), the file
-created if it is missing. The server has the 23 panel tools at `/mcp` and no
+created if it is missing. The server has the 26 panel tools at `/mcp` and no
 board tools; boards are edited in servers of their own, and the panel notices
 when one of its boards changes on disk.
 
@@ -185,7 +233,7 @@ boards + quantities → quote_order → panel_apply_scenario → panel_check →
 
 ### Panel MCP tools
 
-23 tools, served at the same `/mcp` endpoint as the 36 board tools:
+26 tools, served at the same `/mcp` endpoint as the 41 board tools:
 
 | Group | Tool | What it does |
 | --- | --- | --- |
@@ -207,6 +255,9 @@ boards + quantities → quote_order → panel_apply_scenario → panel_check →
 | | `panel_arrange` | Pack every unpinned instance into the smallest panel that fits the limits. |
 | | `panel_check` | Report everything wrong with the panel, as data. |
 | | `panel_screenshot` | Render the panel to a PNG. |
+| **Cables** | `panel_add_link` | Declare a cable between boards: `"<key>:<refdes>"` to one or more headers, straight or through a pad map, with net-name aliases. Never changes fab output. |
+| | `panel_remove_link` | Remove a cable by id. |
+| | `check_interconnect` | Check every cable pin by pin (ground to ground, same supply, no supply on a signal, names agree, no pin connected on one end only); optionally compare markdown pin tables with the copper. Findings as data. |
 | **History** | `panel_undo`, `panel_redo` | Walk the panel's op log. |
 | **Cost** | `quote_order` | Ranked order scenarios with itemized fees, plus the cost of the panel as it stands. |
 | | `panel_apply_scenario` | Load the panel a scenario implies onto the panel. |
