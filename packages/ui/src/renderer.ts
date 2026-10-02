@@ -568,7 +568,12 @@ export function draw(board: Board, state: AppState, ctx: CanvasRenderingContext2
   }
 
   // ---- through-hole pads + vias + mounting holes ----
+  // They sit on every copper layer, so they show while any copper layer does.
+  // Unplated holes are drilled outlines, not copper, and always show.
+  const shownCopper = cu.filter((l) => vis[l] !== false);
+  const anyCopper = shownCopper.length > 0;
   for (const c of board.components) {
+    if (!anyCopper) break;
     for (const pad of c.footprint.pads) {
       if (pad.layer !== 'through') continue;
       fillPolygon(ctx, view, padOutline(c, pad), THROUGH_PAD_COLOR);
@@ -578,20 +583,20 @@ export function draw(board: Board, state: AppState, ctx: CanvasRenderingContext2
       }
     }
   }
-  for (const v of board.vias) {
+  for (const v of anyCopper ? board.vias : []) {
     fillCircle(ctx, view, v.at, v.diameter / 2, THROUGH_PAD_COLOR);
     fillCircle(ctx, view, v.at, v.drill / 2, HOLE_COLOR);
   }
   for (const h of allHoles(board)) {
     if (isSlot(h)) {
       const { start, end } = holeSlotCenterline(h);
-      if (h.plated) {
+      if (h.plated && anyCopper) {
         fillPolygon(ctx, view, capsulePolygon(start, end, h.padDiameter / 2), THROUGH_PAD_COLOR);
         fillPolygon(ctx, view, capsulePolygon(start, end, h.drill / 2), HOLE_COLOR);
       } else {
         strokePolygon(ctx, view, capsulePolygon(start, end, h.drill / 2), EDGE_COLOR, 0.1);
       }
-    } else if (h.plated) {
+    } else if (h.plated && anyCopper) {
       fillCircle(ctx, view, h.at, h.padDiameter / 2, THROUGH_PAD_COLOR);
       fillCircle(ctx, view, h.at, h.drill / 2, HOLE_COLOR);
     } else {
@@ -771,6 +776,8 @@ export function draw(board: Board, state: AppState, ctx: CanvasRenderingContext2
     ctx.textBaseline = 'middle';
     for (const c of board.components) {
       for (const pad of c.footprint.pads) {
+        // Label only pads whose copper is on a shown layer.
+        if (!padCopperLayers(pad, c.side, cu).some((l) => vis[l] !== false)) continue;
         const [center] = componentTransformPoints(c, [pad.at]);
         const fontMm = labelFontMm(pad);
         if (showPadLabels) {

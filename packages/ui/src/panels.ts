@@ -18,6 +18,8 @@ import {
   RATSNEST_KEY,
   SILK_KEY,
   ZONES_KEY,
+  soloCopperLayer,
+  soloedCopperLayer,
   store,
   withLayerKeys,
   type AppState,
@@ -126,6 +128,8 @@ function hoverText(hit: HitInfo): string {
 export interface PanelsApi {
   /** Step the sidebar selection to the adjacent net / BOM item. dir: +1 down, -1 up. Returns true when handled. */
   navigateList(dir: 1 | -1): boolean;
+  /** Show only the copper layer at `index` in stack order (0 = F.Cu); null shows every layer again. Returns true when handled. */
+  soloLayerAt(index: number | null): boolean;
 }
 
 export function initPanels(els: PanelEls, toolManager: ToolManager, actions: PanelActions): PanelsApi {
@@ -144,13 +148,105 @@ export function initPanels(els: PanelEls, toolManager: ToolManager, actions: Pan
   // updates don't clobber the open input with the (still-old) name.
   let renamingName = false;
 
+  // Layer list: a "show only" chip row (one chip per copper layer, plus All)
+  // above the per-layer checkboxes. Both write layerVisibility; syncLayerControls
+  // mirrors it back into the chips and boxes on every change.
+  const layerBoxes = new Map<string, HTMLInputElement>();
+  const soloChips = new Map<string, HTMLButtonElement>();
+  let allChip: HTMLButtonElement | null = null;
+  let layerCopper: string[] = [];
+  let lastLayerVis: AppState['layerVisibility'] | null = null;
+  // Visibility from before the first "show only", put back by All (or by
+  // clicking the shown layer's chip again).
+  let preSoloVis: AppState['layerVisibility'] | null = null;
+
+  function setVis(vis: AppState['layerVisibility']): void {
+    store.set({ layerVisibility: vis });
+  }
+
+  function showAllLayers(): void {
+    const base = preSoloVis ?? store.get().layerVisibility;
+    preSoloVis = null;
+    const next = { ...base };
+    for (const k of layerCopper) next[k] = true;
+    setVis(next);
+  }
+
+  function soloLayer(layer: string): void {
+    const vis = store.get().layerVisibility;
+    if (soloedCopperLayer(vis, layerCopper) === layer && preSoloVis) {
+      showAllLayers();
+      return;
+    }
+    if (!preSoloVis) preSoloVis = vis;
+    setVis(soloCopperLayer(vis, layerCopper, layer));
+  }
+
+  function soloLayerAt(index: number | null): boolean {
+    if (!store.get().board) return false;
+    if (index === null) {
+      showAllLayers();
+      return true;
+    }
+    const layer = layerCopper[index];
+    if (!layer) return false;
+    soloLayer(layer);
+    return true;
+  }
+
+  function syncLayerControls(vis: AppState['layerVisibility']): void {
+    for (const [key, cb] of layerBoxes) cb.checked = vis[key] !== false;
+    const solo = soloedCopperLayer(vis, layerCopper);
+    for (const [key, chip] of soloChips) {
+      chip.classList.toggle('on', vis[key] !== false);
+      chip.classList.toggle('solo', key === solo);
+    }
+    allChip?.classList.toggle('solo', layerCopper.every((k) => vis[k] !== false));
+  }
+
   function buildLayerList(state: AppState): void {
     els.layerList.replaceChildren();
+    layerBoxes.clear();
+    soloChips.clear();
+    allChip = null;
     const board = state.board;
     if (!board) return;
-    const keys = [...copperLayersOf(board), ZONES_KEY, SILK_KEY, RATSNEST_KEY, LABEL_PADS_KEY, LABEL_NETS_KEY, DIMS_KEY];
+    layerCopper = copperLayersOf(board);
+    const keys = [...layerCopper, ZONES_KEY, SILK_KEY, RATSNEST_KEY, LABEL_PADS_KEY, LABEL_NETS_KEY, DIMS_KEY];
     store.set({ layerVisibility: withLayerKeys(state.layerVisibility, keys) });
     const vis = store.get().layerVisibility;
+
+    if (layerCopper.length > 1) {
+      const row = document.createElement('div');
+      row.className = 'layer-solo';
+      const all = document.createElement('button');
+      all.type = 'button';
+      all.className = 'layer-chip layer-chip-all';
+      all.textContent = 'All';
+      all.title = 'Show every copper layer (0)';
+      all.addEventListener('click', showAllLayers);
+      row.appendChild(all);
+      allChip = all;
+      layerCopper.forEach((layer, i) => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'layer-chip';
+        chip.style.setProperty('--chip', layerSwatchColor(layer));
+        chip.textContent = layer.replace('.Cu', '');
+        chip.title = `Show only ${layer} (${i + 1}) · shift-click to add or remove it`;
+        chip.addEventListener('click', (ev) => {
+          if (ev.shiftKey || ev.metaKey) {
+            const cur = store.get().layerVisibility;
+            setVis({ ...cur, [layer]: cur[layer] === false });
+          } else {
+            soloLayer(layer);
+          }
+        });
+        row.appendChild(chip);
+        soloChips.set(layer, chip);
+      });
+      els.layerList.appendChild(row);
+    }
 
     for (const key of keys) {
       const label = document.createElement('label');
@@ -160,6 +256,7 @@ export function initPanels(els: PanelEls, toolManager: ToolManager, actions: Pan
       cb.addEventListener('change', () => {
         store.set({ layerVisibility: { ...store.get().layerVisibility, [key]: cb.checked } });
       });
+      layerBoxes.set(key, cb);
       const swatch = document.createElement('span');
       swatch.className = 'layer-swatch';
       swatch.style.background =
@@ -170,6 +267,8 @@ export function initPanels(els: PanelEls, toolManager: ToolManager, actions: Pan
       label.append(cb, swatch, text);
       els.layerList.appendChild(label);
     }
+    lastLayerVis = vis;
+    syncLayerControls(vis);
   }
 
   function buildNetList(state: AppState): void {
@@ -1651,6 +1750,10 @@ export function initPanels(els: PanelEls, toolManager: ToolManager, actions: Pan
       lastPropsBoard = state.board;
       buildProps(state);
     }
+    if (state.layerVisibility !== lastLayerVis) {
+      lastLayerVis = state.layerVisibility;
+      syncLayerControls(state.layerVisibility);
+    }
     if (state.routeStatus !== lastRouteStatus) {
       lastRouteStatus = state.routeStatus;
       routeStatusHandler?.(state.routeStatus);
@@ -1729,5 +1832,5 @@ export function initPanels(els: PanelEls, toolManager: ToolManager, actions: Pan
   store.subscribe(onStateChange);
   onStateChange(store.get());
 
-  return { navigateList };
+  return { navigateList, soloLayerAt };
 }
