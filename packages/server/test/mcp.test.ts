@@ -185,6 +185,14 @@ describe('MCP endpoint', () => {
     const tp = await client.callTool({ name: 'place_builtin', arguments: { kind: 'test-point', refdes: 'TP1', diameter: 1.5 } });
     expect(tp.isError).toBeFalsy();
     expect(doc.board.components.find((c) => c.refdes === 'TP1')!.footprint.pads[0]!.size).toEqual({ w: 1.5, h: 1.5 });
+
+    const th = await client.callTool({ name: 'place_builtin', arguments: { kind: 'test-point-th', refdes: 'TP2', drill: 0.8 } });
+    expect(th.isError).toBeFalsy();
+    expect(doc.board.components.find((c) => c.refdes === 'TP2')!.footprint.pads[0]).toMatchObject({
+      layer: 'through',
+      size: { w: 2, h: 2 },
+      drill: { diameter: 0.8, plated: true },
+    });
   });
 
   it('place_builtin rejects options that do not fit the kind', async () => {
@@ -194,6 +202,10 @@ describe('MCP endpoint', () => {
     expect(b.isError).toBe(true);
     const c = await client.callTool({ name: 'place_builtin', arguments: { kind: 'test-point', refdes: 'TP1', diameter: 9 } });
     expect(c.isError).toBe(true);
+    const d = await client.callTool({ name: 'place_builtin', arguments: { kind: 'test-point', refdes: 'TP1', drill: 1 } });
+    expect(d.isError).toBe(true);
+    const e = await client.callTool({ name: 'place_builtin', arguments: { kind: 'test-point-th', refdes: 'TP1', diameter: 1.1 } });
+    expect(e.isError).toBe(true);
     expect(doc.board.components).toHaveLength(0);
   });
 

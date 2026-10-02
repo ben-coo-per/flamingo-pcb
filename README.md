@@ -137,7 +137,8 @@ doing.
 ### Solder jumpers, test points and do-not-place parts
 
 `place_builtin` places footprints that have no LCSC part: 2-pad and 3-pad
-solder jumpers (1.0 x 1.5mm pads, 0.3mm gap) and round test-point pads. They
+solder jumpers (1.0 x 1.5mm pads, 0.3mm gap) and test points: a round SMD
+pad, or a plated through-hole pad (2.0mm pad, 1.0mm drill by default). They
 get no solder paste and are left out of the BOM, the CPL and the stock check.
 An open jumper is closed with a blob of solder. A bridged jumper has a copper
 link between two pads that you cut to open it. Its pads stay on separate nets,
