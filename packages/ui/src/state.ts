@@ -158,6 +158,29 @@ export function withLayerKeys(current: Record<LayerKey, boolean>, keys: LayerKey
   return next;
 }
 
+/**
+ * "Show only" for one copper layer: that layer and its zones stay visible;
+ * every other copper layer and every overlay (silk, ratsnest, labels,
+ * dimensions) is hidden, so the layer reads on its own.
+ */
+export function soloCopperLayer(
+  current: Record<LayerKey, boolean>,
+  copper: LayerKey[],
+  layer: LayerKey,
+): Record<LayerKey, boolean> {
+  const next: Record<LayerKey, boolean> = {};
+  for (const k of Object.keys(current)) next[k] = false;
+  for (const k of copper) next[k] = k === layer;
+  next[ZONES_KEY] = true;
+  return next;
+}
+
+/** The copper layer that is shown on its own, or null when none or several are. */
+export function soloedCopperLayer(vis: Record<LayerKey, boolean>, copper: LayerKey[]): LayerKey | null {
+  const shown = copper.filter((k) => vis[k] !== false);
+  return shown.length === 1 && copper.length > 1 ? shown[0] : null;
+}
+
 type Listener = (state: AppState) => void;
 
 /** Minimal typed store: get/set/subscribe. Notifies are synchronous. */

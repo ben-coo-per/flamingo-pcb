@@ -1285,3 +1285,45 @@ input[type='text'].props-inline-input {
 .toast-leaving {
   opacity: 0;
 }
+
+/* Layers: "show only" chips, one per copper layer. Filled = visible,
+   outlined = hidden, inked ring = the one layer shown on its own. */
+.layer-solo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.layer-chip {
+  --chip: var(--ink-faint);
+  font: inherit;
+  font-size: 11px;
+  min-width: 34px;
+  padding: 3px 6px;
+  border: 1.5px solid var(--chip);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+
+.layer-chip.on {
+  background: color-mix(in srgb, var(--chip) 35%, transparent);
+  color: var(--ink);
+}
+
+.layer-chip.solo {
+  background: var(--chip);
+  color: #fff;
+  box-shadow: 0 0 0 1.5px var(--paper), 0 0 0 3px var(--ink);
+}
+
+.layer-chip-all {
+  --chip: var(--ink);
+}
+
+.layer-chip:hover {
+  border-color: var(--ink);
+}
