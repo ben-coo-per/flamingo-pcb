@@ -10,7 +10,7 @@
  */
 
 import type { Board, ComponentInst, DrcViolation, Keepout, LayerId, MountingHole, Op, Point, SilkText, Zone } from '@flamingo/engine';
-import { copperLayersOf } from '@flamingo/engine';
+import { copperLayersOf, isAssembled } from '@flamingo/engine';
 import {
   DIMS_KEY,
   LABEL_NETS_KEY,
@@ -266,14 +266,17 @@ export function initPanels(els: PanelEls, toolManager: ToolManager, actions: Pan
       lcsc: string;
       title: string;
       refs: string[];
+      /** Why JLCPCB fits nothing here, when it doesn't. */
+      tag?: 'DNP' | 'copper';
     }
     const lines = new Map<string, BomLine>();
     for (const c of board.components) {
-      const key = c.lcsc || c.footprint.name || c.refdes;
+      const tag = isAssembled(c) ? undefined : c.lcsc ? 'DNP' : 'copper';
+      const key = (tag === 'DNP' ? 'dnp:' : '') + (c.lcsc || c.footprint.name || c.refdes);
       let line = lines.get(key);
       if (!line) {
         const title = c.fields.value || c.fields.package || c.footprint.name || key;
-        line = { key, lcsc: c.lcsc, title, refs: [] };
+        line = { key, lcsc: c.lcsc, title, refs: [], ...(tag ? { tag } : {}) };
         lines.set(key, line);
       }
       line.refs.push(c.refdes);
@@ -294,7 +297,16 @@ export function initPanels(els: PanelEls, toolManager: ToolManager, actions: Pan
       const qty = document.createElement('span');
       qty.className = 'bom-qty';
       qty.textContent = `×${line.refs.length}`;
-      head.append(title, qty);
+      if (line.tag) {
+        row.classList.add('bom-row-unfitted');
+        const tag = document.createElement('span');
+        tag.className = 'bom-tag';
+        tag.textContent = line.tag;
+        tag.title = line.tag === 'DNP' ? 'do not place: not in the BOM or CPL' : 'copper only, no part: not in the BOM or CPL';
+        head.append(title, tag, qty);
+      } else {
+        head.append(title, qty);
+      }
 
       const refs = document.createElement('div');
       refs.className = 'bom-refs';
@@ -560,7 +572,14 @@ export function initPanels(els: PanelEls, toolManager: ToolManager, actions: Pan
       textRow('role', c.fields.role ?? '', (v) => actions.sendOp({ op: 'setComponentFields', refdes, fields: { role: v } })),
     );
     if (c.fields.package) els.propsPanel.appendChild(staticRow('package', c.fields.package));
-    if (c.lcsc) els.propsPanel.appendChild(staticRow('lcsc', c.lcsc));
+    if (c.lcsc) {
+      els.propsPanel.append(
+        staticRow('lcsc', c.lcsc),
+        checkboxRow('do not place', c.fields.dnp === true, (v) => actions.sendOp({ op: 'setComponentFields', refdes, fields: { dnp: v } })),
+      );
+    } else {
+      els.propsPanel.appendChild(staticRow('fitted', 'never · no part'));
+    }
     if (c.fields.mfr) els.propsPanel.appendChild(staticRow('mfr', c.fields.mfr));
     els.propsPanel.appendChild(staticRow('pads', String(c.footprint.pads.length)));
     if (c.fields.description && c.fields.description !== c.fields.value) {
