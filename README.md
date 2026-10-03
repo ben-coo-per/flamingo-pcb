@@ -16,7 +16,7 @@ running DRC, and exporting a
 
 ## Features
 
-- **Prompt-first workflow over MCP** — 34 tools cover the whole flow: parts →
+- **Prompt-first workflow over MCP** — 36 tools cover the whole flow: parts →
   placement → nets → routing → DRC → fab export. No schematic step.
 - **Real parts** — LCSC keyword search plus EasyEDA footprint fetch/parse with
   real pad numbers and geometry, cached locally under `~/.flamingo/parts/`.
@@ -121,18 +121,32 @@ doing.
 
 ## MCP tools
 
-34 tools are served at `http://localhost:4242/mcp`:
+36 tools are served at `http://localhost:4242/mcp`:
 
 | Group | Tools |
 | --- | --- |
 | **Board / project** | `new_board`, `open_board`, `save_board`, `get_board_state`, `describe_connections` |
 | **Parts** | `parts_search`, `parts_get`, `datasheet_get` |
-| **Placement** | `place_component`, `move_component`, `remove_component` |
+| **Placement** | `place_component`, `place_builtin`, `set_do_not_place`, `move_component`, `remove_component` |
 | **Connectivity** | `connect_pins`, `disconnect_pins`, `create_net_class`, `assign_net_class` |
 | **Board features** | `set_board_outline`, `add_zone`, `add_keepout`, `add_mounting_hole`, `add_silk_text`, `add_silk_line`, `remove_item` |
 | **Routing / analysis** | `add_track`, `add_via`, `get_ratsnest`, `autoroute`, `unroute`, `widen_tracks`, `run_drc` |
 | **History** | `undo`, `redo` |
 | **Output** | `export_fab`, `export_step`, `screenshot` |
+
+### Solder jumpers, test points and do-not-place parts
+
+`place_builtin` places footprints that have no LCSC part: 2-pad and 3-pad
+solder jumpers (1.0 x 1.5mm pads, 0.3mm gap) and round test-point pads. They
+get no solder paste and are left out of the BOM, the CPL and the stock check.
+An open jumper is closed with a blob of solder. A bridged jumper has a copper
+link between two pads that you cut to open it. Its pads stay on separate nets,
+and the footprint's `netTie` tells DRC that they touch on purpose. The
+autorouter sees each tied pad without the link.
+
+`place_component dnp: true` or `set_do_not_place` keeps a part's footprint and
+nets but leaves it out of the BOM, CPL and stock check, so JLCPCB fits nothing
+there (a 0R to add by hand, an optional part). Its pads keep their paste.
 
 ## Architecture
 

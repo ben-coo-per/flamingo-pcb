@@ -14,7 +14,7 @@ node packages/server/dist/cli.js serve board.flamingo   # prints "Flamingo v0.1.
 
 - Serves the live UI at `http://localhost:4242`, streams board changes over
   `/ws`, and exposes the MCP endpoint at `/mcp`.
-- `.mcp.json` (repo root) wires the `flamingo` MCP server to `/mcp` — its **34
+- `.mcp.json` (repo root) wires the `flamingo` MCP server to `/mcp` — its **36
   tools are available only while the server is running**. Start the server
   first, then use the tools.
 - Port override: `FLAMINGO_PORT`. Autoroute timeout override:
@@ -31,6 +31,10 @@ node packages/server/dist/cli.js serve board.flamingo   # prints "Flamingo v0.1.
    read it before stating any specs.
 2. **Lay out.** `new_board` (2/4/6 layers) → `set_board_outline` (rect with
    `cornerRadius`, polygon, or raw path) → `place_component` / `move_component`.
+   `place_builtin` adds parts with no LCSC number: solder jumpers (open, or
+   bridged by a cuttable copper link) and test-point pads. `set_do_not_place`
+   (or `place_component dnp: true`) keeps a part's footprint but leaves it out
+   of the BOM and CPL.
 3. **Connect.** `connect_pins` (net + `REFDES.PAD` refs) builds nets.
    `create_net_class` + `assign_net_class` set track width / clearance / via
    sizes per net.

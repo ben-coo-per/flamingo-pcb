@@ -16,7 +16,8 @@
  *    immediately after -- order matters and is guaranteed by zonefill.ts.
  *  - Soldermask openings = pads dilated 0.05mm; vias are TENTED (omitted from
  *    the mask). Mask files carry TF.FilePolarity Negative.
- *  - Paste = SMD pads exactly (no expansion), through-hole pads excluded.
+ *  - Paste = SMD pads exactly (no expansion), through-hole pads and
+ *    footprints marked noPaste excluded.
  *  - Silk text is stroked with a local vector font (strokefont.ts); every silk
  *    aperture is floored at the ruleset's minSilkWidth (see buildSilk).
  *  - The profile (.GKO) carries the outer outline plus a closed contour for
@@ -329,6 +330,7 @@ function buildPaste(b: Board, side: 'F' | 'B'): string {
   const g = new GerberBuilder();
   const cu = copperLayersOf(b);
   for (const comp of b.components) {
+    if (comp.footprint.noPaste) continue; // solder jumpers, test points
     for (const pad of comp.footprint.pads) {
       if (pad.layer === 'through') continue;
       if (!padCopperLayers(pad, comp.side, cu).includes(layer)) continue;
