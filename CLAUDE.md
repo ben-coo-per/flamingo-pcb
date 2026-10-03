@@ -14,7 +14,7 @@ node packages/server/dist/cli.js serve board.flamingo   # prints "Flamingo v0.1.
 
 - Serves the live UI at `http://localhost:4242`, streams board changes over
   `/ws`, and exposes the MCP endpoint at `/mcp`.
-- `.mcp.json` (repo root) wires the `flamingo` MCP server to `/mcp` — its **34
+- `.mcp.json` (repo root) wires the `flamingo` MCP server to `/mcp` — its **36
   tools are available only while the server is running**. Start the server
   first, then use the tools.
 - Port override: `FLAMINGO_PORT`. Autoroute timeout override:
@@ -31,6 +31,11 @@ node packages/server/dist/cli.js serve board.flamingo   # prints "Flamingo v0.1.
    read it before stating any specs.
 2. **Lay out.** `new_board` (2/4/6 layers) → `set_board_outline` (rect with
    `cornerRadius`, polygon, or raw path) → `place_component` / `move_component`.
+   `place_builtin` adds parts with no LCSC number: solder jumpers (open, or
+   bridged by a cuttable copper link) and test points (SMD pad, or
+   through-hole with `test-point-th`). `set_do_not_place`
+   (or `place_component dnp: true`) keeps a part's footprint but leaves it out
+   of the BOM and CPL.
 3. **Connect.** `connect_pins` (net + `REFDES.PAD` refs) builds nets.
    `create_net_class` + `assign_net_class` set track width / clearance / via
    sizes per net.
@@ -44,6 +49,51 @@ node packages/server/dist/cli.js serve board.flamingo   # prints "Flamingo v0.1.
 
 `screenshot` renders a PNG whenever you want to see the board. `get_board_state`
 / `describe_connections` give text summaries. `undo` / `redo` walk the op log.
+
+## Panels (several boards fabricated as one piece)
+
+A **panel** is a `.plamingo` file next to the boards that places copies
+("instances") of one or more board files on one fabrication panel. See "Panels
+and order cost" in `README.md` for every tool and the matching `flamingo panel`
+CLI commands. It is served in one of two ways:
+
+- `flamingo serve combo.plamingo`: like a board file, on its own. The panel
+  view is at `http://localhost:4242`, and `/mcp` has the 23 panel tools and
+  **no board tools**. The file is created if it is missing.
+- `flamingo serve board.flamingo --panel combo.plamingo`: the board's server
+  with the panel added. All 59 tools at one `/mcp`; the panel view is at
+  `/panel`. Use this when one session designs boards and panelizes them.
+
+Two servers on one machine need two ports (`FLAMINGO_PORT`); `.mcp.json` points
+at 4242.
+
+`boards + quantities → quote_order → panel_apply_scenario → panel_check → export_panel_fab`
+
+1. `panel_new`, then `panel_add_board` per board with `needed` (assembled
+   boards that must be delivered) and optionally `niceToHave`.
+2. `quote_order` ranks the ways to order them and itemizes every fee.
+   `panel_apply_scenario id=...` loads a scenario's panel. Or build the panel
+   by hand: `panel_add_instance`, then `panel_arrange`.
+3. `panel_check` returns findings as data. Errors gate `export_panel_fab`
+   (`waive: true` overrides).
+4. `panel_screenshot` to look at it; `export_panel_fab` to write the fileset.
+
+Conventions:
+
+- **Instance ids** are `<board key><n>`: `S1`, `M3`. Merged BOM/CPL designators
+  are `<instance>_<refdes>`: `S1_U2`. Positions are the bottom-left corner of
+  the instance's bounding box, mm, y-up; rotations are 0/90/180/270.
+- **Every amount marked `~` is an estimate.** Say so when you quote it. Fees
+  and limits live in `packages/panel/config/*.json` with a source URL and a
+  `verified` flag each; bare-board prices are always estimates.
+- **Never call JLCPCB's quote or order endpoints**, and never place an order.
+  The cost model works from the local fee table only.
+- A panel refers to boards by path + content hash. After editing a board that
+  is on a panel, `panel_check` reports it stale until `panel_refresh_boards`.
+- Panel support is opt-in in `startServer({ panel: true })`; the CLI turns it
+  on. `panelOnly: true` is the server of a panel file.
+- The panel server polls its boards' file times, so a board saved by another
+  server shows up as stale within about two seconds.
 
 ## Conventions
 
@@ -113,6 +163,8 @@ minute or more — be patient and don't assume a hang.
 npm run build   # tsc per package + vite build for the ui
 npm test        # vitest run across all packages
 npx tsx packages/server/scripts/e2e-esp32.ts   # real end-to-end pipeline check
+npx tsx packages/server/scripts/e2e-panel.ts   # panel pipeline: two boards, 1 + 5, quote, export
+npx tsx packages/server/scripts/verify-panel-ui.ts   # panel view in headless Chromium
 ```
 
 The E2E script drives only the public MCP tools against a real server with live

@@ -26,6 +26,9 @@ import { exportStep, exportStepDetail } from './step.js';
 import { parseObjMesh, placeMeshGroups } from './objmesh.js';
 import type { MeshGroup } from './objmesh.js';
 import { BOARD_T } from './viewer3d.js';
+import type { PanelChannel } from './panel/http.js';
+import { attachPanelChannel, handlePanelApi, isPanelChannel } from './panel/http.js';
+import { PanelSession } from './panel/session.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 // packages/server/dist/http.js -> packages/ui/dist
@@ -745,6 +748,34 @@ function makeRequestListener(
           }
           return;
         }
+        if (ctx.panel && (pathname === '/api/panel' || pathname.startsWith('/api/panel/'))) {
+          // Panel routes read their own bodies, so they are dispatched before
+          // handleApi, which drains the body of every route it does not list.
+          const handled = await handlePanelApi(ctx.panel, method, pathname, url, req, res);
+          if (!handled) sendNotFound(res);
+          return;
+        }
+        if (ctx.panelOnly && ctx.panel) {
+          // Started on a panel file: the panel view is the page at '/', the
+          // way the editor is for a board file, and there is no board here.
+          req.resume();
+          if (pathname.startsWith('/api/') || pathname === '/3d') {
+            sendNotFound(res);
+            return;
+          }
+          if (method === 'GET' && (pathname === '/panel' || pathname === '/panel/')) {
+            // Where the view lives on a server started on a board.
+            res.writeHead(302, { location: '/' });
+            res.end();
+            return;
+          }
+          if (method === 'GET' || method === 'HEAD') {
+            const page = pathname === '/' || pathname === '/index.html' || !/\.[a-z0-9]+$/i.test(pathname);
+            if (await serveStatic(page ? '/panel.html' : pathname, res, uiDistDir)) return;
+          }
+          sendNotFound(res);
+          return;
+        }
         if (pathname.startsWith('/api/')) {
           const handled = await handleApi(ctx, method, pathname, url, req, res);
           if (!handled) sendNotFound(res);
@@ -756,6 +787,11 @@ function makeRequestListener(
           res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
           res.end(render3dHtml(ctx.doc.board));
           return;
+        }
+        if (ctx.panel && method === 'GET' && (pathname === '/panel' || pathname === '/panel/')) {
+          // The panel view is a page of its own (packages/ui/panel.html).
+          const served = await serveStatic('/panel.html', res, uiDistDir);
+          if (served) return;
         }
         if (method === 'GET' || method === 'HEAD') {
           const served = await serveStatic(pathname, res, uiDistDir);
@@ -769,7 +805,7 @@ function makeRequestListener(
   };
 }
 
-function attachWebSocket(doc: Doc, server: http.Server): WebSocketServer {
+function attachWebSocket(doc: Doc, server: http.Server, panelChannel?: PanelChannel): WebSocketServer {
   const wss = new WebSocketServer({ server, path: '/ws' });
   const clients = new Set<WebSocket>();
 
@@ -797,7 +833,13 @@ function attachWebSocket(doc: Doc, server: http.Server): WebSocketServer {
   };
   doc.on('routeStatus', onRouteStatus);
 
-  wss.on('connection', (ws: WebSocket) => {
+  wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+    // /ws?channel=panel is the panel view's socket: it gets panel views and
+    // sends panel ops, and never sees board traffic.
+    if (panelChannel && isPanelChannel(req)) {
+      panelChannel.add(ws);
+      return;
+    }
     clients.add(ws);
     ws.send(JSON.stringify({ type: 'board', board: doc.board, file: fileName() }));
 
@@ -845,6 +887,8 @@ function attachWebSocket(doc: Doc, server: http.Server): WebSocketServer {
 export interface StartedServer {
   server: http.Server;
   port: number;
+  /** The panel session, when the server was started with `panel`. */
+  panel?: PanelSession;
   close(): Promise<void>;
 }
 
@@ -857,6 +901,19 @@ export interface StartServerOptions {
   uiDistDir?: string;
   /** Freerouting runner for the autoroute MCP tool. Defaults to the real java/jar runner -- tests should inject a mock. */
   routeRunner?: RouteRunner;
+  /**
+   * Panelization: the panel MCP tools, the /api/panel routes, the /panel page
+   * and the panel WebSocket channel. Off by default, so a server started
+   * without it behaves exactly as before; `flamingo serve` turns it on. Pass
+   * true for a fresh session, or a session to use (e.g. one that opened a file).
+   */
+  panel?: boolean | PanelSession;
+  /**
+   * The server is started on a panel file, not on a board: the panel view is
+   * the page at '/', only the panel tools are served over MCP, and the board
+   * editor, its routes and its tools are not. Needs `panel`; `doc` is unused.
+   */
+  panelOnly?: boolean;
 }
 
 /**
@@ -868,15 +925,42 @@ export function startServer(
   port: number = DEFAULT_PORT,
   opts: StartServerOptions = {},
 ): Promise<StartedServer> {
+  const projectDir = opts.projectDir ?? process.cwd();
+  const partsApi = opts.partsApi ?? { fetchPart, searchParts, fetchStock: fetchJlcStock };
+  const panel =
+    opts.panel instanceof PanelSession
+      ? opts.panel
+      : opts.panel === true
+        ? new PanelSession({
+            projectDir,
+            priceLookup: async (lcsc) => (await partsApi.fetchPart(lcsc)).info.price,
+          })
+        : undefined;
   const ctx: McpContext = {
     doc,
-    projectDir: opts.projectDir ?? process.cwd(),
-    partsApi: opts.partsApi ?? { fetchPart, searchParts, fetchStock: fetchJlcStock },
+    projectDir,
+    partsApi,
     route: opts.routeRunner ?? defaultRouteRunner,
+    ...(panel ? { panel } : {}),
+    ...(panel && opts.panelOnly ? { panelOnly: true } : {}),
   };
   const uiDistDir = opts.uiDistDir ?? UI_DIST;
   const server = http.createServer(makeRequestListener(ctx, uiDistDir));
-  const wss = attachWebSocket(doc, server);
+  const panelChannel = panel ? attachPanelChannel(panel) : undefined;
+  const wss = attachWebSocket(doc, server, panelChannel);
+
+  // A board edited in the editor is a source board changed on disk: once its
+  // autosave has landed, let the panel view notice (stale flag, new geometry).
+  let staleTimer: ReturnType<typeof setTimeout> | null = null;
+  const onBoardChange = (): void => {
+    if (!panel || panel.panel.sources.length === 0) return;
+    if (staleTimer) clearTimeout(staleTimer);
+    staleTimer = setTimeout(() => {
+      staleTimer = null;
+      panel.touch();
+    }, 900);
+  };
+  if (panel) doc.on('change', onBoardChange);
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -887,7 +971,11 @@ export function startServer(
       resolve({
         server,
         port: actualPort,
+        ...(panel ? { panel } : {}),
         close: async () => {
+          if (staleTimer) clearTimeout(staleTimer);
+          doc.removeListener('change', onBoardChange);
+          panelChannel?.close();
           await new Promise<void>((res, rej) => {
             for (const client of wss.clients) client.terminate();
             wss.close(() => {
@@ -895,6 +983,7 @@ export function startServer(
             });
           });
           await doc.close();
+          await panel?.close();
         },
       });
     });

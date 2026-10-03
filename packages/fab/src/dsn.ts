@@ -266,8 +266,12 @@ export function exportDSN(b: Board, opts: ExportDSNOptions = {}): string {
   const padStackNameOf = new Map<Pad, string>();
   for (const id of imageOrder) {
     const comp = imageByName.get(id)!;
+    const tie = new Set(comp.footprint.netTie ?? []);
     for (const pad of comp.footprint.pads) {
-      const ps = padStackFor(b, pad);
+      // A net-tied pad (bridged solder jumper) touches its neighbour on purpose.
+      // The router gets it without the link, as its plain `size` rectangle.
+      const routed: Pad = tie.has(pad.number) ? { ...pad, shape: 'rect', polygon: undefined } : pad;
+      const ps = padStackFor(b, routed);
       padStackNameOf.set(pad, ps.name);
       if (!padStacks.has(ps.name)) padStacks.set(ps.name, ps.shapeForms);
     }

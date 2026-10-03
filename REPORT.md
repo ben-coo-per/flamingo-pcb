@@ -1,0 +1,1129 @@
+# Panelization + cost optimizer — work report
+
+Branch `panelize`, on top of `main` (487b6b0). Written 2026-09-28.
+All ten steps of the order of work are done and committed. The branch is pushed
+to the fork `ben-coo-per/flamingo-pcb`; see section 1.
+
+**Sections 16 and 17 record changes made after Ben's reviews of the panel view.
+Where they contradict sections 7, 12 or 14, the later section is current.**
+
+## 1. Git remotes and what was pushed
+
+`git remote -v` at the start of the session:
+
+```
+origin	git@github.com:cheewee2000/flamingo-pcb.git (fetch)
+origin	git@github.com:cheewee2000/flamingo-pcb.git (push)
+```
+
+`origin` pointed at `cheewee2000/flamingo-pcb`, the original repo, not at a
+fork. Per the git rules **nothing was pushed during the unattended work**: every
+commit stayed local on `panelize`.
+
+Afterwards, on 2026-09-28 and at Ben's request:
+
+- No fork existed under the signed-in GitHub account, so
+  `ben-coo-per/flamingo-pcb` was created as a fork of `cheewee2000/flamingo-pcb`.
+  It is public, as the original is.
+- `origin` was re-pointed at it with `git remote set-url`. No remote was added.
+- `panelize` was pushed to it and tracks `origin/panelize`. Nothing else was
+  pushed: `main` on the fork is the original's `main` (487b6b0).
+
+```
+origin	git@github.com:ben-coo-per/flamingo-pcb.git (fetch)
+origin	git@github.com:ben-coo-per/flamingo-pcb.git (push)
+```
+
+No pull request was opened, against either repo. Nothing was pushed to or
+merged from the original repo, and nothing was force-pushed. The original repo
+is no longer a remote of this checkout; add it as `upstream` yourself if you
+want to pull its changes later.
+
+## 2. Summary
+
+Given two or more board files and quantities, Flamingo now lays out a panel,
+checks it against JLCPCB's limits, ranks the ways to order the boards with
+itemized costs, and exports one fileset for the panel. All of it is drivable
+over MCP (23 new tools), from the shell (`flamingo panel ...`), and from a
+slicer-style view at `/panel`.
+
+For the brief's example, 1 ESP32 board + 5 USB-C breakouts, the optimizer's
+answer is:
+
+| Rank | Scenario | Total | Boards received |
+| --- | --- | --- | --- |
+| 1 | One board, silkscreen dividers, 1×S + 3×M, 2 of 5 assembled | ~$30.48 | S 2, M 6 |
+| 2 | One board, silkscreen dividers, 1×S + 1×M, 5 of 5 assembled | ~$32.18 | S 5, M 5 |
+| 3 | One panel, mouse bites, 1×S + 3×M, 2 of 5 assembled | ~$46.69 | S 2, M 6 |
+| 4 | One panel, mouse bites, 1×S + 1×M, 5 of 5 assembled | ~$48.39 | S 5, M 5 |
+| 5 | Separate orders | ~$53.46 | S 2, M 5 |
+
+Three things to know before trusting those numbers:
+
+1. **They are estimates, and low.** Every bare-board price is an estimate, and
+   the ESP32 module has no price in Flamingo's part data, so it is missing
+   from every total (section 9).
+2. **The gap between ranks 1–2 and 3–4 is mostly two fees**: the
+   different-designs fee, whose amount is my guess ($8), and the panel fee
+   ($8.21, verified, but whether it applies is my reading).
+3. **The panel gerbers parse cleanly but have not been opened in a Gerber
+   viewer.** Do that before ordering (section 13).
+
+## 3. Status
+
+| # | Step | Status |
+| --- | --- | --- |
+| 1 | Read the codebase, architecture note | done (section 5) |
+| 2 | Panel format, op log, load/save, stale detection | done |
+| 3 | Constraint checks | done |
+| 4 | Auto-layout and render | done |
+| 5 | Merged BOM, CPL, gerbers | done |
+| 6 | Cost model and fee table | done; bare-board prices are estimates (section 9) |
+| 7 | Scenario optimizer | done |
+| 8 | MCP tools, CLI, README section | done; CLI has no undo/redo (section 6.9) |
+| 9 | E2E script | done; passes routed and unrouted |
+| 10 | UI | done as specified; section 14 lists what the spec left open |
+
+Partial: nothing is half-built. Not started: nothing from the brief. What is
+deliberately absent is in sections 13 and 14.
+
+## 4. Baseline and this machine
+
+`npm test` on untouched `main` has three failures that come from this machine,
+not from the code. They are unchanged on `panelize` and are the only failures
+in any run below.
+
+- `fab/test/gerber.test.ts > demo board integration` reads
+  `.superpowers/sdd/demo/board.flamingo`, which is gitignored and absent here.
+- `server/test/screenshot.test.ts`, two label-overlay tests: they compare PNGs
+  with and without `<text>`. This machine has no fonts installed (`fc-list`
+  prints nothing), so resvg draws no text and the images are identical.
+
+Two tools the work needed are not installed here, and nothing was installed
+system-wide to get them:
+
+- **Java.** Freerouting needs it (2.4.1 needs Java 25). I downloaded a Temurin
+  JRE tarball into this session's temporary scratch directory and pointed
+  `JAVA_HOME` at it for the routed e2e runs only. It is not on `PATH` and goes
+  away with the session. Without Java the panel e2e still runs, on unrouted
+  boards; see section 11.
+- **Chromium's system libraries.** Playwright's Chromium is in
+  `~/.cache/ms-playwright` but cannot start (`libglib-2.0.so.0` missing). The
+  UI check ran the browser in the `mcr.microsoft.com/playwright:v1.61.1-noble`
+  image that was already on this machine, as container `flamingo-pw-panelize`
+  on port 4103. I started that container and stopped it again; no other
+  container or port was touched.
+
+Side effects outside the repo, all from running the existing tools:
+`~/.flamingo/parts/` (part cache) and `~/.flamingo/freerouting.jar` now exist.
+I also wrote `~/.config/dev-previews/flamingo-pcb.md` with the above.
+
+## 5. Architecture
+
+### What was there
+
+npm workspaces, ESM, strict TypeScript, Vitest. `engine` is a pure library:
+`Board` is plain JSON, `applyOp(board, op)` is a pure reducer over a
+discriminated `Op` union, geometry is mm / y-up / degrees CCW. `fab` writes
+Gerber, Excellon, BOM and CPL from a `Board`. `server` owns the live `Doc`
+(snapshot undo/redo, debounced atomic save, `change` events), serves REST under
+`/api/*`, a WebSocket at `/ws` that pushes the board on every change, and a
+stateless MCP endpoint at `/mcp`. `ui` is Vite with no framework: a store, a
+canvas renderer, pure view math. The server is the single source of truth; MCP
+and browser both call `doc.apply(op)`.
+
+### What was added
+
+```
+packages/panel/            new package, @flamingo/panel
+  config/panel-limits.json   size limits, rail/tab/fiducial geometry, with sources
+  config/fee-table.json      every fee, with source and verified flag
+  src/                       pure and browser-safe (the default entry point)
+    types, panel, ops        the format and its reducer
+    history                  generic snapshot undo/redo
+    source                   what a panel needs to know about a board; blocked edges
+    transform                where an instance is
+    geometry                 frame, rails, tabs, fiducials, tooling holes, routed profile
+    check                    constraint checks
+    layout                   arrange
+    merge                    the one Board a panel amounts to
+    cost, order, scenarios   cost model, panel -> order, optimizer
+    view                     the data a client draws
+  src/node/                  needs Node (entry point @flamingo/panel/node)
+    config, hash, load       config files, content hash, source resolution
+    render                   SVG
+    exportPanelFab           fab files, through packages/fab
+packages/server/src/panel/
+  doc                        PanelDoc: the panel counterpart of Doc
+  session                    PanelSession: everything the server can do with a panel
+  mcp, http, cli, format     thin wrappers over the session
+packages/ui/panel.html, src/panel/   the panel view, a second page
+```
+
+The same shape as the board side, one level up: a pure reducer over plain JSON,
+a server-side document with an op log, and one derived view pushed to every
+client. `PanelSession` is the single place panel work happens, so MCP, HTTP,
+WebSocket and CLI cannot drift apart.
+
+## 6. Technical decisions
+
+### 6.1 Format
+
+- **A new package** rather than more code in `engine`. Panels depend on `fab`
+  for output, and `engine` must not. The package has two entry points so the
+  browser never bundles `node:fs` or `archiver`.
+- **Instance position is the bottom-left corner of the rotated bounding box.**
+  Rotation never moves an instance off its corner, and packing, hit testing and
+  the UI all work in the same terms. `panel_rotate_instance` and the UI turn
+  about the centre by computing the corner that keeps the centre still.
+- **The hash covers the board's canonical serialization, not the file bytes.**
+  Re-indenting or re-saving an unchanged board does not mark panels stale.
+- **The panel always uses the board as it is on disk.** `stale` means "this
+  changed since you last looked", not "the old version is being used". It is a
+  warning and does not gate export. `panel_refresh_boards` acknowledges it.
+- **Op log: an equivalent, not a generalization.** `History<T>` in
+  `@flamingo/panel` is the generic snapshot stack and `PanelDoc` uses it. `Doc`
+  was left untouched rather than rebuilt on it, because that would have meant
+  changing a class the board editor depends on. `Doc` could move onto `History`
+  later with no behaviour change.
+- **The frame is derived, never stored.** It wraps the instances wherever they
+  are. Nothing can be "outside the panel", and the panel's size is always what
+  the cost is computed from.
+
+### 6.2 Blocked edges
+
+- **Per edge, not per stretch of edge.** One connector blocks the whole side it
+  overhangs. Coarser than necessary, always safe, and what the brief describes.
+- "Edges" are the four sides of the outline's bounding box. A part that sticks
+  into the notch of a non-rectangular board blocks every side nearest to a
+  stray corner.
+- A footprint without a courtyard is judged by its pads.
+- **Two parts overhanging toward each other must clear each other**
+  (overhang + overhang + margin), not just the opposite board. The first e2e
+  run put two USB-C shells 8 µm apart; this rule is the fix.
+
+### 6.3 Layout
+
+- **Bottom-left packing of grown rectangles over a range of strip widths.**
+  Each instance grows by the clearance each side needs, so grown rectangles may
+  touch. It leaves holes that a smarter packer would fill; it never produces an
+  invalid panel.
+- **Preference order**: a panel an assembly line accepts, then rails along the
+  long sides, then smaller area (with strips beyond 3:1 penalized). Without the
+  second rule two boards stack into a 40 × 76 mm strip with its rails on the
+  short sides.
+- **Rotations tried: as it is, and a quarter turn.** A deliberate 180° flip by
+  the user survives an arrange.
+- **One exception, the support pass.** A board left with too few tabs is turned
+  180° inside the space it already occupies when that gets it held better and
+  makes nothing worse. Costs no area. Off when rotation is off.
+- **A failed arrange changes nothing** and returns the reason plus the smallest
+  panel the packer found ignoring the limit.
+- **The binding limit** is the fab maximum for the layer count, tightened to the
+  roomier assembly service's limit when any instance is populated.
+
+### 6.4 Tabs and rail features
+
+- Tabs bridge from a board's unblocked edge to the nearest facing board or rail
+  within `tabs.maxLength` (8 mm). Each pair of boards is tabbed once.
+- One tab per edge, two as soon as two fit with a gap between them, more at
+  `tabs.pitch`.
+- **Mouse-bite holes on board ends of a tab only**, none on rail ends, one third
+  of the hole inside the board. Both per JLCPCB's mouse-bite guide.
+- **Three fiducials, four tooling holes.** Three marks make the pattern
+  unambiguous; JLCPCB's figure of 3.85 mm is the distance to the rail's outer
+  edge. Bottom-side fiducials are added when a populated board has bottom parts.
+- **No V-cut.** The brief asks for mouse bites; Economic PCBA does not take
+  V-cut panels; V-cut needs zero spacing and straight full-width lines, which
+  is a different layout problem.
+
+### 6.5 Fab output
+
+- **A panel is merged into one `Board` and handed to the existing writers.**
+  That is the reuse of `packages/fab` the brief asks for.
+- **Net names are prefixed per instance** (`S1/GND`). Two boards' GND nets are
+  not connected and nothing may treat them as one.
+- **Pours are filled on each source board and the finished fill is moved.**
+  `fillAllZones` clips to the board outline; on the merged board the outline is
+  the panel frame, so re-pouring would flood the gaps.
+- **Silkscreen labels are placed on the source board and moved**, so a board on
+  a panel carries exactly the legend it carries alone (`U2`, not `S1_U2`).
+- **The `.GKO` is the union of boards, tabs and rails**: the panel outline plus
+  a closed contour per routed opening.
+- **Bare instances are fabricated, without paste**, and absent from BOM and CPL.
+- **One BOM comment per LCSC part across boards.** Two boards naming one part
+  differently would put it on two BOM rows, which JLCPCB stops on. The first
+  name wins and the export says so.
+- **No DRC on the merged board.** Each source board's own DRC is run (cached by
+  hash) and gates the export; the panel check covers what is between boards.
+
+### 6.6 Cost model
+
+- `computeCost(order, fees)` is pure. It holds no price. Each line carries
+  `estimate` and `sources` from the fee entries it used.
+- **Bare-board price** = special offer when the piece fits 100 × 100 mm and the
+  quantity is on offer, else engineering fee + area × rate. The offer is never
+  allowed to cost more than the area price.
+- **Part prices come from the EasyEDA part data Flamingo already caches.** They
+  are always flagged as estimates. A part with no price is listed at $0 and
+  named in a note. **The ESP32-S3 module has no price in that data**, so every
+  total for the reference board is low by about two modules' worth.
+- **Through-hole joints are counted from plated through-hole pads**, which
+  includes the mounting legs of the USB-C connector. JLCPCB may not charge
+  those as hand-soldered; a note says so wherever the line appears.
+- **Panel fee** ($8.21, "applicable when the number of panelized designs > 1")
+  is applied once to an assembly order whose piece is a routed panel of more
+  than one board. That reading is mine.
+- **The stock check is not run for panels.** It calls jlcpcb.com; I kept new
+  code off JLCPCB's API entirely. `e2e-panel.ts` sets
+  `FLAMINGO_STOCK_CHECK=off` unless the caller set it.
+
+### 6.7 Scenarios
+
+- **`needed`** = assembled boards the order must deliver. **`niceToHave`** =
+  total boards welcome if cheap, assembled or bare. The brief does not define
+  it; this is my reading. Change it in `scenarios.ts` (`variants`).
+- **Quantities come in steps**: boards in 5, 10, 15 ..., assembly in 2, 5, 10
+  .... Needing 1 + 5 therefore yields 2 + 6 at best. Every scenario shows
+  received against needed.
+- **Partial population** appears when a design has a nice-to-have quantity: the
+  needed boards populated, the rest of the wish bare.
+- **Silkscreen-divider is offered when** every outline fills 98% of its
+  bounding box and there are at most 10 designs.
+- **"Cost per needed board"** divides by needed boards plus nice-to-have boards
+  actually delivered. With no nice-to-have it is total / needed.
+- Scenarios that cannot be built are returned in `rejected` with the reason.
+
+### 6.8 Server
+
+- **Panel support is opt-in on `startServer`; the CLI turns it on.** An existing
+  test asserts that the MCP endpoint serves exactly 34 tools. Rather than edit
+  that test, a server started without `panel` behaves exactly as before.
+- **The panel socket is `/ws?channel=panel`**, the same `WebSocketServer`.
+  Two servers on one HTTP server with different paths abort each other's
+  handshakes in `ws`.
+- **The view is derived server-side and pushed whole.** The browser draws what
+  MCP reads, by construction.
+- **An unsaved panel gets a file when it gains its first board**, as
+  `flamingo serve` creates a missing board file.
+
+### 6.9 CLI
+
+- `flamingo panel <command> <file>` works on the file directly, no server.
+- **No `undo` / `redo` commands.** The op log is in memory, as for boards, and
+  each command is a process of its own.
+
+## 7. UX decisions
+
+Everything here is mine to have made only because the brief left it open.
+
+**Canvas**
+
+1. White plate, black ink (the board editor's canvas is dark).
+2. Selected = 4 px outline + square handles at the corners.
+3. Pinned = filled square in the top-left corner + label `PINNED`.
+4. Bare = dashed outline + sparse diagonal hatch + label `BARE`.
+5. Blocked edge = 5 px line with a comb of ticks pointing outward.
+6. Error / warning = a second outline just outside the board, solid / dashed,
+   + label `ERROR` / `WARNING`.
+7. Stale = dotted outline + label `STALE`.
+8. Overhanging part = thin dashed polygon. Board-edge keepout = cross hatch.
+9. Rails = diagonal hatch. Tabs = solid bars. Mouse-bite holes = open circles,
+   drawn only when zoomed in far enough to be more than a speck.
+10. Size limits = long-dash rectangles anchored at the panel's bottom-left
+    corner. The one arrange packs against is heavier and says so. Labels are
+    kept on screen when the limit's corner is not.
+11. Labels scale with the instance; tags that do not fit are dropped from the
+    right.
+12. While dragging, the instance shows its position in mm.
+
+**Interaction**
+
+13. A press becomes a drag after 3 px.
+14. Drop positions are rounded to 0.01 mm. No grid snap.
+15. Dragging is not constrained by collisions. You can drop a board on another;
+    the check reports it.
+16. `+` adds an instance **and arranges everything unpinned**, as one undo step.
+    Otherwise the new instance would land on top of the first.
+17. `−` removes unpinned instances first, highest number first.
+18. Duplicate places the copy to the right of the original, unpinned, keeping
+    populated/bare.
+19. Rotate turns about the instance's centre.
+20. The plate re-fits on first load, after Arrange, and after a scenario loads.
+    Nothing else moves the view.
+21. **Extra hotkeys**: `Backspace` also deletes (Mac keyboards have no Delete);
+    `Escape` closes the menu, cancels a drag, deselects.
+22. The right-click menu shows "Make bare" or "Make populated" by state.
+    "Unpin" is struck through when the instance is not pinned.
+23. Right-click on empty plate does nothing.
+
+**Sidebar**
+
+24. Order: Boards, Arrange, Estimated cost, Compare scenarios, Warnings, Export.
+    (Replaced by the three steps of section 18.)
+25. 420 px wide, scrolls on its own.
+26. Estimates are marked `est.` after the amount, with a legend under the cost.
+    (Reports for agents mark them `~`.)
+27. The scenario table has four columns: rank, scenario, total, per board.
+    Received-versus-needed and the warning count sit under the title, because
+    a fifth and sixth column do not fit 420 px.
+28. **Selecting a scenario loads it at once, without asking.** It is one undo
+    step and the message says so.
+29. A scenario of single boards has no panel; selecting it shows its fees and a
+    note, and leaves the plate alone.
+30. A scenario with several panels loads the first and says so in its warnings.
+31. Warnings are listed errors first. The "Warnings" section also holds notes
+    (blocked edges, promotion).
+32. **Export in the UI cannot waive.** A panel with errors is refused with the
+    findings. Waiving is `export_panel_fab waive:true` or `--waive`.
+33. Export shows a download link rather than starting the download itself.
+34. Messages stay until the next action replaces them. No toasts.
+35. **No debounce.** The server derives a view, checks and cost included, in
+    about 5 ms; see section 10.
+36. Scenarios are re-fetched when boards, quantities or settings change, not
+    when an instance moves.
+37. A link to the board editor in the header. The editor has no link back,
+    because that would mean editing the editor.
+
+## 8. Changed existing files
+
+Nine existing files and two existing documents. Everything else is new.
+
+| File | Change | Why |
+| --- | --- | --- |
+| `packages/fab/src/gerber.ts` | `generateGerbers(b, extras = {})`. Extras: `prefilled`, `profile`, `fiducials`, `labels`, `noPaste`. | A panel needs a routed profile instead of one outline, fiducials without paste, pours that are not re-poured, labels that keep their text. With no extras the output is byte-identical; every fab test passes as before. |
+| `packages/fab/src/index.ts` | Exports the two new types. | |
+| `packages/server/src/mcp.ts` | `McpContext.panel?`; registers the panel tools when present. | Same endpoint as the board tools. |
+| `packages/server/src/http.ts` | `StartServerOptions.panel`, dispatch of `/api/panel/*` and `/panel`, the panel channel on `/ws`, a nudge to the panel when the board changes. | All behind `if (ctx.panel)`. |
+| `packages/server/src/cli.ts` | `serve --panel <file>`, the `panel` command. | |
+| `packages/server/package.json` | Depends on `@flamingo/panel`; dev-depends on `playwright-core`. | |
+| `packages/ui/package.json` | Depends on `@flamingo/panel`. | |
+| `packages/ui/vite.config.ts` | Two HTML entry points. | The panel view is a page of its own. **Side effect:** the editor's bundle is now `main-*.js` plus a chunk shared with the panel page, where it was `index-*.js`. Same code; the CSS hash is unchanged. |
+| `package-lock.json` | The new workspace and `playwright-core`. | |
+| `README.md` | New section "Panels and order cost"; one line in Architecture. | |
+| `CLAUDE.md` | New section "Panels"; two lines under Build & test. | So an agent in this repo finds the panel tools. Not asked for; revert if unwanted. |
+
+No existing test was edited. `e2e-esp32.ts` was not touched; it passes
+(exit 0) with Java available.
+
+## 9. Fee values and their status
+
+**verified** = read from a JLCPCB `/help/` article with WebFetch on 2026-09-28.
+Everything else is flagged unverified and surfaces as an estimate:
+
+- **published, not a help page** = read with WebFetch from JLCPCB's
+  capabilities pages. Real published numbers, but not from a help article, so
+  by the brief's rule they are not marked verified. Two of them
+  (`assembly.*.qtySteps`) cite that page for the range only; the steps inside
+  the range are from memory.
+- **ESTIMATE** = JLCPCB publishes no figure, or I found it only in a blog post
+  or a search-result summary.
+- **design choice** = Flamingo's own default, not a claim about JLCPCB.
+
+What matters most:
+
+- **Every bare-board price is an estimate.** JLCPCB publishes them only through
+  its quote calculator, which was never called. The 4-layer numbers are fitted
+  to one published data point; the 2-layer and 6-layer numbers have less behind
+  them. Expect the ranking to be more reliable than the totals.
+- **The different-designs fee ($8 per extra design) is a guess.** The help page
+  confirms the charge and gives no amount. It decides between the merged and
+  the silk-divider scenarios, so check it on the quote page before relying on
+  that choice.
+- **Assembly fees are verified**, all from one page.
+- `assembly.*.panelSize` is marked verified for its maximum (250 × 250 mm, from
+  the FAQ); its minimum is from the capabilities page.
+
+### Fee table (`packages/panel/config/fee-table.json`)
+
+| Entry | Value | Status | Source |
+| --- | --- | --- | --- |
+| `pcb.qtySteps` | `[5,10,15,20,25,30,50,75,100,125,150,200,250,300,400,500]` | **ESTIMATE** | cart.jlcpcb.com/quote |
+| `pcb.promo.maxSize` | `{"width":100,"height":100}` | **ESTIMATE** | jlcpcb.com/blog/custom-pcb-cost |
+| `pcb.promo.prices.2` | `[{"qty":5,"price":2},{"qty":10,"price":5}]` | **ESTIMATE** | jlcpcb.com/blog/custom-pcb-cost |
+| `pcb.promo.prices.4` | `[{"qty":5,"price":7}]` | **ESTIMATE** | jlcpcb.com/blog/special-discount-on-quality-4-layers-pcbs |
+| `pcb.promo.prices.6` | `[]` | **ESTIMATE** | cart.jlcpcb.com/quote |
+| `pcb.engineeringFee.2` | `8` | **ESTIMATE** | cart.jlcpcb.com/quote |
+| `pcb.engineeringFee.4` | `20` | **ESTIMATE** | jlcpcb.com/blog/special-discount-on-quality-4-layers-pcbs |
+| `pcb.engineeringFee.6` | `50` | **ESTIMATE** | cart.jlcpcb.com/quote |
+| `pcb.areaRate.2` | `[{"upToM2":0.5,"perM2":45},{"upToM2":3,"perM2":35},{"upToM2":null,"perM2":30}]` | **ESTIMATE** | cart.jlcpcb.com/quote |
+| `pcb.areaRate.4` | `[{"upToM2":0.5,"perM2":65},{"upToM2":3,"perM2":50},{"upToM2":null,"perM2":45}]` | **ESTIMATE** | jlcpcb.com/blog/special-discount-on-quality-4-layers-pcbs |
+| `pcb.areaRate.6` | `[{"upToM2":0.5,"perM2":160},{"upToM2":3,"perM2":130},{"upToM2":null,"perM2":120}]` | **ESTIMATE** | cart.jlcpcb.com/quote |
+| `pcb.differentDesigns.perExtraDesign` | `8` | **ESTIMATE** | jlcpcb.com/help/article/in-what-cases-will-there-be-charged-extra |
+| `pcb.differentDesigns.rule` | `"separable"` | verified 2026-09-28 | jlcpcb.com/help/article/different-design-in-your-pcb-files |
+| `pcb.differentDesigns.maxDesigns` | `10` | verified 2026-09-28 | jlcpcb.com/help/article/pcb-panelization |
+| `pcb.smallBoardDeburring` | `[{"underMm":15,"perPiece":0.05},{"underMm":30,"perPiece":0.02}]` | verified 2026-09-28 | jlcpcb.com/help/article/in-what-cases-will-there-be-charged-extra |
+| `assembly.economic.setupFee` | `{"single":8.18,"double":null}` | verified 2026-09-28 | jlcpcb.com/help/article/pcb-assembly-price |
+| `assembly.economic.stencil` | `{"single":1.53,"double":null}` | verified 2026-09-28 | jlcpcb.com/help/article/pcb-assembly-price |
+| `assembly.economic.smtJoint` | `[{"upTo":100000,"price":0.0016}]` | verified 2026-09-28 | jlcpcb.com/help/article/pcb-assembly-price |
+| `assembly.economic.feederLoading` | `{"basic":0,"extended":3.07}` | verified 2026-09-28 | jlcpcb.com/help/article/pcb-assembly-price |
+| `assembly.economic.qtySteps` | `[2,5,10,15,20,25,30,50]` | published, not a help page | jlcpcb.com/capabilities/pcb-assembly-capabilities |
+| `assembly.standard.setupFee` | `{"single":25.56,"double":51.12}` | verified 2026-09-28 | jlcpcb.com/help/article/pcb-assembly-price |
+| `assembly.standard.stencil` | `{"single":8.21,"double":16.42}` | verified 2026-09-28 | jlcpcb.com/help/article/pcb-assembly-price |
+| `assembly.standard.smtJoint` | `[{"upTo":50000,"price":0.0016},{"upTo":100000,"price":0.0013},{"upTo":1000000,"price":0.0012}]` | verified 2026-09-28 | jlcpcb.com/help/article/pcb-assembly-price |
+| `assembly.standard.feederLoading` | `{"basic":1.53,"extended":1.53}` | verified 2026-09-28 | jlcpcb.com/help/article/pcb-assembly-price |
+| `assembly.standard.qtySteps` | `[2,5,10,15,20,25,30,50,75,100,125,150,200,250,300,400,500]` | published, not a help page | jlcpcb.com/capabilities/pcb-assembly-capabilities |
+| `assembly.manualJoint` | `0.0164` | verified 2026-09-28 | jlcpcb.com/help/article/pcb-assembly-price |
+| `assembly.handSolderLabor` | `3.58` | verified 2026-09-28 | jlcpcb.com/help/article/pcb-assembly-price |
+| `assembly.panelFee` | `8.21` | verified 2026-09-28 | jlcpcb.com/help/article/pcb-assembly-price |
+| `assembly.largePcb` | `{"overCm2":650,"fee":57.46}` | verified 2026-09-28 | jlcpcb.com/help/article/pcb-assembly-price |
+| `parts.attrition` | `[{"maxJoints":2,"extra":8,"minimum":20,"kind":"two-pad passives"},{"maxJoints":8,"extra":3,"m...` | **ESTIMATE** | jlcpcb.com/help/answers/detail/92-What-are-the-MOQ-and-attrition |
+
+### Limits and panel geometry (`packages/panel/config/panel-limits.json`)
+
+| Entry | Value | Status | Source |
+| --- | --- | --- | --- |
+| `fab.maxSize.2` | `{"width":670,"height":600}` | published, not a help page | jlcpcb.com/capabilities/pcb-capabilities |
+| `fab.maxSize.4` | `{"width":663,"height":593}` | published, not a help page | jlcpcb.com/capabilities/pcb-capabilities |
+| `fab.maxSize.6` | `{"width":656,"height":586}` | published, not a help page | jlcpcb.com/capabilities/pcb-capabilities |
+| `fab.minSize` | `{"width":3,"height":3}` | published, not a help page | jlcpcb.com/capabilities/pcb-capabilities |
+| `fab.minSpacing` | `1.6` | published, not a help page | jlcpcb.com/capabilities/pcb-capabilities |
+| `fab.minNpthDiameter` | `0.5` | published, not a help page | jlcpcb.com/capabilities/pcb-capabilities |
+| `assembly.economic.singleSize` | `{"minWidth":10,"minHeight":10,"maxWidth":470,"maxHeight":500}` | published, not a help page | jlcpcb.com/capabilities/pcb-assembly-capabilities |
+| `assembly.economic.panelSize` | `{"minWidth":10,"minHeight":10,"maxWidth":250,"maxHeight":250}` | verified 2026-09-28 | jlcpcb.com/help/article/pcb-assembly-faqs |
+| `assembly.economic.quantity` | `{"min":2,"max":50}` | published, not a help page | jlcpcb.com/capabilities/pcb-assembly-capabilities |
+| `assembly.economic.layers` | `[2,4,6]` | published, not a help page | jlcpcb.com/capabilities/pcb-assembly-capabilities |
+| `assembly.economic.sides` | `1` | published, not a help page | jlcpcb.com/capabilities/pcb-assembly-capabilities |
+| `assembly.economic.separations` | `["mouse-bite"]` | verified 2026-09-28 | jlcpcb.com/help/article/pcb-assembly-faqs |
+| `assembly.economic.railsRequired` | `false` | published, not a help page | jlcpcb.com/capabilities/pcb-assembly-capabilities |
+| `assembly.standard.singleSize` | `{"minWidth":70,"minHeight":70,"maxWidth":460,"maxHeight":500}` | published, not a help page | jlcpcb.com/capabilities/pcb-assembly-capabilities |
+| `assembly.standard.panelSize` | `{"minWidth":70,"minHeight":70,"maxWidth":250,"maxHeight":250}` | verified 2026-09-28 | jlcpcb.com/help/article/pcb-assembly-faqs |
+| `assembly.standard.quantity` | `{"min":2,"max":80000}` | published, not a help page | jlcpcb.com/capabilities/pcb-assembly-capabilities |
+| `assembly.standard.layers` | `[2,4,6]` | published, not a help page | jlcpcb.com/capabilities/pcb-assembly-capabilities |
+| `assembly.standard.sides` | `2` | published, not a help page | jlcpcb.com/capabilities/pcb-assembly-capabilities |
+| `assembly.standard.separations` | `["mouse-bite"]` | published, not a help page | jlcpcb.com/capabilities/pcb-assembly-capabilities |
+| `assembly.standard.railsRequired` | `true` | published, not a help page | jlcpcb.com/capabilities/pcb-assembly-capabilities |
+| `rails.width` | `5` | verified 2026-09-28 | jlcpcb.com/help/article/specifications-for-adding-process-edges-and-positioning-holes |
+| `rails.toolingHoleDiameter` | `2` | verified 2026-09-28 | jlcpcb.com/help/article/specifications-for-adding-process-edges-and-positioning-holes |
+| `rails.toolingHoleCornerOffset` | `5` | design choice | — |
+| `rails.fiducialCopperDiameter` | `1` | verified 2026-09-28 | jlcpcb.com/help/article/specifications-for-adding-process-edges-and-positioning-holes |
+| `rails.fiducialMaskDiameter` | `2` | design choice | — |
+| `rails.fiducialEdgeDistance` | `3.85` | verified 2026-09-28 | jlcpcb.com/help/article/specifications-for-adding-process-edges-and-positioning-holes |
+| `rails.fiducialCornerOffset` | `10` | design choice | — |
+| `tabs.width` | `5` | **ESTIMATE** | jlcpcb.com/blog/technical-guidance-mouse-bite-panelization-guide |
+| `tabs.pitch` | `50` | **ESTIMATE** | jlcpcb.com/blog/technical-guidance-mouse-bite-panelization-guide |
+| `tabs.maxLength` | `8` | design choice | — |
+| `tabs.holeDiameter` | `0.6` | **ESTIMATE** | jlcpcb.com/blog/technical-guidance-mouse-bite-panelization-guide |
+| `tabs.holePitch` | `1` | **ESTIMATE** | jlcpcb.com/blog/technical-guidance-mouse-bite-panelization-guide |
+| `tabs.holeOverlap` | `0.3333` | **ESTIMATE** | jlcpcb.com/blog/technical-guidance-mouse-bite-panelization-guide |
+| `tabs.minPerInstance` | `2` | **ESTIMATE** | jlcpcb.com/blog/technical-guidance-mouse-bite-panelization-guide |
+| `tabs.copperClearance` | `0.5` | design choice | — |
+| `blockedEdges.overhangMargin` | `1` | design choice | — |
+| `blockedEdges.keepoutClearance` | `3` | design choice | — |
+| `blockedEdges.keepoutEdgeTolerance` | `0.5` | design choice | — |
+| `silkDivider.maxDesigns` | `10` | verified 2026-09-28 | jlcpcb.com/help/article/pcb-panelization |
+| `silkDivider.freeDesigns` | `5` | **ESTIMATE** | jlcpcb.com/help/article/different-design-in-your-pcb-files |
+| `silkDivider.lineWidth` | `0.15` | design choice | — |
+| `silkDivider.minFillRatio` | `0.98` | design choice | — |
+
+Counts: 72 entries: 23 verified on a help page, 19 read from a JLCPCB capabilities page (flagged unverified), 20 estimates, 10 design choices.
+
+Seen on the help pages and not modelled: X-ray inspection, the single-board
+assembly surcharge ($0.48, for bulk orders), routing fee for dense slots,
+expedite fees, ENIG area, stencil extras.
+
+## 10. Timing
+
+| What | Time | Measured by |
+| --- | --- | --- |
+| `computeCost`, 60 part lines, Standard, two sides | **25 µs** per call | `packages/panel/test/cost.test.ts`, 2000 calls |
+| `quoteOrder`, 2 designs, 13 scenarios | **11 ms** warm, 53 ms first call | 20 consecutive calls |
+| Server view (geometry, checks, cost), 4–6 instances | **5 ms** | `derivedMs` in the view, read in the UI check |
+| Server view, first time a routed board is seen | **818 ms** | same; it is that board's own DRC with zone fill, cached by content hash |
+
+The cost model is about 600 times faster than a 60 Hz frame. The UI does not
+debounce. The one slow moment is the first view after a board is added or
+edited, when its DRC runs once.
+
+## 11. Test results
+
+`npm run build && npm test`, final run on `panelize`:
+
+| Package | Passed | Failed | Skipped | New tests |
+| --- | --- | --- | --- | --- |
+| engine | 305 | 0 | 0 | 0 |
+| fab | 67 | 1 (baseline) | 0 | 0 |
+| panel | 220 | 0 | 0 | 220 |
+| parts | 41 | 0 | 0 | 0 |
+| server | 198 | 2 (baseline) | 2 | 51 |
+| ui | 64 | 0 | 0 | 23 |
+| **total** | **895** | **3 (all baseline)** | 2 | **294** |
+
+Where the brief's list of unit tests lives:
+
+| Asked for | File |
+| --- | --- |
+| format load/save, stale detection | `panel/test/panel.test.ts`, `stale.test.ts`, `server/test/panel-doc.test.ts` |
+| op log, undo/redo | `panel/test/ops.test.ts` |
+| constraint detection | `panel/test/check.test.ts` |
+| packing, pinned, don't-fit | `panel/test/layout.test.ts` |
+| refdes prefixing, coordinate transforms | `panel/test/merge.test.ts` |
+| cost model | `panel/test/cost.test.ts` |
+| scenario enumeration | `panel/test/scenarios.test.ts` |
+| MCP tools, sync, CLI | `server/test/panel-mcp.test.ts`, `panel-sync.test.ts`, `panel-cli.test.ts` |
+
+Scripts:
+
+| Command | Result |
+| --- | --- |
+| `npx tsx packages/server/scripts/e2e-panel.ts` with Java | **PASS**, exit 0. Both boards routed and DRC-clean, panel check 0 errors, export not waived, 9 gerbers + 2 drill files parsed by tracespace, BOM 34 designators on 7 rows, CPL 34 rows. 11 s. |
+| same, without Java (this machine as it is) | **PASS**, exit 0, on unrouted boards. The only errors are each board's own unconnected nets, and only those are waived. 2 s. |
+| `npx tsx packages/server/scripts/verify-panel-ui.ts` | **PASS**, exit 0. 19 checks, 17 screenshots. |
+| `npx tsx packages/server/scripts/e2e-esp32.ts` with Java, stock check off | **PASS**, exit 0. Unchanged script. It rewrites `docs/images/esp32-breakout.png`; I restored the file. |
+
+## 12. UI screenshots
+
+In `panel-screenshots/`, 1600 × 1000, headless Chromium, on the boards
+`e2e-panel.ts` builds (routed). Retaken after the review changes of section 16.
+
+| File | What it shows |
+| --- | --- |
+| `00-start.png` | A new panel: nothing on the plate, the project's boards on offer under Boards. |
+| `00b-started.png` | Both boards added from the list: one instance of each, each in its board's colour. |
+| `01-loaded-empty.png` | The view as it opens: both boards listed with needed 1 and 5, nothing on the plate. |
+| `02-one-plus-five.png` | After `+` once for S and five times for M: 1 + 5 on the plate with the live cost. |
+| `03-dragging.png` | M3 picked up: drawn where the pointer has it, its position beside it. |
+| `04-dropped-pinned-overlap.png` | M3 dropped on S1: pinned, both marked as errors, the overlap listed under Checks with a chip per board. |
+| `05-arranged-around-pinned.png` | After `A`: five instances packed, M3 left where it was pinned. |
+| `06-context-menu.png` | Right-click on M3: rotate 90°, duplicate, delete, make bare, unpin. |
+| `07-bare-instances.png` | M3 made bare and duplicated as M6: hatched, dashed, labelled BARE. |
+| `08-cost-follows-quantity.png` | Needed quantity of M raised to 12: more panels assembled, a new total. |
+| `09-scenario-loaded.png` | A scenario selected: its cost in three subtotals with Boards unfolded, its 1 + 3 panel on the plate. |
+| `10-scenario-silk-divider.png` | The cheapest scenario: boards in one outline divided by silkscreen lines, no rails, no tabs. |
+| `10b-scenario-separate.png` | Separate orders selected: the plate shows the two orders side by side, each a stack of single boards, under a banner saying the panel is unchanged. |
+| `11-exported.png` | Export: the zip is ready and offered as a link. |
+| `12-export-refused.png` | Export on a panel with an overlap: refused, with the findings. |
+| `13-does-not-fit.png` | 47 instances: Arrange leaves the plate alone and says why. |
+| `14-stale-source.png` | A board edited on disk: tagged stale, its instances dotted and labelled STALE. |
+
+What the script asserts beyond the pictures: the download is a zip holding
+`combo.GTL`, `.GBL`, `.GKO`, both drill files, `bom.csv`, `cpl.csv`; Delete,
+Ctrl+Z and Ctrl+Shift+Z; pan and zoom; an edit made outside the browser appears
+without a reload; every instance is filled with its board's tint, and no pixel
+or style has a colour that is not a board's; no element has a transition,
+animation, shadow or gradient; the board editor still loads.
+
+The colour test needs a browser that antialiases text in grey.
+Chromium on Linux tints text edges for LCDs by default; the container was
+started with `packages/server/scripts/lib/greyscale-fonts.conf` to turn that
+off. The script's header has the command.
+
+## 13. Known bugs and limitations
+
+**Cost**
+
+- Totals are estimates wherever a bare-board price or a part price is in them,
+  which is always. Use the ranking first and the totals second.
+- Parts with no price in the EasyEDA data are left out of the total. On the
+  reference board that is the ESP32 module, its most expensive part.
+- Not modelled: shipping, tax, coupons, surface finish, colour, thickness, lead
+  time, stock.
+- Attrition is three classes by joint count. JLCPCB sets it per part.
+
+**Layout**
+
+- The packer is a heuristic. It leaves gaps a person would close.
+- Arrange considers tab support only in its last pass. It can return a layout
+  with a board held by one tab, or by none. The check reports both, and none is
+  an error that stops the export.
+- Tab placement does not avoid copper. A mouse-bite hole within 0.5 mm of
+  copper or a drill is a warning.
+- A blocked edge blocks its whole side.
+- Instances turn in 90° steps only.
+
+**Fab output**
+
+- No V-cut panels, no solid rails between rows, no instance labels or panel
+  name in silkscreen.
+- The merged board is not run through DRC as a whole.
+- Promotion leaves the promoted boards' inner layers empty and does not check
+  impedance or thickness.
+- Panel gerbers have been validated by tracespace's parser and by counting
+  primitives against the single-board gerbers. **They have not been opened in
+  JLCPCB's viewer or any other Gerber viewer.** Do that before ordering.
+
+**Server and CLI**
+
+- One panel per server, as there is one board per server.
+- No undo/redo in the CLI.
+- The first view after a board changes takes as long as that board's DRC.
+
+**UI**
+
+- See section 14. Also: no touch support, no keyboard access to the canvas.
+
+## 14. UI questions I could not resolve
+
+Each is something the brief does not settle. In every case I built the simplest
+thing and did not add a control.
+
+| Question | What I did meanwhile |
+| --- | --- |
+| How do boards get onto a panel from the browser? | They do not. An empty panel says how to add them over MCP or the CLI. |
+| Should a board be removable from the list? | No control. Count 0 leaves the board listed; `panel_remove_board` removes it. |
+| Should panel settings (rails, spacing, separation, layers) be editable in the view? | No. `panel_set_settings`. Loading a scenario does change them. |
+| Should a stale board have a "refresh" button? | Yes, since 2026-09-29 at Ben's request: the `stale ↻` tag on a board's row is a button that accepts the board as it is on disk (`/api/panel/refresh`, one undo step). `panel_refresh_boards` does the same over MCP. |
+| Should a stackup mismatch offer a "promote" button? | No. The message names the fix. |
+| Should the ranking objective be selectable? | No. Always total cost. |
+| Should Export be able to waive errors? | No. Refused with reasons. |
+| Should there be Undo/Redo buttons? | No. Hotkeys only. |
+| Open / new / save panel in the view? | No. Header shows name and path. Edits autosave. |
+| Should a scenario load on click, or need a confirm? | On click, one undo step. |
+| Several panels in one scenario: which goes on the plate? | The first. A warning says so. |
+| Should dragging refuse to overlap? | No. The check reports it. |
+| Should `+` arrange? | Yes. |
+| Light or dark plate? | Light. |
+| Should the board editor link to the panel view? | Not added. |
+
+## 15. Suggested next steps
+
+1. **Check the two numbers that decide the ranking** on JLCPCB's quote page by
+   hand: the different-designs fee, and a bare-board price or two for panels
+   around 80 × 60 mm. Put them in `fee-table.json` with `verified: true`.
+2. **Open an exported panel in a Gerber viewer**, then in JLCPCB's. The profile
+   layer and the mouse-bite holes are what to look at.
+3. Review `panelize` on the fork and merge it yourself when you are ready.
+4. Answer section 14. The first four rows are what makes the view usable
+   without an agent.
+5. Part prices from a source that has them for modules.
+6. Tab placement that avoids copper, and per-stretch blocked edges.
+7. Install Java 25 and a font on this machine if the three baseline failures
+   and the unrouted e2e should go away here.
+
+## 16. Changes after review (2026-09-28)
+
+Ben looked at the panel view and asked for three things. All three are done,
+on top of the unattended work, in one commit.
+
+### What Ben said, and what changed
+
+| Ben | Change |
+| --- | --- |
+| "The scenarios and warnings are very text heavy. I don't like that." | Both lists say things with shapes first. See below. |
+| "It would be nice to have some color-coding ... they can be hard to tell apart if the shape is similar between different boards." | Every design has a colour. This lifts the monochrome rule of the brief, for this one purpose. |
+| "It is also not clear how you would start to panel a board - is this just done with an LLM call?" | It was: MCP or CLI only. **Boards** now lists the project's board files; picking one puts it on the plate. |
+
+### Colour
+
+- One colour per design, by its position among the panel's boards, from a
+  seven-colour palette chosen to survive colour blindness (Okabe and Ito's,
+  less the yellow). `packages/panel/src/colors.ts`.
+- An instance is filled with an 18% tint of its board's colour and outlined in
+  the colour. The same colour marks the board in the board list, in scenario
+  rows, in boards-received marks, and on the chips under Checks.
+- **Colour means which board and nothing else.** Bare, pinned, stale, blocked
+  and in-error are still drawn with line style, hatching and labels. Errors are
+  not red. The view reads the same in greyscale.
+- `panel_screenshot` and `panel.render.svg` use the same colours.
+- Still no shadows, gradients, transitions or animations.
+
+### Scenarios
+
+A row was four lines of prose. It is now:
+
+- a two-word name (`Silk-divided board`, `Mouse-bite panel`, `Separate orders`)
+- what one panel holds, as chips in the boards' colours: `S ×1` `M ×3`; a bare
+  board's chip is hollow
+- how many are made and assembled: `5 made · 2 assembled`
+- boards received against needed, **one mark per board**: solid for a needed
+  board, hollow for an extra one (numbers instead above 12 boards)
+- the total, the price per board, and a bar whose length is the total relative
+  to the dearest scenario
+- a count of notes; the notes themselves are in the detail
+
+Scenarios that are not possible are folded into one line. The detail of the
+selected scenario shows three subtotals (Boards, Assembly, Parts), each with a
+bar for its share; the fee lines unfold per subtotal.
+
+The optimizer's own titles and summaries are unchanged. MCP and the CLI still
+print them in full.
+
+### Checks (was: Warnings)
+
+- Findings of one kind are one row: a level mark (`E`, `W`, `i`), a title of a
+  few words, a count, and a chip per instance involved.
+- The sentence is behind the row, one click away.
+- **Clicking a chip selects that instance on the plate.**
+- The heading counts errors, warnings and notes.
+- On the e2e panel this turns seven lines of text into two rows.
+
+### Estimated cost
+
+The same three subtotals as a scenario's detail, folded by default. Notes are
+folded into one line. The legend is one line; the long form is a tooltip.
+
+### Starting a panel
+
+- **Boards** lists every `.flamingo` file next to the panel that is not on it
+  yet. Picking one adds the board and puts one instance of it on the plate.
+- The board's key is chosen as before: the first letter of its name, or the
+  next free letter.
+- An empty panel says where to start instead of quoting MCP commands.
+- The view now re-fits when a board or an instance is added, and when another
+  panel is opened. Before, a panel that outgrew the view stayed cut off.
+
+### Decisions in this round that are mine
+
+1. The palette, the 18% tint, and colour by position. Removing a board shifts
+   the colours of the boards after it.
+2. Severity stays uncoloured.
+3. Twelve is the most boards drawn one mark each.
+4. The section is called Checks, since it also holds notes and may be empty of
+   warnings.
+5. Adding a board places one instance at once.
+6. Fee lines are folded by default.
+
+### Superseded
+
+- Section 7: decisions 1 (white plate, black ink only), 26 (legend), 27
+  (scenario table columns) and 31 (warnings as a list of sentences).
+- Section 14: "How do boards get onto a panel from the browser?" is answered.
+  The other rows stand: no control yet to remove a board, edit settings,
+  refresh a stale board, promote layers, choose the ranking, waive an export.
+- Section 12: the screenshots were retaken.
+
+### Also fixed
+
+- Elements marked `hidden` that had a display set in CSS were shown anyway:
+  the `estimate` tag appeared with no cost to flag.
+
+## 17. Changes after the second review (2026-09-28)
+
+Ben, on the reworked scenario list: "we still need to be clearer about what
+these scenarios mean. what are the squares for S & M in the scenario rows? we
+also need to make the separate orders scenario reflect somehow in the panel
+view UI. Currently it feels like a bug if you don't read the small text
+underneath that it doesn't change the panel."
+
+### Scenario rows say what each thing is
+
+Every fact on a row now has a label in front of it:
+
+| Label | What follows | Example |
+| --- | --- | --- |
+| `panel` | what one panel holds, as chips in the boards' colours | `S ×1` `M ×3` |
+| `order` | how many pieces are made, and of those how many are assembled and how many arrive bare | `5 panels: 2 assembled, 3 bare` |
+| `you get` | assembled boards delivered per design: the number, then one mark per board | `S 2 ■□` `M 6 ■■■■■□` |
+
+- The squares Ben asked about are the boards delivered: solid for one that is
+  needed, hollow for one more than needed. They now carry their number and sit
+  behind the label `you get`, and the legend above the list says the same.
+- The unlabelled `5 made · 2 assembled` is now `5 panels: 2 assembled, 3 bare`.
+  That the unassembled pieces are delivered too, bare, was not shown before.
+- The badge `6 !` is now `6 notes`.
+- Each kind of scenario has a small drawing of what is fabricated: boards with
+  gaps and tabs, one outline with printed lines, boards on their own.
+- The selected scenario's detail opens with two sentences on what the kind
+  means and what it costs or saves.
+- An order of single boards has no `panel` line: its `order` line starts with
+  the board's chip.
+
+### Every scenario shows on the plate
+
+Before, selecting a scenario that is not one panel left the plate as it was
+and said so in small text. Now:
+
+- A scenario that **is one panel** is loaded onto the plate, as before, and can
+  be edited. One undo step.
+- A scenario that **is not** (separate orders; a panel per design; split by
+  layers) is **shown** on the plate: one plate per order, side by side, each
+  drawn as a stack with its quantity (`× 5`) and a caption
+  (`Order 1 of 2: 5 boards, 2 assembled`).
+- A banner across the top of the plate names the scenario, says
+  "Shown for comparison. Your panel is unchanged.", and has a button
+  **Back to my panel**.
+- While a scenario is on show nothing on the plate can be edited: no drag, no
+  object menu, and A and Delete do nothing. Dragging pans, scrolling zooms.
+- Escape, the button, selecting another scenario, or any change to the panel
+  from anywhere brings the panel back.
+- The panel on the plate now also says what ordering it means, under its size:
+  `to meet the need: 5 panels, 2 assembled`.
+
+This replaces decisions 29 and 30 of section 7.
+
+To make this possible every order of a scenario now carries the shape of one
+piece of it (`ScenarioOrder.plate`), computed by the optimizer. `quote_order`
+and the CLI print the same text as before; `quote --json` has the new field.
+
+### Decisions in this round that are mine
+
+1. Scenarios that are not one panel are shown, not loaded, and the panel
+   underneath is kept. The alternative, emptying the panel, would lose work.
+2. The plates of a scenario stand side by side, 18 mm apart, bottoms aligned.
+3. A stack of three outlines stands for "several of these", whatever the
+   quantity; the number is written beside it.
+4. The labels are `panel`, `order`, `you get`.
+5. The sidebar is 440 px wide, from 420, so that an order line fits on one line.
+6. The estimated cost in the sidebar stays that of the panel while a scenario
+   is on show; the scenario's own cost is in its detail below the list.
+
+
+
+## 18. Changes after the third review (2026-09-28)
+
+Ben, on the sidebar: "what is the relationship between the Boards config and
+the compare scenarios? they seem to be disconnected. I think we need to
+simplify/step out the flows a bit first. Like if the board setup and arrange
+button is one option amongst the scenarios, we should have it recalculate the
+scenarios based on the new preferences for the board choices".
+
+He was right that they were disconnected. `needed` and `nice to have` fed the
+scenarios; `on panel` and Arrange built a panel by hand that was priced in its
+own section and never compared with anything.
+
+### The sidebar is three steps
+
+| Step | Holds | Was |
+| --- | --- | --- |
+| 1 Boards you need | the boards, `needed`, `nice to have`, add a board | Boards |
+| 2 Ways to order them | every way to get those boards, cheapest first | Compare scenarios |
+| 3 On the plate: *name* | what is in view: the tools to change it, its cost, its checks, export | Boards (the `on panel` counts), Arrange, Estimated cost, scenario detail, Checks, Export |
+
+Each step feeds the next. Change a quantity in step 1 and step 2 is worked out
+again. Pick a row in step 2 and step 3 is about that row.
+
+### The panel on the plate is one of the ways to order
+
+- When the plate holds a panel the optimizer did not compute, it is listed in
+  step 2 as **Your panel**, priced the same way and ranked by its total among
+  the others. If it cannot be priced (a needed board is missing from it) it is
+  listed last with the reason in place of a price.
+- When the plate holds exactly what a computed way would put there, that row
+  is the one marked, and there is no "Your panel" row: nothing is listed twice.
+  "Exactly" is the same instances at the same places (within 5 µm) with the
+  same rotation and populate flag, and the settings that way sets
+  (`layoutMatches` in `packages/panel/src/scenarios.ts`).
+- One row carries `on the plate` (filled tag). A way shown for comparison
+  carries `shown` (outlined tag), and the panel keeps its own tag meanwhile.
+  The framed row is the one step 3 is about.
+- Moving, adding, removing or toggling an instance turns a computed way into
+  Your panel. Undo turns it back.
+
+### Step 3 follows what is in view
+
+- Heading: `On the plate: Mouse-bite panel`, `On the plate: Your panel`,
+  `Shown: Separate orders`, or `On the plate: nothing yet`.
+- One cost block, for the way in view. The separate "scenario detail" box under
+  the list is gone, and so is the case where the sidebar showed the cost of one
+  thing while the plate showed another (decision 6 of section 17).
+- While a way is only shown, the counts, Arrange and Checks are hidden and
+  Export is disabled: they belong to the panel, and it is not in view.
+
+### Adding a board no longer places it
+
+Adding a board in step 1 adds it to what is needed, with `needed` 1, and puts
+nothing on the plate. The answers appear in step 2; picking one puts a panel on
+the plate. The `+` and `-` counts in step 3 still build a panel by hand. This
+replaces the behaviour of section 16, where adding a board also placed one
+instance of it.
+
+### Decisions in this round that are mine
+
+1. Three steps, numbered, in one scrolling sidebar. No wizard, no tabs: every
+   step stays visible and editable at any time.
+2. Nothing is put on the plate automatically, not even the cheapest way. The
+   plate changes only when Ben picks a row or edits it. On an empty plate the
+   hint says "Step 2: pick a way to order".
+3. The name "Your panel", and the banner reading `Option 5, ...` where it read
+   `Scenario 5, ...`: the list now holds things that are not scenarios.
+4. A change to `needed` or `nice to have` while a way is shown for comparison
+   keeps it shown, if the new answers still include it. Only a change to the
+   panel itself (instances, settings) ends the comparison. Before, any change
+   did.
+5. The message after picking a way ("Put on the plate: 4 instances, 64.7 × 62
+   mm. Ctrl/Cmd+Z brings the previous panel back.") sits under Arrange in
+   step 3, where the panel's other messages are.
+6. A board row in step 1 is two lines, not three: size and layer count moved
+   up beside the name.
+7. "Per board" for Your panel is its total over the boards delivered that were
+   asked for, the same rule the optimizer uses for its own rows.
+
+### Not changed
+
+The optimizer, the cost model, the server and the MCP tools are as they were.
+`layoutMatches` is the one addition to `@flamingo/panel`; it is pure and has
+its own tests. `add_board` over MCP and HTTP behaves as before.
+
+### Checked
+
+- `verify-panel-ui.ts`: 19 checks pass in headless Chromium, 17 screenshots
+  refreshed. New in it: the three headings; an added board puts nothing on the
+  plate; picking a way marks its row; Your panel appears after an edit by hand,
+  with the same total as step 3, ranked in order; it leaves the list when a
+  computed way is loaded and comes back after an outside edit; the ways follow
+  a change of `needed`; step 3 shows the cost of what is shown and hides the
+  tools.
+- `npm test`: 914 pass, and the same 3 failures as on `main` (section 3).
+  New: 8 tests in `packages/ui/test/panel-options.test.ts`, 3 for
+  `layoutMatches` in `packages/panel/test/scenarios.test.ts`.
+
+### Known limit
+
+With five or more ways listed, step 3 starts below the fold on a 1000 px high
+window, so picking a row changes the plate at once but its cost needs a scroll.
+Folding the rows that are not in view to one line each would fix it, at the
+price of hiding the labelled facts asked for in the second review. Left for
+Ben to decide.
+
+## 19. Changes after the fourth review (2026-09-28)
+
+Ben, on a row reading `order 5 panels: 2 assembled, 3 bare` and `you get S 2,
+M 2`: "if I'm ordering 5 panels, why does the 'you get' only say S 2 and M 2?"
+And: "please clean up the UI issues you can see on this section - overlapping
+text & whatnot".
+
+### What the row meant, and what it left out
+
+With 1 S and 2 M needed and one of each on a panel: 2 panels have to be
+assembled to get 2 M. JLCPCB fabricates no fewer than 5 pieces per order, so 5
+panels are made, and the 3 that are not assembled arrive bare. Delivered: 2 S
+and 2 M assembled, 3 S and 3 M bare. "You get" counted the assembled boards
+only, so 6 of the 10 boards were nowhere on the row. The numbers were right;
+the row did not add up to the eye.
+
+### The row now adds up
+
+```
+order    5 panels [min]: 2 assembled + 3 bare
+you get  S 2 ■□ + 3 bare    M 2 ■■ + 3 bare
+```
+
+- "You get" lists every board delivered: assembled ones as marks, bare ones
+  as a count after them.
+- `min` follows a quantity that is larger than the need asks for because no
+  smaller order exists. It is worked out per order: 2 assembled carries it when
+  1 was needed, not when 2 were.
+- The legend says what the two marks, `bare` and `min` mean, and lists only
+  the ones that occur in the list.
+- The text is written with its spaces, so a row copied out of the page reads
+  `5 panels min: 2 assembled + 3 bare` and not `5 panels:2 assembled,3 bare`.
+
+### Overlapping text
+
+The cause: the price column was as wide as its widest text, the facts had what
+was left, and the order line was forbidden to wrap. With a price like
+`$17.41 / board est.` and a scrollbar taking 15 px of the sidebar, the order
+line ran into the price. My screenshots never showed it because headless
+Chromium draws no scrollbar.
+
+- A row is now: name and total on the first line; the facts below at the full
+  width of the row; then one line with the cost bar, the cost per board and
+  the notes. Nothing sits beside the facts any more.
+- The sidebar reserves the room of a scrollbar at all times
+  (`scrollbar-gutter: stable`), so the layout is the same with and without one.
+- `verify-panel-ui.ts` has a check for it: every piece of text in the sidebar
+  is measured, and none may lie over another or run out of the sidebar. It
+  runs on three states of the page, each at full width and with 17 px less.
+  It also checks, for every way listed, that boards made = assembled + bare
+  and that the row shows that number of bare boards.
+
+### Added to what the server sends
+
+`PanelView.minimums` (`made`, `assembled`, `verified`): the smallest order in
+the fee table, so the page can say why a quantity is what it is. Both numbers
+are unverified (the order form was not opened), and the tooltip on `min` says
+"estimate". Additive; MCP tools and CLI output are unchanged.
+
+### Decisions in this round that are mine
+
+1. Bare boards are a count (`+ 3 bare`), not marks: 9 hollow squares beside 6
+   filled ones were harder to read than the number.
+2. The word `min`, in a dashed box, with the rule in its tooltip and the
+   legend.
+3. The estimate mark moved from the cost per board to the total.
+4. A row is one line taller (about 20 px). With five rows, step 3 starts
+   further below the fold than it did (see the known limit in section 18).
+
+### Checked
+
+`verify-panel-ui.ts`: 19 checks pass, 17 screenshots refreshed. `npm test`:
+915 pass, and the same 3 failures as on `main`.
+
+### Pushed
+
+On 2026-09-28, at Ben's request, `panelize` was pushed to `origin`
+(`ben-coo-per/flamingo-pcb`, his fork) with the commits of sections 16 to 19.
+A fast-forward from 9c50dfa; no force, no pull request.
+
+## 20. Changes after the fifth review (2026-09-28)
+
+Ben: "if we're running each flamingo board file in a shell, should we change
+the way we're running the panel files so that they run basically in the same
+way? so instead of it being a {port}/panel, its just {port}". And: "can we
+change the filetype extension to '.plamingo' instead of '.flamingo-panel'".
+
+### A panel file is served like a board file
+
+```bash
+flamingo serve combo.plamingo     # Flamingo v0.1.0 serving combo.plamingo at http://localhost:4242
+```
+
+- One file, one server, one port. The panel view is the page at `/`.
+- The file is created if it is missing, as a board file is.
+- `FLAMINGO_PORT` sets the port; the default is 4242, as for a board.
+- `/mcp` on this server has the 23 panel tools and none of the 34 board tools.
+  The board routes (`/api/board` and the rest, `/3d`) answer 404. The server
+  has no board, and tools that edit one nobody can see or save would be a trap.
+- `/panel` redirects to `/`, so an old link still arrives.
+- The "Board editor" link in the top bar is hidden on such a server: there is
+  no editor behind it.
+
+### Boards edited in other servers
+
+With each board in a server of its own, the panel's server no longer hears
+about an edit from the editor beside it. It now polls the file times of its
+boards every 1.5 s (`PanelSession.watchSources`) and pushes a new view when one
+changes, so a board saved elsewhere is marked stale in the panel view within
+about two seconds. Polling, not `fs.watch`: it behaves the same on every file
+system, and a panel has a handful of boards.
+
+### `.plamingo`
+
+`PANEL_EXTENSION` is `.plamingo` everywhere: the files written, the CLI, the
+MCP tool descriptions, README, CLAUDE.md, tests and scripts. The contents of a
+file are unchanged (its `kind` field still reads `flamingo-panel`), so an
+existing file only needs renaming. `flamingo serve x.flamingo-panel` says so
+and exits.
+
+### Kept
+
+`flamingo serve board.flamingo [--panel combo.plamingo]` works as it did: the
+editor at `/`, the panel view at `/panel`, all 57 tools at one `/mcp`. That is
+the mode for a session that designs boards and panelizes them through the one
+endpoint in `.mcp.json`, and the one `e2e-panel.ts` runs in.
+
+### Decisions in this round that are mine
+
+1. No board tools on a panel server (above).
+2. The same default port as a board server, not a second default such as 4243.
+   Two servers need `FLAMINGO_PORT` on one of them, exactly as two boards do.
+3. The combined mode stays. Removing it would take the panel tools away from
+   any session connected to a board server.
+4. No support for reading `.flamingo-panel` files under their old name. The
+   format has not been released; the only files were this branch's own.
+5. `.mcp.json` is unchanged. It names port 4242, which is whichever server
+   runs there.
+
+### Existing files changed
+
+- `packages/server/src/http.ts`: option `panelOnly`, and the routes of a panel
+  server ahead of the board routes. Without the option nothing changes.
+- `packages/server/src/mcp.ts`: `McpContext.panelOnly`, and an early return
+  with only the panel tools when it is set.
+- `packages/server/src/cli.ts`: `serve` looks at the extension.
+
+### Checked
+
+- `packages/server/test/panel-serve.test.ts`, 8 tests: the view at `/`, the
+  redirect, routes, tools, the board server unchanged, the watcher, and the
+  CLI itself started on a missing `.plamingo` file and on an old name.
+- `verify-panel-ui.ts`: 20 checks, 18 screenshots. New: a second server
+  started on a panel file, its page at `/`, a board added from it, no editor
+  link (`15-served-on-its-own.png`).
+- `e2e-panel.ts` passes, routed. `npm test`: 923 pass, and the same 3 failures
+  as on `main`.
+
+### Pushed
+
+On 2026-09-28, at Ben's request, to `origin` (`ben-coo-per/flamingo-pcb`).
+Fast-forward; no force, no pull request.

@@ -839,4 +839,11 @@ describe('runDRC — bom-comment-conflict', () => {
     b.components.push(comp('TP1', 5, 'TESTPOINT', 'TP A'), comp('TP2', 15, 'TESTPOINT', 'TP B'));
     expect(violationsOf(b, 'bom-comment-conflict')).toHaveLength(0);
   });
+
+  it('skips do-not-place parts, which have no BOM row', () => {
+    const b = base();
+    b.components.push(comp('R1', 5, 'C23162', '4.7k'), comp('R2', 15, 'C23162', '0R'));
+    b.components[b.components.length - 1].fields.dnp = true;
+    expect(violationsOf(b, 'bom-comment-conflict')).toHaveLength(0);
+  });
 });
