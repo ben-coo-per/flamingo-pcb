@@ -13,6 +13,7 @@ import { Doc } from '../src/document.js';
 import { startServer } from '../src/http.js';
 import type { StartedServer } from '../src/http.js';
 import { PANEL_TOOL_NAMES } from '../src/panel/mcp.js';
+import { SIM_TOOL_NAMES } from '../src/sim-tools.js';
 import { miniBoard, sensorBoard, startPanelServer, writeBoards } from './panel-helpers.js';
 
 function textOf(r: CallToolResult): string {
@@ -59,11 +60,11 @@ describe('panel MCP tools', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('serves the panel tools next to the 36 board tools', async () => {
+  it('serves the panel tools next to the 41 board tools', async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
     for (const n of PANEL_TOOL_NAMES) expect(names).toContain(n);
-    expect(tools).toHaveLength(36 + PANEL_TOOL_NAMES.length);
+    expect(tools).toHaveLength(38 + SIM_TOOL_NAMES.length + PANEL_TOOL_NAMES.length);
     for (const t of tools.filter((x) => (PANEL_TOOL_NAMES as readonly string[]).includes(x.name))) {
       expect(t.description, t.name).toBeTruthy();
       const props = (t.inputSchema as { properties?: Record<string, { description?: string }> }).properties ?? {};
@@ -77,7 +78,7 @@ describe('panel MCP tools', () => {
     try {
       await c.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${plain.port}/mcp`)));
       const { tools } = await c.listTools();
-      expect(tools).toHaveLength(36);
+      expect(tools).toHaveLength(38 + SIM_TOOL_NAMES.length);
       expect(tools.some((t) => t.name.startsWith('panel_'))).toBe(false);
       expect((await fetch(`http://localhost:${plain.port}/api/panel`)).status).toBe(404);
     } finally {
@@ -187,6 +188,27 @@ describe('panel MCP tools', () => {
     expect(r.text).toMatch(/^Panel check: \d+ error\(s\)/);
     expect(r.text).toContain('[error] [overlap]');
     expect(r.text).toContain('instances: S1, M1');
+  });
+
+  it('panel_add_link, check_interconnect and panel_remove_link', async () => {
+    await build();
+    expect(await ok('check_interconnect')).toContain('No links on this panel');
+    expect(await ok('panel_add_link', { from: 'S:R1', to: ['M:R1'], aliases: { A: 'B' } })).toContain('Added link L1');
+    const report = await ok('check_interconnect');
+    expect(report).toContain('L1 S:R1 -> M:R1: 2 of 2 pins agree');
+    expect(report).toContain('0 errors');
+    const bad = await call('panel_add_link', { from: 'Q:J1', to: ['M:R1'] });
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toContain('unknown source "Q"');
+    const missing = await call('check_interconnect', { docs: ['nope.md'] });
+    expect(missing.isError).toBe(true);
+    await writeFile(join(dir, 'pins.md'), '| Pin | Signal | Pin | Signal |\n|---|---|---|---|\n| 1 | X | 2 | Y |\n');
+    expect(await ok('check_interconnect', { docs: ['pins.md'] })).toContain('pin table 1 in pins.md disagrees');
+    await ok('panel_save');
+    const saved = parsePanel(await readFile(join(dir, 'combo.plamingo'), 'utf8'));
+    expect(saved.links?.[0]).toMatchObject({ id: 'L1', from: 'S:R1', to: ['M:R1'], map: 'straight', aliases: { A: 'B' } });
+    expect(await ok('panel_remove_link', { id: 'L1' })).toContain('Removed link L1');
+    expect((await call('panel_remove_link', { id: 'L1' })).isError).toBe(true);
   });
 
   it('detects a source board edited on disk, and panel_refresh_boards accepts it', async () => {

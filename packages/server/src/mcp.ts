@@ -20,6 +20,7 @@ import type {
   Point,
   SilkText,
   SilkLine,
+  SymbolPin,
   Track,
   Via,
   Zone,
@@ -28,6 +29,7 @@ import {
   boardBBox,
   builtinFootprint,
   fillAllZones,
+  formatFindings,
   isAssembled,
   isFullyRouted,
   LABEL_NETS_LAYER,
@@ -50,6 +52,10 @@ import { pngDimensions, renderPNG } from './screenshot.js';
 import { checkStock, stockCheckEnabled } from './stock.js';
 import { exportStep } from './step.js';
 import { registerPanelTools } from './panel/mcp.js';
+import { registerPrintTools } from './print-tools.js';
+import { ercFindings, registerCheckTools, writeChecksReport } from './checks-tools.js';
+import { drcFindings } from './checks.js';
+import { registerSimTools } from './sim-tools.js';
 import type { PanelSession } from './panel/session.js';
 
 /**
@@ -81,6 +87,11 @@ export interface McpContext {
   panel?: PanelSession;
   /** The server was started on a panel file: panel tools only. */
   panelOnly?: boolean;
+  /**
+   * Symbol pins for parts whose footprint does not carry them (boards placed
+   * before footprints did). Defaults to the on-disk parts cache; tests inject one.
+   */
+  loadSymbolPins?: (lcscs: Iterable<string>) => Promise<Map<string, Record<string, SymbolPin>>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -495,8 +506,10 @@ export function createMcpServer(ctx: McpContext): McpServer {
       lines.push(`Footprint: ${footprint.name} (${footprint.pads.length} pad(s))`);
       for (const pad of footprint.pads) {
         const drill = pad.drill ? `, drill ${fmt(pad.drill.diameter)}mm${pad.drill.plated ? '' : ' (unplated)'}` : '';
+        const pin = footprint.pins?.[pad.number];
+        const named = pin?.name && pin.name !== pad.number ? ` [${pin.name}${pin.type !== 'undefined' ? `, ${pin.type}` : ''}]` : '';
         lines.push(
-          `  pad ${pad.number}: ${pad.shape} at (${fmt(pad.at.x)}, ${fmt(pad.at.y)}) size ${fmt(pad.size.w)}x${fmt(pad.size.h)}mm, ${pad.layer}${drill}`,
+          `  pad ${pad.number}${named}: ${pad.shape} at (${fmt(pad.at.x)}, ${fmt(pad.at.y)}) size ${fmt(pad.size.w)}x${fmt(pad.size.h)}mm, ${pad.layer}${drill}`,
         );
       }
       return textResult(lines.join('\n'));
@@ -1229,7 +1242,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
     'export_fab',
     {
       description:
-        'Export the fabrication fileset for JLCPCB: gerbers.zip (Gerber X2 + Excellon drills), bom.csv, cpl.csv, plus a bonus board.render.svg reference image. Runs DRC first and refuses to export (isError) if it finds unwaived violations -- pass waiveDrc:true to export anyway. Defaults outDir to "<directory of the current board file>/fab".',
+        'Export the fabrication fileset for JLCPCB: gerbers.zip (Gerber X2 + Excellon drills), bom.csv, cpl.csv, checks.json (the DRC and ERC findings), plus a bonus board.render.svg reference image. Runs DRC and ERC first and refuses to export (isError) on any DRC violation or ERC error -- pass waiveDrc:true to export anyway. Defaults outDir to "<directory of the current board file>/fab".',
       inputSchema: {
         outDir: z
           .string()
@@ -1238,16 +1251,21 @@ export function createMcpServer(ctx: McpContext): McpServer {
         waiveDrc: z
           .boolean()
           .optional()
-          .describe('Export even if DRC finds violations (default false -- export is refused on any violation)'),
+          .describe('Export even if DRC finds violations or ERC finds errors (default false -- export is refused on any)'),
       },
     },
     async ({ outDir, waiveDrc }) => {
       const board = ctx.doc.board;
       const filled = fillAllZones(board);
       const { violations, advisories } = await runDrcWithStock(ctx, filled);
-      if (violations.length > 0 && !waiveDrc) {
+      const erc = await ercFindings(ctx, board);
+      const ercErrors = erc.filter((f) => f.level === 'error');
+      if ((violations.length > 0 || ercErrors.length > 0) && !waiveDrc) {
+        const parts: string[] = [];
+        if (violations.length > 0) parts.push(`${formatDrcReport(violations)}${formatStockAdvisories(advisories)}`);
+        if (ercErrors.length > 0) parts.push(`ERC errors:\n${formatFindings(ercErrors)}`);
         return errorResult(
-          `${formatDrcReport(violations)}${formatStockAdvisories(advisories)}\n\nExport refused; fix the violation(s) above or pass waiveDrc:true to export anyway.`,
+          `${parts.join('\n\n')}\n\nExport refused; fix the problem(s) above or pass waiveDrc:true to export anyway.`,
         );
       }
 
@@ -1259,14 +1277,29 @@ export function createMcpServer(ctx: McpContext): McpServer {
         return errorResult(`export_fab failed: ${err instanceof Error ? err.message : String(err)}`);
       }
 
+      let checksJson: string;
+      try {
+        checksJson = await writeChecksReport(targetDir, board, [
+          ...drcFindings(violations),
+          ...drcFindings(advisories, 'warn'),
+          ...erc,
+        ]);
+      } catch (err) {
+        return errorResult(`export_fab failed writing checks.json: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
       const lines = [
         `Exported fab outputs to ${targetDir}:`,
         `  ${result.gerberZip}`,
         `  ${result.bomCsv}`,
         `  ${result.cplCsv}`,
+        `  ${checksJson}`,
       ];
       if (violations.length > 0) {
         lines.push('', `Waived ${violations.length} DRC violation(s):`, formatDrcReport(violations));
+      }
+      if (ercErrors.length > 0) {
+        lines.push('', `Waived ${ercErrors.length} ERC error(s):`, formatFindings(ercErrors));
       }
       const advisoryBlock = formatStockAdvisories(advisories);
       if (advisoryBlock) lines.push(advisoryBlock.trimStart());
@@ -1342,7 +1375,11 @@ export function createMcpServer(ctx: McpContext): McpServer {
     },
   );
 
+  registerPrintTools(server, ctx);
+  registerSimTools(server, ctx);
+
   if (ctx.panel) registerPanelTools(server, ctx.panel);
+  registerCheckTools(server, ctx);
 
   return server;
 }

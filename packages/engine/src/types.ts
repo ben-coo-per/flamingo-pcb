@@ -87,6 +87,14 @@ export interface Footprint {
   /** Non-plated mechanical holes (locating posts). Absent on older boards. */
   holes?: FootprintHole[];
   /**
+   * Schematic pin names and electrical types from the part's EasyEDA symbol,
+   * keyed by symbol pin number. Symbol pin numbers usually equal pad numbers,
+   * but not always (USB-C footprints merge pads, e.g. "A1B12"), so match
+   * exactly and treat a pad with no entry as unnamed. Absent on older boards
+   * and on parts whose symbol has no pins.
+   */
+  pins?: Record<string, SymbolPin>;
+  /**
    * Pads whose copper touches on purpose although they sit on different nets
    * (a bridged solder jumper). DRC skips clearance between them and the DSN
    * hands the router each one at its `size` rectangle, without the bridge.
@@ -94,6 +102,14 @@ export interface Footprint {
   netTie?: string[];
   /** No solder paste on any pad (solder jumpers, test points). */
   noPaste?: boolean;
+}
+
+/** EasyEDA symbol pin electrical type. Most library parts leave it 'undefined'. */
+export type PinType = 'undefined' | 'input' | 'output' | 'bidirectional' | 'power';
+
+export interface SymbolPin {
+  name: string;
+  type: PinType;
 }
 
 export interface ComponentInst {
@@ -236,4 +252,19 @@ export interface Board {
   silkLines: SilkLine[];
   dimensions: Dimension[];
   rules: 'jlcpcb-2l' | 'jlcpcb-4l' | 'jlcpcb-6l';
+  /** Electrical-check findings deliberately accepted, each with its reason. Absent on older boards. */
+  checkWaivers?: CheckWaiver[];
+}
+
+/**
+ * A waiver silences one electrical-check rule for some items, with a reason,
+ * so an intended oddity (a pin left open on purpose) is recorded once. It
+ * matches a finding when `rule` matches (and `check`, if given) and every
+ * item listed here appears in the finding's items.
+ */
+export interface CheckWaiver {
+  check?: string;
+  rule: string;
+  items: string[];
+  reason: string;
 }

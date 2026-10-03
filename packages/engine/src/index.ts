@@ -7,6 +7,8 @@ export type {
   SilkItem,
   Footprint,
   FootprintHole,
+  SymbolPin,
+  PinType,
   ComponentInst,
   Net,
   NetClass,
@@ -52,6 +54,8 @@ export {
   footprintHoles,
   allHoles,
   capsulePolygon,
+  tessellateSeg,
+  tessellateCircle,
 } from './geometry.js';
 export type { PolyGroup } from './geometry.js';
 
@@ -117,3 +121,17 @@ export type { RuleSet } from './drc/rules.js';
 export { RULESETS } from './drc/rules.js';
 export type { DrcViolation, CopperItem } from './drc/types.js';
 export { runDRC, buildCopperItems, groupFillRings } from './drc/drc.js';
+
+// Electrical checks: shared types, and component values as numbers.
+export * from './checks/index.js';
+export { parseValue, kindFromRefdes, formatSi } from './values.js';
+export type { ParsedValue, ValueUnit, ValueKind } from './values.js';
+
+// ERC: electrical rules on the netlist.
+export * from './erc/index.js';
+
+// Netlist-driven logic simulation with invariants.
+export * from './logic/index.js';
+
+// SPICE: netlist export from a board, and templates for recurring circuits.
+export * from './spice/index.js';

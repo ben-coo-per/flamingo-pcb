@@ -17,6 +17,7 @@ import { runAutorouteBroadcast } from './autoroute.js';
 import { Doc } from './document.js';
 import type { McpContext, PartsApi } from './mcp.js';
 import { createMcpServer, resolveFabOutDir } from './mcp.js';
+import { ercFindings, writeChecksReport } from './checks-tools.js';
 import type { RouteRunner } from './route.js';
 import { defaultRouteRunner } from './route.js';
 import type { ScreenshotOpts } from './screenshot.js';
@@ -360,6 +361,11 @@ async function handleApi(
     return true;
   }
 
+  if (method === 'GET' && pathname === '/api/erc') {
+    sendJSON(res, 200, { ok: true, findings: await ercFindings(ctx, doc.board) });
+    return true;
+  }
+
   if (method === 'GET' && pathname === '/api/render.svg') {
     const opts: RenderOpts = {};
     const layersParam = url.searchParams.get('layers');
@@ -444,11 +450,18 @@ async function handleApi(
       });
       return true;
     }
+    const erc = await ercFindings(ctx, doc.board);
+    const ercErrors = erc.filter((f) => f.level === 'error');
+    if (ercErrors.length > 0) {
+      sendJSON(res, 400, { ok: false, error: 'ERC errors present; export refused', ercErrors });
+      return true;
+    }
 
     const targetDir = resolveFabOutDir(ctx, outDirRaw);
     try {
       const result = await exportFab(doc.board, targetDir);
-      sendJSON(res, 200, { ok: true, outDir: targetDir, ...result });
+      const checksJson = await writeChecksReport(targetDir, doc.board, erc);
+      sendJSON(res, 200, { ok: true, outDir: targetDir, ...result, checksJson });
     } catch (err) {
       sendJSON(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) });
     }
@@ -914,6 +927,8 @@ export interface StartServerOptions {
    * editor, its routes and its tools are not. Needs `panel`; `doc` is unused.
    */
   panelOnly?: boolean;
+  /** Symbol pins for parts placed before footprints carried them. Defaults to the on-disk parts cache -- tests inject one. */
+  loadSymbolPins?: McpContext['loadSymbolPins'];
 }
 
 /**
@@ -943,6 +958,7 @@ export function startServer(
     route: opts.routeRunner ?? defaultRouteRunner,
     ...(panel ? { panel } : {}),
     ...(panel && opts.panelOnly ? { panelOnly: true } : {}),
+    ...(opts.loadSymbolPins ? { loadSymbolPins: opts.loadSymbolPins } : {}),
   };
   const uiDistDir = opts.uiDistDir ?? UI_DIST;
   const server = http.createServer(makeRequestListener(ctx, uiDistDir));

@@ -10,6 +10,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { PanelOp, PanelOpError, PanelOpResult, Rotation, SettingsPatch } from '@flamingo/panel';
 import { OBJECTIVES } from '@flamingo/panel';
+import { formatFindings } from '@flamingo/engine';
 import {
   ESTIMATE_LEGEND,
   fmt,
@@ -53,6 +54,9 @@ export const PANEL_TOOL_NAMES = [
   'panel_set_settings',
   'panel_arrange',
   'panel_check',
+  'panel_add_link',
+  'panel_remove_link',
+  'check_interconnect',
   'panel_screenshot',
   'panel_undo',
   'panel_redo',
@@ -369,6 +373,64 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
       inputSchema: {},
     },
     async () => text(formatIssues(await session.check())),
+  );
+
+  server.registerTool(
+    'panel_add_link',
+    {
+      description:
+        'Declare a cable between boards on the panel, for check_interconnect: header "from" on one board joined to header(s) "to" on others (several for a daisy-chained ribbon). Endpoints are "<source key>:<refdes>", e.g. "S:J5" (source keys are in panel_get_state). Links describe the system only; they never change fab output or cost.',
+      inputSchema: {
+        from: z.string().describe('Header the cable starts at, "<source key>:<refdes>"'),
+        to: z.array(z.string()).min(1).describe('Header(s) at the other end(s), each "<source key>:<refdes>"'),
+        map: z
+          .union([z.literal('straight'), z.record(z.string(), z.string())])
+          .optional()
+          .describe('"straight" (default): pad N meets pad N, as on a keyed IDC ribbon. Or an object mapping from-pad -> to-pad for a crossed or partial cable'),
+        aliases: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe('Net names meaning one signal on different boards, mapped to one name, e.g. {"BUS_SDA": "SDA", "M_EN": "MOTION_EN"}'),
+        note: z.string().optional().describe('What the cable is, e.g. "14-way ribbon, 2 x 0.5 m"'),
+      },
+    },
+    async ({ from, to, map, aliases, note }) =>
+      applied(
+        session.apply({
+          op: 'addLink',
+          link: { from, to, map: map ?? 'straight', ...(aliases ? { aliases } : {}), ...(note ? { note } : {}) },
+        }),
+        (r) => `Added link ${r.created[0]}: ${from} -> ${to.join(', ')}`,
+      ),
+  );
+
+  server.registerTool(
+    'panel_remove_link',
+    {
+      description: 'Remove a cable declared with panel_add_link.',
+      inputSchema: { id: z.string().describe('Link id, e.g. "L1"') },
+    },
+    async ({ id }) => applied(session.apply({ op: 'removeLink', id }), () => `Removed link ${id}`),
+  );
+
+  server.registerTool(
+    'check_interconnect',
+    {
+      description:
+        'Check every cable declared on the panel pin by pin: ground meets ground, a supply meets the same supply, no supply meets a signal, signal names agree (after the link\'s aliases), and no pin is connected on one end only. Optionally compare markdown pin tables ("| Pin | Signal | Pin | Signal |") with the copper. Findings are data, never a tool error.',
+      inputSchema: {
+        docs: z
+          .array(z.string())
+          .optional()
+          .describe('Markdown files (relative to the project directory) whose pin tables should match the "from" header'),
+      },
+    },
+    async ({ docs }) => {
+      const r = await session.checkInterconnect(docs ?? []);
+      if (!r.ok) return error(r.error);
+      if ((session.doc.panel.links ?? []).length === 0) return text('No links on this panel: declare cables with panel_add_link.');
+      return text(formatFindings(r.findings));
+    },
   );
 
   server.registerTool(

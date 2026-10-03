@@ -6,7 +6,7 @@
  * settings added after a file was written.
  */
 
-import type { Panel, PanelInstance, PanelSettings, PanelSource, Rotation } from './types.js';
+import type { Panel, PanelInstance, PanelLink, PanelSettings, PanelSource, Rotation } from './types.js';
 
 export const PANEL_EXTENSION = '.plamingo';
 
@@ -141,6 +141,8 @@ export function parsePanel(json: string): Panel {
     ids.add(inst.id);
   }
 
+  const links = parsed.links === undefined ? undefined : parseLinks(parsed.links, keys);
+
   return {
     formatVersion: 1,
     kind: 'flamingo-panel',
@@ -148,5 +150,62 @@ export function parsePanel(json: string): Panel {
     sources,
     instances,
     settings: mergeSettings(DEFAULT_SETTINGS, parsed.settings),
+    ...(links ? { links } : {}),
   };
+}
+
+const ENDPOINT_RE = /^([^:\s]+):([^:\s]+)$/;
+
+/** `<source key>:<refdes>` -> its parts, or null when malformed. */
+export function parseEndpoint(ep: string): { key: string; refdes: string } | null {
+  const m = ENDPOINT_RE.exec(ep);
+  return m ? { key: m[1]!, refdes: m[2]! } : null;
+}
+
+function isStringMap(v: unknown): v is Record<string, string> {
+  return isObject(v) && Object.values(v).every((x) => typeof x === 'string');
+}
+
+/**
+ * Validate a link's shape and that its endpoints name sources on the panel.
+ * Returns an error message, or null when the link is well formed. Whether the
+ * refdes exist on those boards is the interconnect check's business: the
+ * panel never reads board content.
+ */
+export function validateLink(link: Omit<PanelLink, 'id'>, keys: ReadonlySet<string>): string | null {
+  const eps = [link.from, ...(Array.isArray(link.to) ? link.to : [])];
+  if (typeof link.from !== 'string') return 'from must be "<source key>:<refdes>"';
+  if (!Array.isArray(link.to) || link.to.length === 0) return 'to must list at least one "<source key>:<refdes>"';
+  for (const ep of eps) {
+    const parsed = typeof ep === 'string' ? parseEndpoint(ep) : null;
+    if (!parsed) return `endpoint "${String(ep)}" must be "<source key>:<refdes>"`;
+    if (!keys.has(parsed.key)) return `endpoint "${ep}" refers to unknown source "${parsed.key}"`;
+  }
+  if (new Set(eps).size !== eps.length) return 'a link cannot join a header to itself';
+  if (link.map !== 'straight' && !isStringMap(link.map)) return 'map must be "straight" or an object of pad -> pad';
+  if (link.aliases !== undefined && !isStringMap(link.aliases)) return 'aliases must be an object of net name -> name';
+  if (link.note !== undefined && typeof link.note !== 'string') return 'note must be a string';
+  return null;
+}
+
+function parseLinks(raw: unknown, keys: ReadonlySet<string>): PanelLink[] {
+  if (!Array.isArray(raw)) throw new Error('Field "links" must be an array');
+  const ids = new Set<string>();
+  return raw.map((l, i) => {
+    if (!isObject(l)) throw new Error(`links[${i}] must be an object`);
+    if (typeof l.id !== 'string' || l.id === '') throw new Error(`links[${i}].id must be a non-empty string`);
+    if (ids.has(l.id)) throw new Error(`Duplicate link id "${l.id}"`);
+    ids.add(l.id);
+    const link = l as unknown as PanelLink;
+    const problem = validateLink(link, keys);
+    if (problem) throw new Error(`links[${i}] ("${l.id}"): ${problem}`);
+    return {
+      id: link.id,
+      from: link.from,
+      to: [...link.to],
+      map: link.map === 'straight' ? 'straight' : { ...link.map },
+      ...(link.aliases ? { aliases: { ...link.aliases } } : {}),
+      ...(link.note !== undefined ? { note: link.note } : {}),
+    };
+  });
 }

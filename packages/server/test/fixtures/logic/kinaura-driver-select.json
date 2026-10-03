@@ -1,0 +1,43 @@
+{
+  "description": "KinAura driver-select chain: ScaleController J5 ribbon to two identical driver banks (J9 open = bank 0, fitted = bank 1). Boards are not in this repo; tests load them from KINAURA_PCB.",
+  "instances": [
+    { "name": "ctrl", "board": "scale-controller-flamingo/ScaleController.flamingo", "supplies": { "3V3": "1" } },
+    { "name": "bank0", "board": "driver-bank/DriverBank.flamingo" },
+    { "name": "bank1", "board": "driver-bank/DriverBank.flamingo", "fitted": ["J9"] }
+  ],
+  "links": [{ "from": "ctrl:J5", "to": ["bank0:J6", "bank1:J6"], "map": "straight" }],
+  "free": [
+    { "net": "ctrl:U1.IO6" },
+    { "net": "ctrl:U1.IO16" },
+    { "register": "bank*:U2", "pins": "connected" }
+  ],
+  "invariants": [
+    { "name": "at most one StepStick EN low across both banks", "assert": { "atMostOneLow": "bank*:XL*.1" } },
+    {
+      "name": "no EN low while MOTION_EN is low",
+      "when": { "net": "bank0:MOTION_EN", "is": ["0", "Z", "X"] },
+      "assert": { "noneLow": "bank*:XL*.1" }
+    },
+    {
+      "name": "the enabled driver's bank mux connects the UART to that driver",
+      "selectFollows": { "enable": "bank*:XL{i}.1", "mux": "bank*:U4", "channel": "bank*:XL{i}.4" }
+    },
+    {
+      "name": "while a driver is enabled no other bank's mux is on the UART",
+      "level": "warn",
+      "when": { "anyLow": "bank*:XL*.1" },
+      "assert": { "atMostOneConnected": "bank*:U4" }
+    },
+    {
+      "name": "BANK_SEL low enables only bank 0",
+      "when": { "net": "bank0:BANK_SEL", "is": "0" },
+      "assert": { "noneLow": "bank1:XL*.1" }
+    },
+    {
+      "name": "BANK_SEL high enables only bank 1",
+      "when": { "net": "bank0:BANK_SEL", "is": "1" },
+      "assert": { "noneLow": "bank0:XL*.1" }
+    },
+    { "name": "every driver on both banks can be enabled on its own", "eachCanBeLowAlone": "bank*:XL*.1" }
+  ]
+}
