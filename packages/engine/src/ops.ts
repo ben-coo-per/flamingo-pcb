@@ -1,5 +1,6 @@
 import type {
   Board,
+  CheckWaiver,
   ComponentInst,
   Footprint,
   Keepout,
@@ -61,7 +62,9 @@ export type Op =
   | { op: 'transaction'; ops: Op[] }
   | { op: 'unroute'; net?: string }
   | { op: 'widenTracks'; nets?: string[] }
-  | { op: 'setBoardMeta'; name?: string; copperLayers?: 2 | 4 | 6 };
+  | { op: 'setBoardMeta'; name?: string; copperLayers?: 2 | 4 | 6 }
+  | { op: 'addCheckWaiver'; waiver: CheckWaiver }
+  | { op: 'removeCheckWaiver'; index: number };
 
 export interface OpResult {
   ok: true;
@@ -524,6 +527,36 @@ export function applyOp(b: Board, op: Op): OpResult | OpError {
         board.copperLayers = newCopperLayers;
         board.rules = RULES_MAP[newCopperLayers];
       }
+      return ok(board, createdIds);
+    }
+
+    case 'addCheckWaiver': {
+      const w = op.waiver as Partial<CheckWaiver> | undefined;
+      if (!w || typeof w !== 'object') return err('addCheckWaiver needs a waiver');
+      if (typeof w.rule !== 'string' || w.rule.trim() === '') return err('Waiver needs a rule');
+      if (typeof w.reason !== 'string' || w.reason.trim() === '') return err('Waiver needs a reason');
+      if (!Array.isArray(w.items) || !w.items.every((i) => typeof i === 'string')) {
+        return err('Waiver items must be an array of strings');
+      }
+      if (w.check !== undefined && typeof w.check !== 'string') return err('Waiver check must be a string');
+      const waiver: CheckWaiver = {
+        ...(w.check ? { check: w.check } : {}),
+        rule: w.rule.trim(),
+        items: [...w.items],
+        reason: w.reason.trim(),
+      };
+      board.checkWaivers = [...(board.checkWaivers ?? []), waiver];
+      return ok(board, createdIds);
+    }
+
+    case 'removeCheckWaiver': {
+      const list = board.checkWaivers ?? [];
+      if (!Number.isInteger(op.index) || op.index < 0 || op.index >= list.length) {
+        return err(`No check waiver at index ${op.index} (board has ${list.length})`);
+      }
+      list.splice(op.index, 1);
+      if (list.length === 0) delete board.checkWaivers;
+      else board.checkWaivers = list;
       return ok(board, createdIds);
     }
 

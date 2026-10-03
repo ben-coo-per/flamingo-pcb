@@ -124,6 +124,15 @@ export async function handlePanelApi(
         });
         return true;
       }
+      case 'interconnect': {
+        const r = await session.checkInterconnect();
+        sendJSON(res, r.ok ? 200 : 400, r);
+        return true;
+      }
+      case 'headers': {
+        sendJSON(res, 200, { ok: true, ...(await session.headers()) });
+        return true;
+      }
       case 'render.svg': {
         res.writeHead(200, { 'content-type': 'image/svg+xml' });
         res.end(await session.renderSvg());
