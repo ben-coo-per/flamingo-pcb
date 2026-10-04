@@ -12,6 +12,7 @@ import { bboxOf, polyPolyDistance, polyGroupDistance } from '../../geometry.js';
 import { DRC_EPSILON } from '../rules.js';
 import type { RuleSet } from '../rules.js';
 import type { CopperItem, DrcViolation } from '../types.js';
+import type { CheckProgress } from '../drc.js';
 
 /**
  * Distance between two copper items, honoring zone holes. When an item carries
@@ -81,11 +82,19 @@ function tiedPads(b: Board): Map<string, Set<string>> {
   return tied;
 }
 
-export function check(b: Board, rules: RuleSet, items: CopperItem[]): DrcViolation[] {
+/** Vertices `itemDistance` has to walk for an item: a zone's every ring. */
+function vertexCount(it: CopperItem): number {
+  if (!it.group) return it.polygon.length;
+  return it.group.outer.length + it.group.holes.reduce((n, h) => n + h.length, 0);
+}
+
+export function check(b: Board, rules: RuleSet, items: CopperItem[], progress?: CheckProgress): DrcViolation[] {
   const violations: DrcViolation[] = [];
   const tied = tiedPads(b);
   const withBbox = items.map((it) => ({ it, bbox: bboxOf(it.polygon) }));
 
+  // First the cheap filters, to find the pairs that need the exact distance.
+  const pairs: Array<{ i: number; j: number; required: number }> = [];
   for (let i = 0; i < withBbox.length; i++) {
     for (let j = i + 1; j < withBbox.length; j++) {
       const a = withBbox[i];
@@ -104,18 +113,39 @@ export function check(b: Board, rules: RuleSet, items: CopperItem[]): DrcViolati
       ) {
         continue; // bbox prefilter: can't possibly be closer than `required`
       }
+      pairs.push({ i, j, required });
+    }
+  }
 
-      const d = itemDistance(a.it, c.it);
-      if (d < required - DRC_EPSILON) {
-        violations.push({
-          rule: 'clearance',
-          message:
-            `${a.it.kind} ${a.it.ref} (net "${a.it.net}") and ${c.it.kind} ${c.it.ref} ` +
-            `(net "${c.it.net}") on ${a.it.layer}: clearance ${d.toFixed(2)}mm is below required ${required.toFixed(2)}mm`,
-          at: closestApproach(a.it.polygon, c.it.polygon),
-          items: [a.it.ref, c.it.ref],
-        });
+  // Progress counts work, not pairs: a pair touching a zone costs about the
+  // product of the two outlines' vertices, and those pairs take nearly all
+  // the time.
+  const vertices = progress ? items.map(vertexCount) : [];
+  const costOf = (p: { i: number; j: number }): number => 1 + vertices[p.i]! * vertices[p.j]!;
+  const total = progress ? pairs.reduce((n, p) => n + costOf(p), 0) : 0;
+  let spent = 0;
+  let reported = 0;
+
+  for (const { i, j, required } of pairs) {
+    const a = withBbox[i];
+    const c = withBbox[j];
+    if (progress) {
+      spent += costOf({ i, j });
+      if (spent - reported > total / 1000) {
+        reported = spent;
+        progress(spent / total);
       }
+    }
+    const d = itemDistance(a.it, c.it);
+    if (d < required - DRC_EPSILON) {
+      violations.push({
+        rule: 'clearance',
+        message:
+          `${a.it.kind} ${a.it.ref} (net "${a.it.net}") and ${c.it.kind} ${c.it.ref} ` +
+          `(net "${c.it.net}") on ${a.it.layer}: clearance ${d.toFixed(2)}mm is below required ${required.toFixed(2)}mm`,
+        at: closestApproach(a.it.polygon, c.it.polygon),
+        items: [a.it.ref, c.it.ref],
+      });
     }
   }
 

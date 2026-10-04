@@ -20,6 +20,7 @@ import { drawPlate } from './draw.js';
 import { loadsOntoPanel, mm, previewLine, quoteKey } from './format.js';
 import { OWN, buildOptions, rankOf, scenarioOnPlate } from './options.js';
 import { DRAG_THRESHOLD_PX, contentBox, dropPosition, hitInstance, platePlaces, platesBox } from './hit.js';
+import { createLoading } from './loading.js';
 import { createSidebar } from './sidebar.js';
 import { PanelStore } from './store.js';
 import { connectPanelWs } from './ws.js';
@@ -137,6 +138,7 @@ function refreshQuote(view: PanelView): void {
 
 const ws = connectPanelWs({
   onConnectionChange: (connected) => store.set({ connected }),
+  onLoading: (loading) => store.set({ loading }),
   onOpResult: (result) => {
     if (!result.ok) store.set({ arrangeMsg: { text: result.error ?? 'Edit rejected', problem: true }, drag: null });
   },
@@ -583,6 +585,8 @@ const renderSidebar = createSidebar(
   },
 );
 
+const renderLoading = createLoading($('plate-loading'));
+
 // A board made in the editor since this page loaded should be on offer.
 window.addEventListener('focus', () => refreshBoardFiles(store.get().view, true));
 
@@ -609,6 +613,7 @@ $('export-btn').addEventListener('click', () => void exportFab());
 store.subscribe((state, previous) => {
   requestDraw();
   renderSidebar(state);
+  renderLoading(state);
   if (state.menu !== previous.menu || state.view !== previous.view) renderMenu();
   if (state.preview !== previous.preview || state.quote !== previous.quote || state.view !== previous.view) renderBanner();
 });
@@ -620,6 +625,7 @@ new ResizeObserver(() => {
 }).observe(plate);
 resize();
 renderSidebar(store.get());
+renderLoading(store.get());
 
 // A read-only handle for scripted checks (packages/server/scripts/verify-panel-ui.ts):
 // where things are on the plate cannot be read from the DOM, because the plate is a canvas.

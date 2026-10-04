@@ -331,6 +331,8 @@ export function isPanelChannel(req: IncomingMessage): boolean {
   }
 }
 
+const LOADING_INTERVAL_MS = 100;
+
 export function attachPanelChannel(session: PanelSession): PanelChannel {
   const clients = new Set<WebSocket>();
   let pushing = false;
@@ -363,9 +365,32 @@ export function attachPanelChannel(session: PanelSession): PanelChannel {
   };
   session.on('change', onChange);
 
+  // Progress of the board checks a view is waiting on, at most every 100 ms.
+  // The first update and the end of it (null) go out at once, so the end
+  // always reaches a client before the view it was waiting for.
+  let loadingTimer: ReturnType<typeof setTimeout> | null = null;
+  let loadingSentAt = 0;
+  function sendLoading(): void {
+    loadingTimer = null;
+    loadingSentAt = Date.now();
+    const msg = JSON.stringify({ type: 'loading', loading: session.loading() });
+    for (const ws of clients) if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+  }
+  const onLoading = (): void => {
+    const done = session.loading() === null;
+    if (loadingTimer && !done) return; // the latest state goes out when it fires
+    if (loadingTimer) clearTimeout(loadingTimer);
+    const wait = LOADING_INTERVAL_MS - (Date.now() - loadingSentAt);
+    if (done || wait <= 0) sendLoading();
+    else loadingTimer = setTimeout(sendLoading, wait);
+  };
+  session.on('loading', onLoading);
+
   return {
     add(ws: WebSocket): void {
       clients.add(ws);
+      const loading = session.loading();
+      if (loading) ws.send(JSON.stringify({ type: 'loading', loading }));
       void (async () => {
         try {
           ws.send(JSON.stringify({ type: 'panel', view: await session.view() }));
@@ -401,6 +426,8 @@ export function attachPanelChannel(session: PanelSession): PanelChannel {
     },
     close(): void {
       session.removeListener('change', onChange);
+      session.removeListener('loading', onLoading);
+      if (loadingTimer) clearTimeout(loadingTimer);
       for (const ws of clients) ws.terminate();
       clients.clear();
     },

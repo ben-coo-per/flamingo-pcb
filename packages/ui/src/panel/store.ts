@@ -7,7 +7,7 @@
  */
 
 import type { Point } from '@flamingo/engine';
-import type { PanelView, QuoteResult } from '@flamingo/panel';
+import type { PanelLoading, PanelView, QuoteResult } from '@flamingo/panel';
 import type { ViewTransform } from '../state.js';
 import type { BoardFile } from './api.js';
 
@@ -33,6 +33,8 @@ export interface Message {
 
 export interface PanelState {
   view: PanelView | null;
+  /** Board checks the server is running before it can send the next view. */
+  loading: PanelLoading | null;
   connected: boolean;
   transform: ViewTransform;
   hasFit: boolean;
@@ -63,6 +65,7 @@ export interface PanelState {
 function initial(): PanelState {
   return {
     view: null,
+    loading: null,
     connected: false,
     transform: { scale: 6, originPxX: 40, originPxY: 400, flipped: false },
     hasFit: false,

@@ -16,7 +16,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { Resvg } from '@resvg/resvg-js';
 import type { Board, DrcViolation } from '@flamingo/engine';
-import { fillAllZones, renderSVG, runDRC } from '@flamingo/engine';
+import { fillAllZones, renderSVG } from '@flamingo/engine';
 import { generateBOM, generateCPL, generateGerbers } from '@flamingo/fab';
 import type {
   ArrangeResult,
@@ -37,8 +37,11 @@ import type {
   SettingsPatch,
   LimitView,
   SourceView,
+  BoardLoading,
+  PanelLoading,
 } from '@flamingo/panel';
 import {
+  boardColor,
   PANEL_EXTENSION,
   applyPanelOp,
   arrange,
@@ -67,6 +70,7 @@ import {
   sourcePath,
 } from '@flamingo/panel/node';
 import { PanelDoc } from './doc.js';
+import { boardDrcAsync } from './drc-run.js';
 
 /** Unit price lookup, injected so tests need no network. Returns undefined when unknown. */
 export type PriceLookup = (lcsc: string) => Promise<number | undefined>;
@@ -118,7 +122,13 @@ export class PanelSession extends EventEmitter {
   private readonly priceLookup: PriceLookup | undefined;
   private readonly prices = new Map<string, number | undefined>();
   private readonly drcCache = new Map<string, DrcViolation[]>();
+  /** DRC runs in flight, by content hash, so one board is never checked twice at once. */
+  private readonly drcRuns = new Map<string, Promise<DrcViolation[]>>();
+  /** Boards being checked, by content hash. Cleared when the last one finishes. */
+  private readonly checking = new Map<string, BoardLoading>();
+  private checkingSince = 0;
   private cached: { panel: Panel; view: PanelView; sources: ResolvedSource[] } | null = null;
+  private deriving: { panel: Panel; view: Promise<PanelView> } | null = null;
   private revision = 0;
   private watch: ReturnType<typeof setInterval> | null = null;
 
@@ -167,32 +177,57 @@ export class PanelSession extends EventEmitter {
     });
   }
 
-  /** DRC of a source board, as it would gate that board's own export. Cached per content hash. */
-  private sourceDrc(src: ResolvedSource): DrcViolation[] {
+  /**
+   * DRC of a source board, as it would gate that board's own export. Cached
+   * per content hash. While it runs, the board is listed in `loading()`.
+   */
+  private async sourceDrc(src: ResolvedSource): Promise<DrcViolation[]> {
     if (!src.board || !src.hash) return [];
-    let v = this.drcCache.get(src.hash);
-    if (v === undefined) {
-      const board: Board = src.board.zones.length > 0 ? fillAllZones(src.board) : src.board;
-      v = runDRC(board);
-      this.drcCache.set(src.hash, v);
+    const hash = src.hash;
+    const cached = this.drcCache.get(hash);
+    if (cached) return cached;
+    let run = this.drcRuns.get(hash);
+    if (!run) {
+      if (this.checking.size === 0) this.checkingSince = Date.now();
+      const board = { key: src.key, name: src.name, color: boardColor(this.panel.sources.map((s) => s.key), src.key) };
+      this.checking.set(hash, { ...board, phase: 'queued', fraction: 0 });
+      this.emit('loading');
+      run = boardDrcAsync(src.board, (step) => {
+        this.checking.set(hash, { ...board, ...step });
+        this.emit('loading');
+      })
+        .then((v) => {
+          this.drcCache.set(hash, v);
+          return v;
+        })
+        .finally(() => {
+          this.drcRuns.delete(hash);
+          this.checking.set(hash, { ...board, phase: 'done', fraction: 1 });
+          if (this.drcRuns.size === 0) this.checking.clear();
+          this.emit('loading');
+        });
+      this.drcRuns.set(hash, run);
     }
-    return v;
+    return run;
   }
 
-  private drcIssues(panel: Panel, sources: ResolvedSource[]): PanelIssue[] {
-    const issues: PanelIssue[] = [];
-    for (const s of sources) {
-      const instances = panel.instances.filter((i) => i.source === s.key).map((i) => i.id);
-      if (instances.length === 0) continue;
-      const issue = this.drcIssue(s, instances);
-      if (issue) issues.push(issue);
-    }
-    return issues;
+  /** Boards whose checks are running, for a client to show while it waits; null when none are. */
+  loading(): PanelLoading | null {
+    if (this.checking.size === 0) return null;
+    return { startedAt: this.checkingSince, boards: [...this.checking.values()] };
+  }
+
+  private async drcIssues(panel: Panel, sources: ResolvedSource[]): Promise<PanelIssue[]> {
+    const used = sources
+      .map((s) => ({ s, instances: panel.instances.filter((i) => i.source === s.key).map((i) => i.id) }))
+      .filter((u) => u.instances.length > 0);
+    const issues = await Promise.all(used.map((u) => this.drcIssue(u.s, u.instances)));
+    return issues.filter((i): i is PanelIssue => i !== null);
   }
 
   /** A source board's own DRC violations as one issue, or null when it has none. */
-  private drcIssue(s: ResolvedSource, instances: string[]): PanelIssue | null {
-    const v = this.sourceDrc(s);
+  private async drcIssue(s: ResolvedSource, instances: string[]): Promise<PanelIssue | null> {
+    const v = await this.sourceDrc(s);
     if (v.length === 0) return null;
     const rules = [...new Set(v.map((x) => x.rule))];
     return {
@@ -209,11 +244,21 @@ export class PanelSession extends EventEmitter {
   async view(): Promise<PanelView> {
     const panel = this.panel;
     if (this.cached && this.cached.panel === panel) return this.cached.view;
+    // Every caller waiting on the same panel shares one derivation.
+    if (this.deriving?.panel === panel) return this.deriving.view;
+    const view = this.derive(panel).finally(() => {
+      if (this.deriving?.view === view) this.deriving = null;
+    });
+    this.deriving = { panel, view };
+    return view;
+  }
+
+  private async derive(panel: Panel): Promise<PanelView> {
     const t0 = performance.now();
     const revision = this.revision;
     const sources = await this.resolved();
     const geometry = computeGeometry(panel, sources);
-    const issues = [...checkPanel(panel, sources, this.limits, geometry), ...this.drcIssues(panel, sources)].sort(
+    const issues = [...checkPanel(panel, sources, this.limits, geometry), ...(await this.drcIssues(panel, sources))].sort(
       (a, b) => rankOf(a) - rankOf(b),
     );
     const quote = quotePanel(panel, sources, geometry, this.limits, this.fees);
@@ -731,7 +776,7 @@ export class PanelSession extends EventEmitter {
           const key = order.designs[0]!;
           const src = sources.find((s) => s.key === key);
           if (!src?.board) return fail(src?.error ?? `Board ${key} is not resolved`);
-          const drc = this.drcIssue(src, []);
+          const drc = await this.drcIssue(src, []);
           if (drc) blocking.push(drc);
           const filled = fillAllZones(src.board);
           orders.push({
@@ -752,7 +797,7 @@ export class PanelSession extends EventEmitter {
         if (!applied.ok) return fail(applied.error);
         const panel = applied.panel;
         const geometry = computeGeometry(panel, sources);
-        const issues = [...checkPanel(panel, sources, this.limits, geometry), ...this.drcIssues(panel, sources)];
+        const issues = [...checkPanel(panel, sources, this.limits, geometry), ...(await this.drcIssues(panel, sources))];
         blocking.push(...issues.filter((i) => i.severity === 'error'));
         const built = buildPanelFab(panel, sources, this.limits, { geometry, issues });
         orders.push({
