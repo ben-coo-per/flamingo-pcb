@@ -172,6 +172,7 @@ function boardOpened(): void {
 const panels = initPanels(
   {
     layerList: document.getElementById('layer-list')!,
+    overlayList: document.getElementById('overlay-list')!,
     netList: document.getElementById('net-list')!,
     boardInfo: document.getElementById('board-info')!,
     sideBadge: document.getElementById('side-badge')!,

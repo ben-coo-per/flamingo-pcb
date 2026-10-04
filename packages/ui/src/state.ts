@@ -68,6 +68,10 @@ export interface AppState {
   hover: HitInfo | null;
   view: ViewTransform;
   layerVisibility: Record<LayerKey, boolean>;
+  /** How hidden copper layers draw: 'ghost' keeps them as a faint grey
+   * underlay so a layer shown on its own still has its surroundings;
+   * 'hide' leaves them out entirely. */
+  hiddenCopper: 'ghost' | 'hide';
   /** WebSocket connection status for the status bar. */
   connected: boolean;
   /** Violation locations from the last "Run DRC" (panels.ts); drawn as red
@@ -121,6 +125,7 @@ function initialState(): AppState {
     hover: null,
     view: { scale: 10, originPxX: 0, originPxY: 0, flipped: false },
     layerVisibility: { [SILK_KEY]: true, [RATSNEST_KEY]: true, [ZONES_KEY]: true, [LABEL_PADS_KEY]: true, [LABEL_NETS_KEY]: true, [DIMS_KEY]: true },
+    hiddenCopper: 'ghost',
     connected: false,
     drcMarkers: [],
     cursorMm: null,

@@ -101,6 +101,10 @@ const HOVER_COLOR = '#ffffffcc';
 // as one color everywhere.
 const SELECTION_COLOR = '#4da6ff';
 const BACKGROUND = '#1a1a1a';
+// Hidden copper layers drawn as a faint neutral underlay ('ghost' mode), so a
+// layer on its own keeps its surroundings without reading as real copper.
+const GHOST_COLOR = '#B4B4B4';
+const GHOST_ALPHA = 0.22;
 // Label overlay colors -- kept in sync by hand with PAD_LABEL_COLOR /
 // NET_LABEL_COLOR in packages/engine/src/render.ts (the SVG renderer).
 const PAD_LABEL_COLOR = '#22D3EE';
@@ -145,7 +149,7 @@ function pathPolygon(ctx: CanvasRenderingContext2D, view: ViewTransform, pts: Po
 function fillPolygon(ctx: CanvasRenderingContext2D, view: ViewTransform, pts: Point[], color: string, alpha = 1): void {
   if (pts.length < 3) return;
   ctx.save();
-  ctx.globalAlpha = alpha;
+  ctx.globalAlpha *= alpha;
   ctx.fillStyle = color;
   pathPolygon(ctx, view, pts);
   ctx.fill();
@@ -481,6 +485,81 @@ function resolvePin(b: Board, ref: string): { comp: ComponentInst; pad: Pad } | 
 }
 
 /**
+ * One copper layer's zones, tracks and SMD pads in `color`. Pours composite
+ * through an offscreen layer at 0.55 of the current globalAlpha, so a ghosted
+ * layer (drawn under a reduced alpha) stays proportionally faint.
+ */
+function drawCopperLayer(
+  ctx: CanvasRenderingContext2D,
+  board: Board,
+  view: ViewTransform,
+  cu: LayerId[],
+  layer: LayerId,
+  color: string,
+  zonesVisible: boolean,
+): void {
+  const filledZones = zonesVisible
+    ? board.zones.filter((z) => z.layer === layer && z.fill && z.fill.length > 0)
+    : [];
+  if (zonesVisible) {
+    for (const z of board.zones) {
+      if (z.layer !== layer) continue;
+      if (!z.fill || z.fill.length === 0) fillPolygon(ctx, view, z.polygon, color, 0.25);
+    }
+  }
+
+  const pourNets = new Set(filledZones.map((z) => z.net));
+  if (filledZones.length > 0) {
+    // Pour + its same-net tracks are drawn at full alpha on an offscreen
+    // layer, then composited onto the board once at 0.55 — overlaps tint
+    // uniformly, so a GND trace over the GND pour reads as one copper
+    // region instead of a brighter line on translucent copper. The rings
+    // fill as a single even-odd path so hole rings knock out rather than
+    // double-paint (mirrors the SVG renderer's <g opacity> group).
+    const off = pourLayerCtx(ctx.canvas.width, ctx.canvas.height);
+    off.setTransform(ctx.getTransform());
+    off.fillStyle = color;
+    off.beginPath();
+    for (const z of filledZones) {
+      for (const ring of z.fill!) {
+        ring.forEach((p, i) => {
+          const s = worldToScreen(view, p);
+          if (i === 0) off.moveTo(s.x, s.y);
+          else off.lineTo(s.x, s.y);
+        });
+        off.closePath();
+      }
+    }
+    off.fill('evenodd');
+    for (const t of board.tracks) {
+      if (t.layer !== layer || !pourNets.has(t.net)) continue;
+      strokeTrack(off, view, t, color);
+    }
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha *= 0.55;
+    ctx.drawImage(off.canvas, 0, 0);
+    ctx.restore();
+  }
+
+  for (const t of board.tracks) {
+    if (t.layer !== layer) continue;
+    if (pourNets.has(t.net)) continue; // already composited with the pour above
+    strokeTrack(ctx, view, t, color);
+  }
+
+  if (layer === 'F.Cu' || layer === 'B.Cu') {
+    for (const c of board.components) {
+      for (const pad of c.footprint.pads) {
+        if (pad.layer === 'through') continue;
+        if (!padCopperLayers(pad, c.side, cu).includes(layer)) continue;
+        fillPolygon(ctx, view, padOutline(c, pad), color);
+      }
+    }
+  }
+}
+
+/**
  * Pure full-frame redraw. Render order (bottom-up, per task-9 brief):
  * B.Cu zones/tracks/pads -> inner -> F.Cu zones/tracks/pads -> through-pads
  * + vias + holes -> silk -> outline -> keepouts -> ratsnest -> hover halo ->
@@ -499,72 +578,23 @@ export function draw(board: Board, state: AppState, ctx: CanvasRenderingContext2
   // ---- copper layers, far side first so the near side composites on top ----
   // Front view: draw B.Cu..F.Cu (F.Cu near, on top). Back view: draw F.Cu..B.Cu
   // so B.Cu reads as the near layer, matching the physically flipped board.
+  // Hidden layers are ghosted underneath first (grey, faint) unless the
+  // viewer chose to hide them outright.
   const cu = copperLayersOf(board);
   const layerOrder = view.flipped ? cu.slice() : cu.slice().reverse();
+  const zonesVisible = vis[ZONES_KEY] !== false;
+  if (state.hiddenCopper === 'ghost') {
+    ctx.save();
+    ctx.globalAlpha = GHOST_ALPHA;
+    for (const layer of layerOrder) {
+      if (vis[layer] !== false) continue;
+      drawCopperLayer(ctx, board, view, cu, layer, GHOST_COLOR, zonesVisible);
+    }
+    ctx.restore();
+  }
   for (const layer of layerOrder) {
     if (vis[layer] === false) continue;
-    const color = COPPER_COLOR[layer]!;
-
-    const zonesVisible = vis[ZONES_KEY] !== false;
-    const filledZones = zonesVisible
-      ? board.zones.filter((z) => z.layer === layer && z.fill && z.fill.length > 0)
-      : [];
-    if (zonesVisible) {
-      for (const z of board.zones) {
-        if (z.layer !== layer) continue;
-        if (!z.fill || z.fill.length === 0) fillPolygon(ctx, view, z.polygon, color, 0.25);
-      }
-    }
-
-    const pourNets = new Set(filledZones.map((z) => z.net));
-    if (filledZones.length > 0) {
-      // Pour + its same-net tracks are drawn at full alpha on an offscreen
-      // layer, then composited onto the board once at 0.55 — overlaps tint
-      // uniformly, so a GND trace over the GND pour reads as one copper
-      // region instead of a brighter line on translucent copper. The rings
-      // fill as a single even-odd path so hole rings knock out rather than
-      // double-paint (mirrors the SVG renderer's <g opacity> group).
-      const off = pourLayerCtx(ctx.canvas.width, ctx.canvas.height);
-      off.setTransform(ctx.getTransform());
-      off.fillStyle = color;
-      off.beginPath();
-      for (const z of filledZones) {
-        for (const ring of z.fill!) {
-          ring.forEach((p, i) => {
-            const s = worldToScreen(view, p);
-            if (i === 0) off.moveTo(s.x, s.y);
-            else off.lineTo(s.x, s.y);
-          });
-          off.closePath();
-        }
-      }
-      off.fill('evenodd');
-      for (const t of board.tracks) {
-        if (t.layer !== layer || !pourNets.has(t.net)) continue;
-        strokeTrack(off, view, t, color);
-      }
-      ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.globalAlpha = 0.55;
-      ctx.drawImage(off.canvas, 0, 0);
-      ctx.restore();
-    }
-
-    for (const t of board.tracks) {
-      if (t.layer !== layer) continue;
-      if (pourNets.has(t.net)) continue; // already composited with the pour above
-      strokeTrack(ctx, view, t, color);
-    }
-
-    if (layer === 'F.Cu' || layer === 'B.Cu') {
-      for (const c of board.components) {
-        for (const pad of c.footprint.pads) {
-          if (pad.layer === 'through') continue;
-          if (!padCopperLayers(pad, c.side, cu).includes(layer)) continue;
-          fillPolygon(ctx, view, padOutline(c, pad), color);
-        }
-      }
-    }
+    drawCopperLayer(ctx, board, view, cu, layer, COPPER_COLOR[layer]!, zonesVisible);
   }
 
   // ---- through-hole pads + vias + mounting holes ----
