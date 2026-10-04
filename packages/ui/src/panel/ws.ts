@@ -1,20 +1,23 @@
 /**
  * Panel view - WebSocket client for the panel channel (/ws?channel=panel).
  * Mirrors the board editor's client (../ws.ts): reconnects after a fixed
- * delay, receives `{type:'panel', view}`, sends `{type:'op', op}`.
+ * delay, receives `{type:'panel', view}` and `{type:'loading', loading}`,
+ * sends `{type:'op', op}`.
  */
 
-import type { PanelOp, PanelView } from '@flamingo/panel';
+import type { PanelLoading, PanelOp, PanelView } from '@flamingo/panel';
 
 export interface PanelWsHandlers {
   onView: (view: PanelView) => void;
   onConnectionChange: (connected: boolean) => void;
   onOpResult?: (result: { ok: boolean; error?: string }) => void;
+  onLoading?: (loading: PanelLoading | null) => void;
 }
 
 type ServerMsg =
   | { type: 'panel'; view: PanelView }
-  | { type: 'opResult'; result: { ok: boolean; error?: string } };
+  | { type: 'opResult'; result: { ok: boolean; error?: string } }
+  | { type: 'loading'; loading: PanelLoading | null };
 
 const RECONNECT_DELAY_MS = 1000;
 
@@ -35,6 +38,7 @@ export function connectPanelWs(handlers: PanelWsHandlers): { sendOp: (op: PanelO
       }
       if (msg.type === 'panel') handlers.onView(msg.view);
       else if (msg.type === 'opResult') handlers.onOpResult?.(msg.result);
+      else if (msg.type === 'loading') handlers.onLoading?.(msg.loading);
     });
     ws.addEventListener('close', () => {
       if (socket === ws) socket = null;

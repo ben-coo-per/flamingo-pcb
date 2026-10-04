@@ -411,7 +411,17 @@ export function fillZone(b: Board, zone: Zone): Point[][] {
   return rings;
 }
 
-/** Return a copy of `b` with every zone's `fill` populated by `fillZone`. */
-export function fillAllZones(b: Board): Board {
-  return { ...b, zones: b.zones.map((z) => ({ ...z, fill: fillZone(b, z) })) };
+/**
+ * Return a copy of `b` with every zone's `fill` populated by `fillZone`.
+ * `onZone`, if given, is called after each zone with how many are filled.
+ */
+export function fillAllZones(b: Board, onZone?: (done: number, total: number) => void): Board {
+  return {
+    ...b,
+    zones: b.zones.map((z, i) => {
+      const filled = { ...z, fill: fillZone(b, z) };
+      onZone?.(i + 1, b.zones.length);
+      return filled;
+    }),
+  };
 }

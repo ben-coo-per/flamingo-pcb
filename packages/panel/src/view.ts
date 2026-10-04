@@ -65,3 +65,28 @@ export interface PanelView {
   /** Counts up on every change, so a client can drop views that arrive late. */
   revision: number;
 }
+
+/** Where one source board is in the checks a view waits for. */
+export interface BoardLoading {
+  key: string;
+  name: string;
+  /** The board's colour on this panel (colors.ts). */
+  color: string;
+  /** `zones`: filling copper pours. `drc`: design rule check. */
+  phase: 'queued' | 'zones' | 'drc' | 'done';
+  /** Estimated share of this board's work done, 0..1. */
+  fraction: number;
+  /** What is running right now, e.g. `zone 2 of 4` or `clearance`. */
+  detail?: string;
+}
+
+/**
+ * Progress of a view that is being derived. Pushed to clients while it runs,
+ * then `null` once the view is out. Only the source boards' own DRC (zone fill
+ * included) takes long enough to report; the rest is folded into it.
+ */
+export interface PanelLoading {
+  /** When this derivation started, ms since the epoch (server clock). */
+  startedAt: number;
+  boards: BoardLoading[];
+}

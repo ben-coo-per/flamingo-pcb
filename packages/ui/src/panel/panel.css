@@ -137,6 +137,100 @@ body {
   white-space: pre-line;
 }
 
+/* The server is still checking boards: one bar per board, in its colour. */
+.plate-loading {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(520px, calc(100% - 32px));
+  padding: 12px 14px;
+  border: 2px solid var(--ink);
+  background: var(--paper);
+  z-index: 6;
+}
+
+/* Under a panel already drawn: out of the way, bottom left. */
+.plate-loading-docked {
+  left: 16px;
+  top: auto;
+  bottom: 16px;
+  transform: none;
+  width: min(440px, calc(100% - 32px));
+  padding: 8px 10px;
+  border-width: 1px;
+}
+
+.load-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.load-head strong {
+  flex: 1;
+  font-size: 13px;
+}
+
+.load-clock,
+.load-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.load-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1.4fr);
+  grid-template-areas:
+    'chip name bar'
+    'chip status status';
+  align-items: center;
+  column-gap: 8px;
+  margin-top: 10px;
+}
+
+.load-row .chip {
+  grid-area: chip;
+  align-self: start;
+}
+
+.load-name {
+  grid-area: name;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.load-bar {
+  grid-area: bar;
+  display: block;
+  height: 10px;
+  border: 1px solid var(--ink);
+}
+
+.load-bar span {
+  display: block;
+  height: 100%;
+  background: var(--board, var(--ink));
+}
+
+.load-queued .load-bar {
+  border-style: dashed;
+}
+
+.load-status {
+  grid-area: status;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.load-note {
+  margin-top: 10px;
+  font-size: 11px;
+}
+
 /* A scenario is on show in place of the panel. */
 .banner {
   position: absolute;
