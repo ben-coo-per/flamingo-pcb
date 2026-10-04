@@ -8,6 +8,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { StartedServer } from '../src/http.js';
 import type { PanelView } from '../src/panel/session.js';
+import type { PanelLoading } from '@flamingo/panel';
 import { startPanelServer, writeBoards } from './panel-helpers.js';
 
 interface Msg {
@@ -15,6 +16,7 @@ interface Msg {
   view?: PanelView;
   board?: { name: string };
   result?: { ok: boolean; error?: string; created?: string[] };
+  loading?: PanelLoading | null;
 }
 
 function queue(ws: WebSocket): { next(): Promise<Msg>; until(pred: (m: Msg) => boolean): Promise<Msg> } {
@@ -118,6 +120,25 @@ describe('panel sync: MCP, HTTP and WebSocket act on one panel', () => {
     expect(seen.view!.geometry.instances[0]).toMatchObject({ id: 'M1', bbox: { minX: 10, minY: 7, maxX: 28, maxY: 19 } });
     expect(seen.view!.geometry.frame).toMatchObject({ width: 18, height: 12 + 2 * 2 + 2 * 5 });
     expect(seen.view!.quote.cost!.total).toBeGreaterThan(0);
+  });
+
+  it('reports the board checks a view waits on, then the view', async () => {
+    const { q } = await panelSocket();
+    await q.next();
+    await client.callTool({ name: 'panel_new', arguments: { name: 'combo' } });
+    await client.callTool({ name: 'panel_add_board', arguments: { path: 'mini.flamingo' } });
+    await client.callTool({ name: 'panel_add_instance', arguments: { board: 'M', x: 0, y: 0 } });
+    const first = await q.until((m) => m.type === 'loading' && m.loading !== null);
+    expect(first.loading!.boards).toEqual([expect.objectContaining({ key: 'M', name: expect.any(String), color: expect.stringMatching(/^#/) })]);
+    expect(first.loading!.startedAt).toBeGreaterThan(0);
+    await q.until((m) => m.type === 'loading' && m.loading === null);
+    const view = await q.until((m) => m.type === 'panel' && m.view!.panel.instances.length === 1);
+    expect(view.view!.sources[0]!.key).toBe('M');
+
+    // The result is kept: the same board on the next change runs no check.
+    await client.callTool({ name: 'panel_add_instance', arguments: { board: 'M', x: 40, y: 0 } });
+    const next = await q.until((m) => m.type === 'panel' || (m.type === 'loading' && m.loading !== null));
+    expect(next.type).toBe('panel');
   });
 
   it('a change made in the browser is what MCP reads next', async () => {
