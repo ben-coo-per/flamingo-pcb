@@ -398,7 +398,15 @@ interface ProjectJson {
   devices?: Record<string, { title?: string; attributes?: Record<string, string> }>;
 }
 
-const COPPER_LAYER: Record<number, 'F.Cu' | 'B.Cu'> = { 1: 'F.Cu', 2: 'B.Cu' };
+// Pro inner copper ids verified against a real 4-layer project (Random Together
+// v3.1, editor 2.2.x): LAYER 15 = "Inner1", 16 = "Inner2", and the LAYER_PHYS
+// stack lists them in order 1, 15, 16, 2 (top -> bottom).
+const COPPER_LAYER: Record<number, 'F.Cu' | 'B.Cu' | 'In1.Cu' | 'In2.Cu'> = {
+  1: 'F.Cu',
+  2: 'B.Cu',
+  15: 'In1.Cu',
+  16: 'In2.Cu',
+};
 const SILK_LAYER: Record<number, 'F.Silk' | 'B.Silk'> = { 3: 'F.Silk', 4: 'B.Silk' };
 
 /** Strip units/ohm glyphs EasyEDA leaves in values so the BOM Comment stays bare. */
@@ -445,10 +453,14 @@ export function importEpro(eproPath: string, opts: { pcbName?: string } = {}): E
   const polyRecs: Rec[] = [];
   const pourRecs: Rec[] = [];
   const regionRecs: Rec[] = [];
+  const fillRecs: Rec[] = [];
+  const ruleRecs: Rec[] = [];
+  // PCB-local (inline) footprint copies: HEAD {uuid:'<pcb>_<id>', source:'<library fp uuid>'}
+  const inlineFpSource = new Map<string, string>();
   const padRecs: Rec[] = [];
   const padNets: Rec[] = [];
   const netNames: string[] = [];
-  let physLayers = 0;
+  const physLayerIds = new Set<number>();
 
   for (const r of records) {
     switch (r[0]) {
@@ -476,6 +488,17 @@ export function importEpro(eproPath: string, opts: { pcbName?: string } = {}): E
       case 'REGION':
         regionRecs.push(r);
         break;
+      case 'FILL':
+        fillRecs.push(r);
+        break;
+      case 'RULE':
+        ruleRecs.push(r);
+        break;
+      case 'HEAD': {
+        const h = r[1] as { uuid?: string; source?: string } | undefined;
+        if (h?.uuid && h.source && h.uuid.includes('_')) inlineFpSource.set(h.uuid, h.source);
+        break;
+      }
       case 'PAD':
         padRecs.push(r);
         break;
@@ -486,19 +509,44 @@ export function importEpro(eproPath: string, opts: { pcbName?: string } = {}): E
         if (str(r[1])) netNames.push(str(r[1]));
         break;
       case 'LAYER_PHYS':
-        physLayers++;
+        physLayerIds.add(num(r[1]));
         break;
       default:
         break;
     }
   }
 
-  // Only 2-layer boards are supported so far: the Pro inner-copper layer ids
-  // haven't been verified against a real 4-layer project, and guessing wrong
-  // would silently drop inner routing. Tracks on unknown layers warn loudly.
-  const board = newBoard(pcbName || 'imported', 2);
+  // Copper count = physical-stack entries that are copper layers (1, 2, 15..).
+  // Only 2- and 4-layer boards have verified ids; 6-layer inner3/4 would need
+  // ids 17/18 confirmed first, so anything beyond 4 warns and drops to 4.
+  const copperIds = [...physLayerIds].filter((id) => COPPER_LAYER[id] !== undefined);
+  const copperLayers: 2 | 4 = copperIds.length > 2 ? 4 : 2;
+  const innerIds = [...physLayerIds].filter((id) => id >= 15 && id <= 20 && COPPER_LAYER[id] === undefined);
+  if (innerIds.length > 0) warn(`inner copper layer ids ${innerIds.join(', ')} are unverified — imported as 4-layer, copper on them is skipped`);
+  const board = newBoard(pcbName || 'imported', copperLayers);
   board.name = pcbName || 'imported';
-  void physLayers;
+
+  // -- design rules -> default net class ------------------------------------
+  // RULE [1]=kind [2]=name [3]=active(1) [4]=[unit, ...values]. Values are in
+  // canvas units (mil) regardless of the unit label. kind "3" = track width
+  // [min, preferred, max]; kind "1" = clearance matrix between object
+  // classes (first cell = track-track). The class clearance takes the matrix
+  // minimum so DRC flags only what EasyEDA's own rules would also flag; the
+  // JLC floor is still enforced by the board ruleset. Via size comes from the
+  // most common via actually placed (RULE "5" field order is unverified).
+  const cls = board.netClasses[0]!;
+  const activeRule = (kind: string): unknown[] | undefined =>
+    ruleRecs.find((r) => str(r[1]) === kind && num(r[3]) === 1)?.[4] as unknown[] | undefined;
+  const widthRule = activeRule('3');
+  if (widthRule && typeof widthRule[2] === 'number') cls.trackWidth = mm(widthRule[2]);
+  const clrRule = activeRule('1');
+  if (Array.isArray(clrRule?.[1])) {
+    const cells = (clrRule[1] as unknown[]).flat(2).filter((v): v is number => typeof v === 'number' && v > 0);
+    if (cells.length) {
+      cls.clearance = mm(Math.min(...cells));
+      warn(`net class "default": track ${cls.trackWidth} mm, clearance ${cls.clearance} mm (EasyEDA clearance matrix min; matrix max ${mm(Math.max(...cells))} mm)`);
+    }
+  }
 
   // -- board outline: POLY records on layer 11 ---------------------------
   const outlinePieces: PathSeg[] = [];
@@ -517,8 +565,16 @@ export function importEpro(eproPath: string, opts: { pcbName?: string } = {}): E
   const footprintFor = (fpUuid: string, lcsc: string): Footprint | null => {
     const cached = fpCache.get(fpUuid);
     if (cached) return { ...cached, lcsc: cached.lcsc || lcsc };
-    const raw = readEntry(`FOOTPRINT/${fpUuid}.efoo`);
-    if (!raw) return null;
+    let raw = readEntry(`FOOTPRINT/${fpUuid}.efoo`);
+    if (!raw) {
+      // Inline copy of a library footprint: fall back to the library source.
+      const src = inlineFpSource.get(fpUuid);
+      if (src) {
+        raw = readEntry(`FOOTPRINT/${src}.efoo`);
+        if (raw) fpUuid = src;
+      }
+      if (!raw) return null;
+    }
     const title = project.footprints?.[fpUuid]?.title ?? fpUuid;
     const fp = convertFootprint(title, lcsc, parseRecords(raw), (m) => warn(`footprint ${title}: ${m}`));
     fpCache.set(fpUuid, fp);
@@ -563,7 +619,12 @@ export function importEpro(eproPath: string, opts: { pcbName?: string } = {}): E
       lcsc,
       footprint: { ...footprint, lcsc },
       at: pt(num(r[4]), num(r[5])),
-      rotation: ((num(r[6]) % 360) + 360) % 360,
+      // Bottom-side parts: Pro mirrors the footprint across the X axis
+      // (y -> -y) before rotating; the engine mirrors across Y (x -> -x).
+      // The two differ by exactly 180°, so compensate here. Verified on a
+      // real board: every bottom pad landed on its own net's track ends only
+      // with this offset (without it, 0402 pads were swapped end-for-end).
+      rotation: (((num(r[6]) + (side === 'bottom' ? 180 : 0)) % 360) + 360) % 360,
       side,
       fields: {
         ...(value ? { value } : {}),
@@ -697,19 +758,26 @@ export function importEpro(eproPath: string, opts: { pcbName?: string } = {}): E
   }
 
   // -- pours -> zones: POUR [3]=net [4]=layer [8]=outline ------------------
-  for (const r of pourRecs) {
+  // FILL [3]=net [4]=layer [7]=outline is a solid copper region; imported as a
+  // zone too (it fills identically; the only loss is EasyEDA's no-clearance
+  // semantics, which a review should re-check).
+  const zoneRecs: Array<{ r: Rec; outlineIdx: number; label: string }> = [
+    ...pourRecs.map((r) => ({ r, outlineIdx: 8, label: `pour "${str(r[6])}"` })),
+    ...fillRecs.map((r) => ({ r, outlineIdx: 7, label: `fill ${str(r[1])} (${str(r[3])})` })),
+  ];
+  for (const { r, outlineIdx, label } of zoneRecs) {
     const layer = COPPER_LAYER[num(r[4])];
     if (!layer) {
-      warn(`pour "${str(r[6])}" on unsupported layer ${num(r[4])} — skipped`);
+      warn(`${label} on unsupported layer ${num(r[4])} — skipped`);
       continue;
     }
     const netName = str(r[3]);
     if (netName) ensureNet(netName);
-    const outline = Array.isArray(r[8]) ? (r[8] as unknown[]) : [];
+    const outline = Array.isArray(r[outlineIdx]) ? (r[outlineIdx] as unknown[]) : [];
     const ptsRaw = outline.length === 1 && Array.isArray(outline[0]) ? (outline[0] as unknown[]) : outline;
     const polygon = piecesToPolygon(walkPoly(ptsRaw, warn));
     if (polygon.length < 3) {
-      warn(`pour "${str(r[6])}" outline unparseable — skipped`);
+      warn(`${label} outline unparseable — skipped`);
       continue;
     }
     const zone: Zone = {
@@ -730,9 +798,10 @@ export function importEpro(eproPath: string, opts: { pcbName?: string } = {}): E
     const ptsRaw = outline.length === 1 && Array.isArray(outline[0]) ? (outline[0] as unknown[]) : outline;
     const polygon = piecesToPolygon(walkPoly(ptsRaw, warn));
     if (polygon.length < 3) continue;
+    const regionLayer = COPPER_LAYER[num(r[3])];
     const keepout: Keepout = {
       id: randomUUID(),
-      layers: 'all',
+      layers: regionLayer ? [regionLayer] : 'all',
       polygon,
       keepout: { copper: false, via: false, pour: true },
     };
@@ -740,6 +809,14 @@ export function importEpro(eproPath: string, opts: { pcbName?: string } = {}): E
     warn('REGION imported as pour-only keepout (EasyEDA rule-region semantics are richer — review it)');
   }
 
+  if (board.vias.length) {
+    const tally = new Map<string, number>();
+    for (const v of board.vias) tally.set(`${v.drill}/${v.diameter}`, (tally.get(`${v.drill}/${v.diameter}`) ?? 0) + 1);
+    const [top] = [...tally.entries()].sort((a, b) => b[1] - a[1])[0]!;
+    const [drill, dia] = top.split('/').map(Number);
+    board.netClasses[0]!.viaDrill = drill!;
+    board.netClasses[0]!.viaDiameter = dia!;
+  }
   board.nets = [...netByName.values()];
   normalizeImportedCopper(board, warn);
   return { board, warnings };

@@ -458,7 +458,15 @@ export function polyIntersects(a: Point[], b: Point[]): boolean {
   const ba = bboxOf(a);
   const bb = bboxOf(b);
   if (ba.minX > bb.maxX || bb.minX > ba.maxX || ba.minY > bb.maxY || bb.minY > ba.maxY) return false;
-  const result = polygonClipping.intersection([toRing(a)], [toRing(b)]);
+  let result: ReturnType<typeof polygonClipping.intersection>;
+  try {
+    result = polygonClipping.intersection([toRing(a)], [toRing(b)]);
+  } catch {
+    // polygon-clipping throws "Unable to complete output ring" on
+    // near-degenerate inputs (coincident/collinear edges at float noise, seen
+    // on imported EasyEDA pads). Fall back to a pure geometric overlap test.
+    return edgeToEdgeDistance(a, b) < 1e-6 || pointInPolygon(a[0], b) || pointInPolygon(b[0], a);
+  }
   let area = 0;
   for (const polygon of result) {
     for (let i = 0; i < polygon.length; i++) {
