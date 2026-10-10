@@ -324,6 +324,48 @@ function netOfPin(b: Board, pinRef: string): string {
 /** Clipper works in integers: 1e5/mm = 10nm resolution, well inside its 32-bit fast path. */
 const CLIPPER_SCALE = 1e5;
 
+function clipperPath(pts: Point[]): ClipperLib.Path {
+  const S = CLIPPER_SCALE;
+  return pts.map((p) => ({ X: Math.round(p.x * S), Y: Math.round(p.y * S) }));
+}
+
+/** PolyTree -> MultiPolygon, closing each ring (polygon-clipping convention). */
+function fromPolyTree(tree: ClipperLib.PolyTree): MultiPolygon {
+  const S = CLIPPER_SCALE;
+  const ring = (path: ClipperLib.Path): Ring => {
+    const pts = path.map((q): Pair => [q.X / S, q.Y / S]);
+    if (pts.length > 0) pts.push(pts[0]);
+    return pts;
+  };
+  return ClipperLib.JS.PolyTreeToExPolygons(tree).map((ex): Polygon => [ring(ex.outer), ...ex.holes.map(ring)]);
+}
+
+/**
+ * `base` minus the union of `obstacles`, in one Clipper pass. polygon-clipping's
+ * sweep line is O(n^2)-ish in operand count and took 100-200s on a routed
+ * board with ~6-9k tracks (measured 2026-10-08); Clipper does the same job in
+ * well under a second and never throws on near-coincident vertices. Clip rings
+ * are re-oriented (outer positive, holes negative) so NonZero filling unions
+ * overlapping obstacles instead of cancelling opposite-wound ones.
+ */
+function clipperDifference(base: MultiPolygon, obstacles: MultiPolygon[]): MultiPolygon {
+  const c = new ClipperLib.Clipper();
+  for (const poly of base) c.AddPaths(poly.map((r) => clipperPath(fromRing(r))), ClipperLib.PolyType.ptSubject, true);
+  for (const o of obstacles) {
+    for (const poly of o) {
+      poly.forEach((r, ri) => {
+        const path = clipperPath(fromRing(r));
+        if (path.length < 3) return;
+        if (ClipperLib.Clipper.Orientation(path) !== (ri === 0)) path.reverse();
+        c.AddPath(path, ClipperLib.PolyType.ptClip, true);
+      });
+    }
+  }
+  const tree = new ClipperLib.PolyTree();
+  c.Execute(ClipperLib.ClipType.ctDifference, tree, ClipperLib.PolyFillType.pftEvenOdd, ClipperLib.PolyFillType.pftNonZero);
+  return fromPolyTree(tree);
+}
+
 /**
  * Morphological opening (erode then dilate by `r`, round joins), clipped back
  * to `m` so it can only remove copper: drops every neck and sliver narrower
@@ -339,7 +381,7 @@ const CLIPPER_SCALE = 1e5;
 function openBy(m: MultiPolygon, r: number, sameNet: Point[][]): MultiPolygon {
   if (r <= 1e-9 || m.length === 0) return m;
   const S = CLIPPER_SCALE;
-  const toPath = (pts: Point[]): ClipperLib.Path => pts.map((p) => ({ X: Math.round(p.x * S), Y: Math.round(p.y * S) }));
+  const toPath = clipperPath;
   const paths: ClipperLib.Paths = m.flatMap((poly) => poly.map((ring) => toPath(fromRing(ring))));
   const merged: ClipperLib.Paths = [];
   const u = new ClipperLib.Clipper();
@@ -359,12 +401,7 @@ function openBy(m: MultiPolygon, r: number, sameNet: Point[][]): MultiPolygon {
   c.AddPaths(paths, ClipperLib.PolyType.ptClip, true);
   const tree = new ClipperLib.PolyTree();
   c.Execute(ClipperLib.ClipType.ctIntersection, tree, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftEvenOdd);
-  const ring = (path: ClipperLib.Path): Ring => {
-    const pts = path.map((q): Pair => [q.X / S, q.Y / S]);
-    if (pts.length > 0) pts.push(pts[0]);
-    return pts;
-  };
-  return ClipperLib.JS.PolyTreeToExPolygons(tree).map((ex): Polygon => [ring(ex.outer), ...ex.holes.map(ring)]);
+  return fromPolyTree(tree);
 }
 
 /**
@@ -444,6 +481,19 @@ export function fillZone(b: Board, zone: Zone): Point[][] {
     if (nearZone(k.polygon)) obstacles.push(bufferPolygon(k.polygon, clr));
   }
 
+  // Other-net zones on this layer that are SMALLER than this one are carved
+  // out, clearance-buffered: an island plane nested in a bigger plane (an
+  // EasyEDA solid FILL inside a POUR, a KiCad higher-priority zone) must not
+  // be poured over, or the gerbers short the two nets while each zone's own
+  // fill looks fine. ponytail: smaller-outline-wins is the whole priority
+  // model; equal-area overlaps are left for DRC's zone-zone clearance check.
+  const ownArea = Math.abs(signedArea(zone.polygon));
+  for (const z of b.zones) {
+    if (z.id === zone.id || z.layer !== zone.layer || z.net === zone.net) continue;
+    if (Math.abs(signedArea(z.polygon)) >= ownArea) continue;
+    if (nearZone(z.polygon)) obstacles.push(bufferPolygon(z.polygon, clr));
+  }
+
   // Every hole is an obstacle on every layer. Holes carry no net, so a pour
   // touching a plated annulus would bond it to whatever else touches it (a
   // VCC pour on F.Cu + GND pour on B.Cu over one plated hole = short), and a
@@ -461,8 +511,7 @@ export function fillZone(b: Board, zone: Zone): Point[][] {
     if (nearZone(shape[0][0].map(([x, y]) => ({ x, y })))) obstacles.push(shape);
   }
 
-  const carved: MultiPolygon =
-    obstacles.length > 0 ? robustClip('difference', base, ...obstacles) : base;
+  const carved: MultiPolygon = obstacles.length > 0 ? clipperDifference(base, obstacles) : base;
 
   // Same-net copper on this layer merges with the pour (see openBy).
   const sameNet: Point[][] = [];

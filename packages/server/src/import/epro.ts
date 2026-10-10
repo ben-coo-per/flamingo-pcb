@@ -25,9 +25,11 @@ import {
   padWorld,
   padCopperLayers,
   copperLayersOf,
+  componentTransformPoints,
   type Board,
   type ComponentInst,
   type Footprint,
+  type FootprintHole,
   type Keepout,
   type MountingHole,
   type Net,
@@ -302,9 +304,18 @@ function parseProPad(r: Rec, warn: (m: string) => void): Pad | null {
   return { number: str(r[5]), shape, at, rotation, size, ...(polygon ? { polygon } : {}), ...(drill ? { drill } : {}), layer };
 }
 
-function convertFootprint(name: string, lcsc: string, records: Rec[], warn: (m: string) => void): Footprint {
+/**
+ * Footprint plus the layer-11 outline polylines some connector footprints
+ * carry (a jack's edge notch). They are not part of the Flamingo footprint
+ * model; the importer splices them into the board outline and drops them.
+ */
+type ImportedFootprint = Footprint & { cutouts?: PathSeg[][] };
+
+function convertFootprint(name: string, lcsc: string, records: Rec[], warn: (m: string) => void): ImportedFootprint {
   const pads: Pad[] = [];
   const silk: SilkItem[] = [];
+  const holes: FootprintHole[] = [];
+  const cutouts: PathSeg[][] = [];
   const bodyXs: number[] = [];
   const bodyYs: number[] = [];
 
@@ -333,6 +344,24 @@ function convertFootprint(name: string, lcsc: string, records: Rec[], warn: (m: 
     // FILL points may be nested one level ([[...]]); flatten single wrapper
     const ptsRaw =
       ptsField.length === 1 && Array.isArray(ptsField[0]) ? (ptsField[0] as unknown[]) : (ptsField as unknown[]);
+    if (layer === 12) {
+      // Multi-Layer FILL/POLY inside a footprint is EasyEDA Pro's bare hole
+      // (locating peg / boss, NPTH). Verified on a real board: 14 such circles
+      // were exactly the 14 NPTH drills JLC produced; nothing else sat on 12.
+      for (const piece of walkPoly(ptsRaw, warn)) {
+        if (piece.kind === 'circle') {
+          holes.push({ at: piece.center, drill: Math.round(piece.radius * 2 * 1e4) / 1e4 });
+        } else {
+          warn(`non-round hole (slot?) on the multi-layer — skipped, add it with add_mounting_hole`);
+        }
+      }
+      continue;
+    }
+    if (layer === 11) {
+      const segs = walkPoly(ptsRaw, warn).flatMap((piece) => (piece.kind === 'seg' ? [piece.seg] : []));
+      if (segs.length) cutouts.push(segs);
+      continue;
+    }
     if (FP_SILK_LAYERS.has(layer) && type === 'POLY') {
       const width = mm(num(r[5])) || 0.15;
       for (const piece of walkPoly(ptsRaw, warn)) {
@@ -380,7 +409,74 @@ function convertFootprint(name: string, lcsc: string, records: Rec[], warn: (m: 
     ];
   }
 
-  return { name, lcsc, pads, silk, courtyard };
+  return { name, lcsc, pads, silk, courtyard, ...(holes.length ? { holes } : {}), ...(cutouts.length ? { cutouts } : {}) };
+}
+
+/** World-space copy of a footprint-local path (bottom side mirrors, so arcs flip direction). */
+function cutoutToWorld(inst: ComponentInst, segs: PathSeg[]): PathSeg[] {
+  return segs.map((seg) => {
+    if (seg.type === 'arc') {
+      const [start, end, center] = componentTransformPoints(inst, [seg.start, seg.end, seg.center]) as [Point, Point, Point];
+      return { type: 'arc', start, end, center, cw: inst.side === 'bottom' ? !seg.cw : seg.cw };
+    }
+    const [start, end] = componentTransformPoints(inst, [seg.start, seg.end]) as [Point, Point];
+    return { type: 'line', start, end };
+  });
+}
+
+function reverseSeg(seg: PathSeg): PathSeg {
+  return seg.type === 'arc'
+    ? { type: 'arc', start: seg.end, end: seg.start, center: seg.center, cw: !seg.cw }
+    : { type: 'line', start: seg.end, end: seg.start };
+}
+
+/**
+ * How far a notch mouth may sit from the outline edge and still be snapped
+ * onto it. EasyEDA unions every layer-11 shape, so a notch drawn a hair
+ * short of (or past) the edge is still a clean cutout there; observed 0.087
+ * mm short on a real jack footprint.
+ */
+const CUTOUT_EDGE_TOL = 0.5;
+
+/**
+ * Splice an open polyline whose two ends sit on (or near) one straight
+ * outline edge into that edge (a connector notch). EasyEDA merges every
+ * layer-11 shape into the board shape; Flamingo keeps one closed path, so the
+ * edge is cut and the polyline inserted between the halves, its straight mouth
+ * segments snapped onto the edge. Returns false if no edge hosts both ends
+ * (closed internal cutout, or a notch spanning a corner).
+ */
+function spliceCutout(outline: PathSeg[], polyline: PathSeg[]): boolean {
+  const p0 = polyline[0]!.start;
+  const pn = polyline[polyline.length - 1]!.end;
+  const dist = (p: Point, q: Point): number => Math.hypot(p.x - q.x, p.y - q.y);
+  for (let i = 0; i < outline.length; i++) {
+    const edge = outline[i]!;
+    if (edge.type !== 'line') continue;
+    const a = pointSegDist(p0, edge.start, edge.end);
+    const b = pointSegDist(pn, edge.start, edge.end);
+    if (a.d > CUTOUT_EDGE_TOL || b.d > CUTOUT_EDGE_TOL) continue;
+    const forward = a.u <= b.u;
+    const chain = forward ? [...polyline] : polyline.map(reverseSeg).reverse();
+    const [footFirst, footLast] = forward ? [a.foot, b.foot] : [b.foot, a.foot];
+    // Snap the mouth onto the edge. Only a straight mouth can move; an arc
+    // would distort, so it must already be on the edge.
+    const head = chain[0]!;
+    if (head.type === 'line') chain[0] = { type: 'line', start: footFirst, end: head.end };
+    else if (dist(head.start, footFirst) > 0.05) continue;
+    const tail = chain[chain.length - 1]!;
+    if (tail.type === 'line') chain[chain.length - 1] = { type: 'line', start: tail.start, end: footLast };
+    else if (dist(tail.end, footLast) > 0.05) continue;
+    const first = chain[0]!.start;
+    const last = chain[chain.length - 1]!.end;
+    const spliced: PathSeg[] = [];
+    if (dist(edge.start, first) > 1e-6) spliced.push({ type: 'line', start: edge.start, end: first });
+    spliced.push(...chain);
+    if (dist(last, edge.end) > 1e-6) spliced.push({ type: 'line', start: last, end: edge.end });
+    outline.splice(i, 1, ...spliced);
+    return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -459,6 +555,7 @@ export function importEpro(eproPath: string, opts: { pcbName?: string } = {}): E
   const inlineFpSource = new Map<string, string>();
   const padRecs: Rec[] = [];
   const padNets: Rec[] = [];
+  const stringRecs: Rec[] = [];
   const netNames: string[] = [];
   const physLayerIds = new Set<number>();
 
@@ -504,6 +601,9 @@ export function importEpro(eproPath: string, opts: { pcbName?: string } = {}): E
         break;
       case 'PAD_NET':
         padNets.push(r);
+        break;
+      case 'STRING':
+        stringRecs.push(r);
         break;
       case 'NET':
         if (str(r[1])) netNames.push(str(r[1]));
@@ -561,8 +661,8 @@ export function importEpro(eproPath: string, opts: { pcbName?: string } = {}): E
   board.outline = outlinePieces;
 
   // -- footprints (lazy, one parse per uuid) ------------------------------
-  const fpCache = new Map<string, Footprint>();
-  const footprintFor = (fpUuid: string, lcsc: string): Footprint | null => {
+  const fpCache = new Map<string, ImportedFootprint>();
+  const footprintFor = (fpUuid: string, lcsc: string): ImportedFootprint | null => {
     const cached = fpCache.get(fpUuid);
     if (cached) return { ...cached, lcsc: cached.lcsc || lcsc };
     let raw = readEntry(`FOOTPRINT/${fpUuid}.efoo`);
@@ -606,11 +706,12 @@ export function importEpro(eproPath: string, opts: { pcbName?: string } = {}): E
     const dAttrs = device?.attributes ?? {};
     const lcsc = dAttrs['Supplier Part'] ?? '';
     const fpUuid = str(attrs.get('Footprint')?.[8]);
-    const footprint = fpUuid ? footprintFor(fpUuid, lcsc) : null;
-    if (!footprint) {
+    const imported = fpUuid ? footprintFor(fpUuid, lcsc) : null;
+    if (!imported) {
       warn(`component ${refdes}: footprint ${fpUuid || '(none)'} missing from archive — SKIPPED`);
       continue;
     }
+    const { cutouts, ...footprint } = imported;
 
     const side: ComponentInst['side'] = num(r[3]) === 2 ? 'bottom' : 'top';
     const value = bareValue(dAttrs['Value'] ?? device?.title ?? '');
@@ -634,6 +735,11 @@ export function importEpro(eproPath: string, opts: { pcbName?: string } = {}): E
       },
     };
     board.components.push(inst);
+    for (const cut of cutouts ?? []) {
+      if (!spliceCutout(board.outline, cutoutToWorld(inst, cut))) {
+        warn(`component ${refdes}: footprint outline cutout could not be merged into the board outline (not an open notch on one straight edge) — add it with set_board_outline`);
+      }
+    }
   }
 
   // -- nets ---------------------------------------------------------------
@@ -726,6 +832,7 @@ export function importEpro(eproPath: string, opts: { pcbName?: string } = {}): E
   }
 
   // -- standalone pads: mounting holes and stitching vias ------------------
+  let padsAsVias = 0;
   for (const r of padRecs) {
     const pad = parseProPad(r, warn);
     if (!pad) continue;
@@ -744,6 +851,7 @@ export function importEpro(eproPath: string, opts: { pcbName?: string } = {}): E
           warn(`mounting hole at (${pad.at.x}, ${pad.at.y}) was tied to net ${netName} — Flamingo holes carry no net`);
       } else {
         if (netName) ensureNet(netName);
+        padsAsVias++;
         board.vias.push({
           id: randomUUID(),
           at: pad.at,
@@ -752,10 +860,51 @@ export function importEpro(eproPath: string, opts: { pcbName?: string } = {}): E
           net: netName,
         });
       }
+    } else if (!pad.drill) {
+      warn(`free SMD pad "${pad.number}" at (${pad.at.x}, ${pad.at.y}) on ${pad.layer} (fiducial?) — Flamingo has no free-pad primitive, so it is NOT in the output; add one by hand if the assembler needs it`);
     } else {
-      warn(`free pad "${pad.number}" at (${pad.at.x}, ${pad.at.y}) is not a simple hole — skipped`);
+      warn(`free slotted pad "${pad.number}" at (${pad.at.x}, ${pad.at.y}) — skipped, add it with add_mounting_hole(slotLength)`);
     }
   }
+  if (padsAsVias) warn(`${padsAsVias} plated free pad(s) under 1.5 mm imported as vias — they will be solder-mask tented like every via (EasyEDA left them open)`);
+
+  // -- free text: STRING [3]=layer [4]=x [5]=y [6]=text [7]=font [8]=size [9]=stroke [13]=rotation
+  // (field order verified on one record.) The anchor is the baseline start of
+  // the text; bottom-side text is given in the bottom view (x-mirrored), which
+  // is also Flamingo's B.Silk convention, so rotation passes through unchanged.
+  // Flamingo centres text on `at`, so offset by half the run and half the glyph
+  // height. ponytail: metrics measured off one JLC gerber of EasyEDA's default
+  // font (advance 0.633 x size per char, cap height 0.8 x size); landed within
+  // 0.05 mm there. Tune if another board's label drifts.
+  let skippedStrings = 0;
+  for (const r of stringRecs) {
+    const layer = SILK_LAYER[num(r[3])];
+    const text = str(r[6]);
+    if (!layer || !text) {
+      skippedStrings++;
+      continue;
+    }
+    const size = mm(num(r[8]));
+    const stroke = mm(num(r[9]));
+    const rotation = ((num(r[13]) % 360) + 360) % 360;
+    const a = (rotation * Math.PI) / 180;
+    const m = layer === 'B.Silk' ? -1 : 1;
+    const run = { x: m * Math.cos(a), y: Math.sin(a) };
+    const up = { x: -m * Math.sin(a), y: Math.cos(a) };
+    const half = (0.633 * size * text.length) / 2;
+    const rise = (0.8 * size + stroke) / 2;
+    const anchor = pt(num(r[4]), num(r[5]));
+    const round4 = (v: number): number => Math.round(v * 1e4) / 1e4;
+    board.silk.push({
+      id: randomUUID(),
+      layer,
+      at: { x: round4(anchor.x + run.x * half + up.x * rise), y: round4(anchor.y + run.y * half + up.y * rise) },
+      text,
+      height: round4(0.8 * size),
+      rotation,
+    });
+  }
+  if (skippedStrings) warn(`${skippedStrings} STRING record(s) on non-silk layers (document/assembly text) — skipped`);
 
   // -- pours -> zones: POUR [3]=net [4]=layer [8]=outline ------------------
   // FILL [3]=net [4]=layer [7]=outline is a solid copper region; imported as a
@@ -957,7 +1106,9 @@ function normalizeImportedCopper(board: Board, warn: (m: string) => void): void 
       contactPoints.push({ at: t.seg.start, layers: [t.layer], width: t.width });
       contactPoints.push({ at: t.seg.end, layers: [t.layer], width: t.width });
     }
-    for (const v of vias) contactPoints.push({ at: v.at, layers: [...cu], width: 0.25 });
+    // Real annulus, not a nominal width: a via whose ring overlaps a pad corner
+    // is connected copper in EasyEDA (observed: U236.5 <-> 3V3 via, 0.61 mm).
+    for (const v of vias) contactPoints.push({ at: v.at, layers: [...cu], width: v.diameter });
 
     for (const pad of pads) {
       const cos = Math.cos((-pad.rot * Math.PI) / 180);

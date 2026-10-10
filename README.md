@@ -171,3 +171,5 @@ tracespace-validates every Gerber.
 
 ## License
 
+
+MIT — see [LICENSE](LICENSE).

@@ -282,62 +282,27 @@ describe('fillZone', () => {
     expect(offGrid).toEqual(onGrid);
   });
 
-  it('recovers via the snap retry when the clipper throws once (SweepLine failure)', () => {
-    // No board outline so the only polygonClipping.difference call is the one
-    // inside robustClip's difference for the obstacles subtraction (the
-    // outline-inset uses a separate difference we don't want to trip). A
-    // different-net track gives us obstacles.length > 0.
+  it('carves overlapping obstacles regardless of ring winding (Clipper NonZero)', () => {
+    // Two different-net tracks sharing a corridor: expandTrack emits each
+    // capsule with its own winding, and overlapping opposite-wound rings
+    // would cancel under NonZero filling if clipperDifference did not
+    // re-orient them. Both corridors must be excluded.
     let b = baseBoard(false);
-    b = apply(b, {
-      op: 'addTrack',
-      track: {
-        layer: 'F.Cu',
-        width: 0.5,
-        net: 'SIG',
-        seg: { type: 'line', start: { x: 0, y: 5 }, end: { x: 10, y: 5 } },
-      },
-    });
-    // First difference call throws the real SweepLine failure; every later call
-    // (the 10µm snap retry) falls through to the genuine implementation.
-    const spy = vi
-      .spyOn(polygonClipping, 'difference')
-      .mockImplementationOnce(() => {
-        throw new Error('Unable to find segment … in SweepLine tree');
-      });
+    for (const [start, end] of [
+      [{ x: 0, y: 5 }, { x: 10, y: 5 }],
+      [{ x: 10, y: 5.2 }, { x: 0, y: 5.2 }],
+    ] as const) {
+      b = apply(b, { op: 'addTrack', track: { layer: 'F.Cu', width: 0.5, net: 'SIG', seg: { type: 'line', start, end } } });
+    }
+    const spy = vi.spyOn(polygonClipping, 'difference');
     const fill = fillZone(b, zoneOf(b));
-    expect(spy).toHaveBeenCalled();
-    // Snap-retry result matches the un-mocked happy path at the same samples:
-    expect(fill.length).toBeGreaterThan(0);
-    expect(inFill(fill, { x: 5, y: 5 })).toBe(false); // on the track centerline -> excluded
-    expect(inFill(fill, { x: 5, y: 5.5 })).toBe(false); // within the clearance band -> excluded
-    expect(inFill(fill, { x: 5, y: 7 })).toBe(true); // clear of the band -> filled
+    expect(spy).not.toHaveBeenCalled(); // the obstacle carve no longer runs through polygon-clipping
+    expect(inFill(fill, { x: 5, y: 5 })).toBe(false);
+    expect(inFill(fill, { x: 5, y: 5.1 })).toBe(false);
+    expect(inFill(fill, { x: 5, y: 7 })).toBe(true);
     expect(inFill(fill, { x: 5, y: 3 })).toBe(true);
-    // Winding-encoding invariant still holds: at least one CCW (+area) outer ring.
     const areas = fill.map((r) => signedArea(r));
     expect(areas.some((a) => a > 0)).toBe(true);
-  });
-
-  it('degrades to the unobstructed base when the clipper always throws (last resort)', () => {
-    // Same fixture, but every difference attempt (direct + 10µm + 20µm snap)
-    // throws, so robustClip's difference falls through to `return base`.
-    let b = baseBoard(false);
-    b = apply(b, {
-      op: 'addTrack',
-      track: {
-        layer: 'F.Cu',
-        width: 0.5,
-        net: 'SIG',
-        seg: { type: 'line', start: { x: 0, y: 5 }, end: { x: 10, y: 5 } },
-      },
-    });
-    vi.spyOn(polygonClipping, 'difference').mockImplementation(() => {
-      throw new Error('sweepline failure');
-    });
-    const fill = fillZone(b, zoneOf(b));
-    expect(fill.length).toBeGreaterThan(0);
-    // The track corridor is no longer subtracted: a point the happy path would
-    // exclude (on the track centerline) is now poured over. Deliberate degrade.
-    expect(inFill(fill, { x: 5, y: 5 })).toBe(true);
   });
 });
 
@@ -473,3 +438,28 @@ function signedArea(pts: Point[]): number {
   }
   return s / 2;
 }
+
+describe('fillZone - nested other-net zones', () => {
+  it('carves a smaller other-net zone (clearance-buffered) out of the bigger one, not vice versa', () => {
+    const b = baseBoard();
+    b.nets.push({ name: 'VCC', class: 'default', pins: [] });
+    const island: Zone = zoneOf(b, {
+      id: 'z2',
+      net: 'VCC',
+      polygon: [
+        { x: 4, y: 4 },
+        { x: 6, y: 4 },
+        { x: 6, y: 6 },
+        { x: 4, y: 6 },
+      ],
+    });
+    const plane = zoneOf(b);
+    b.zones.push(plane, island);
+    const gnd = fillZone(b, plane);
+    expect(inFill(gnd, { x: 5, y: 5 })).toBe(false); // under the island
+    expect(inFill(gnd, { x: 6.3, y: 5 })).toBe(false); // inside its 0.5 clearance band
+    expect(inFill(gnd, { x: 8, y: 5 })).toBe(true);
+    const vcc = fillZone(b, island);
+    expect(inFill(vcc, { x: 5, y: 5 })).toBe(true); // the island itself still fills
+  });
+});
