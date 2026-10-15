@@ -231,10 +231,9 @@ export function buildBoardGroup(board: Board): BoardGeometry {
     }
   });
 
-  const cutouts: Point[][] = [];
   const barrels: { at: Point; r: number }[] = [];
 
-  // Mounting holes / slots (board.holes) are cut through the WHOLE stack —
+  // Mounting holes / slots (board.holes) and pad drills are cut through the WHOLE stack —
   // substrate here, and the copper coats below (zone fills span the board and
   // would otherwise tent them shut). Kept separate so the copper loop can reuse
   // the same rings. `at` is the containment probe for which island to punch.
@@ -250,12 +249,12 @@ export function buildBoardGroup(board: Board): BoardGeometry {
       if (pad.drill) {
         const [at] = componentTransformPoints(c, [pad.at]);
         const rr = pad.drill.diameter / 2;
-        cutouts.push(circleRing(at, rr));
+        holeCuts.push({ ring: circleRing(at, rr), at });
         barrels.push({ at, r: rr + 0.15 });
       }
     }
   }
-  for (const ring of [...cutouts, ...holeCuts.map((h) => h.ring)]) {
+  for (const ring of holeCuts.map((h) => h.ring)) {
     const path = new THREE.Path(ring.map((p) => new THREE.Vector2(p.x, p.y)));
     path.closePath();
     shape.holes.push(path);
@@ -298,13 +297,15 @@ export function buildBoardGroup(board: Board): BoardGeometry {
     for (const pad of c.footprint.pads) {
       const ring = padOutline(c, pad);
       if (ring.length < 3) continue;
+      // Drilled pads get the drill punched out of the gold face so the hole reads open.
+      const drill = pad.drill ? [circleRing(componentTransformPoints(c, [pad.at])[0], pad.drill.diameter / 2)] : undefined;
       if (pad.layer === 'through') {
-        group.add(plate(ring, BOARD_T, 0.06, MAT_GOLD));
-        group.add(plate(ring, -0.06, 0.06, MAT_GOLD));
+        group.add(plate(ring, BOARD_T, 0.06, MAT_GOLD, drill));
+        group.add(plate(ring, -0.06, 0.06, MAT_GOLD, drill));
       } else {
         // A 'top' pad on a bottom-side component lands on the bottom face (XOR).
         const onTop = (pad.layer === 'top') !== (c.side === 'bottom');
-        group.add(plate(ring, onTop ? BOARD_T : -0.06, 0.06, MAT_GOLD));
+        group.add(plate(ring, onTop ? BOARD_T : -0.06, 0.06, MAT_GOLD, drill));
       }
     }
   }
