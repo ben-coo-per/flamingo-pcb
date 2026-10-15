@@ -44,6 +44,8 @@ export interface Pad {
   polygon?: Point[]; // when shape==='polygon', relative to `at`
   drill?: { diameter: number; slotLength?: number; plated: boolean };
   layer: 'top' | 'bottom' | 'through';
+  /** Through-hole pad that still gets stencil paste (paste-in-hole, e.g. USB-C shell legs reflowed on the SMT line). */
+  paste?: boolean;
 }
 
 export type SilkItem =
