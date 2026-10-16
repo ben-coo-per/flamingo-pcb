@@ -78,6 +78,13 @@ function focusedSession(): BoardSession | null {
   return (win && sessions.get(win.id)) ?? null;
 }
 
+/** Folder file dialogs start in: the focused board's project folder, else the last opened board's, else ~/Documents/Flamingo. */
+function dialogDir(): string {
+  const s = focusedSession() ?? [...sessions.values()].at(-1);
+  const fp = s?.doc.filePath ?? s?.filePath;
+  return fp ? dirname(fp) : join(app.getPath('documents'), 'Flamingo');
+}
+
 /**
  * Point the project's .mcp.json at this board's MCP endpoint so a Claude Code
  * session started in that folder connects to the right board automatically.
@@ -191,6 +198,7 @@ async function openBoard(filePath: string): Promise<void> {
 
 async function chooseAndOpen(): Promise<void> {
   const res = await dialog.showOpenDialog({
+    defaultPath: dialogDir(),
     filters: [{ name: 'Flamingo Board', extensions: ['flamingo'] }],
     properties: ['openFile'],
   });
@@ -200,7 +208,7 @@ async function chooseAndOpen(): Promise<void> {
 async function chooseAndCreate(): Promise<void> {
   const res = await dialog.showSaveDialog({
     title: 'New Board',
-    defaultPath: join(app.getPath('documents'), 'Flamingo', 'untitled.flamingo'),
+    defaultPath: join(dialogDir(), 'untitled.flamingo'),
     filters: [{ name: 'Flamingo Board', extensions: ['flamingo'] }],
   });
   if (!res.canceled && res.filePath) {
@@ -215,7 +223,7 @@ async function saveBoardAs(): Promise<void> {
   const { doc, win } = session;
   const res = await dialog.showSaveDialog(win, {
     title: 'Save Board As',
-    defaultPath: doc.filePath ?? join(app.getPath('documents'), 'Flamingo', 'untitled.flamingo'),
+    defaultPath: doc.filePath ?? join(dialogDir(), 'untitled.flamingo'),
     filters: [{ name: 'Flamingo Board', extensions: ['flamingo'] }],
   });
   if (res.canceled || !res.filePath) return;
