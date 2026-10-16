@@ -287,6 +287,7 @@ store.subscribe((state) => {
   if (!flipViewBtn) return;
   flipViewBtn.textContent = state.view.flipped ? 'Back' : 'Front';
   flipViewBtn.classList.toggle('flipped', state.view.flipped);
+  viewer3d.setFlipped(state.view.flipped);
 });
 
 (document.getElementById('v3d-components') as HTMLInputElement)?.addEventListener('change', (e) => {
@@ -377,6 +378,12 @@ window.addEventListener('keydown', (ev) => {
   if (ev.code === 'Escape') {
     // Escape always wins, even while typing in a tool-owned input (e.g. silk's inline text box).
     toolManager.setActive('select');
+    return;
+  }
+  if (ev.code === 'KeyF' && (ev.metaKey || ev.ctrlKey) && !ev.shiftKey && !ev.altKey) {
+    // Cmd/Ctrl+F focuses the header search box from anywhere, even another input.
+    ev.preventDefault();
+    (document.getElementById('search-input') as HTMLInputElement | null)?.focus();
     return;
   }
   if (isTypingTarget(ev)) return;
