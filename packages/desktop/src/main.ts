@@ -2,6 +2,7 @@ import { app, BrowserWindow, Menu, dialog, clipboard, shell } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import updater from 'electron-updater';
 import { newBoard } from '@flamingo/engine';
 import { Doc, startServer } from '@flamingo/server';
 import type { StartedServer } from '@flamingo/server';
@@ -241,9 +242,36 @@ async function saveBoardAs(): Promise<void> {
   win.setRepresentedFilename(p);
 }
 
+/** Sparkle-style auto-update via electron-updater against GitHub releases. Silent at launch; the menu item reports the result. */
+async function checkForUpdates(interactive: boolean): Promise<void> {
+  if (!app.isPackaged) return;
+  const { autoUpdater } = updater;
+  try {
+    const res = await autoUpdater.checkForUpdatesAndNotify();
+    if (interactive && !res?.isUpdateAvailable)
+      void dialog.showMessageBox({ message: `Flamingo ${app.getVersion()} is up to date.` });
+  } catch (err) {
+    if (interactive) dialog.showErrorBox('Update check failed', err instanceof Error ? err.message : String(err));
+  }
+}
+
 function buildMenu(): void {
   const template: Electron.MenuItemConstructorOptions[] = [
-    { role: 'appMenu' },
+    {
+      role: 'appMenu',
+      submenu: [
+        { role: 'about' },
+        { label: 'Check for Updates…', click: () => void checkForUpdates(true) },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
     {
       label: 'File',
       submenu: [
@@ -334,6 +362,7 @@ if (!gotLock) {
     pendingOpenPaths = [];
     await openAll(paths);
     if (sessions.size === 0) app.quit(); // nothing could open; error box already shown
+    void checkForUpdates(false);
   });
 
   app.on('activate', () => {
