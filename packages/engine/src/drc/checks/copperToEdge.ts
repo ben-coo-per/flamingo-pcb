@@ -5,7 +5,7 @@
  * check's job (see outline.ts).
  */
 import type { Board, PathSeg, Point } from '../../types.js';
-import { outlineToPolygon, segSegDistance } from '../../geometry.js';
+import { outlineToPolygon, pointInPolygon, segSegDistance } from '../../geometry.js';
 import { DRC_EPSILON } from '../rules.js';
 import type { RuleSet } from '../rules.js';
 import type { CopperItem, DrcViolation } from '../types.js';
@@ -41,6 +41,12 @@ export function check(b: Board, rules: RuleSet, items: CopperItem[]): DrcViolati
 
   const violations: DrcViolation[] = [];
   for (const item of items) {
+    if (item.kind === 'hole' && !item.plated) continue; // bare drill, no copper
+    // Copper lying (partly) off the board is trimmed away at fab: distance 0,
+    // not its boundary gap (a track 5mm outside would otherwise pass). An
+    // unfilled zone's raw outline is exempt -- the fill clips it to the board;
+    // pads are reported by 'outside-outline' already.
+    const off = item.kind !== 'pad' && (item.kind !== 'zone' || item.group) && item.polygon.some((p) => !pointInPolygon(p, outlinePoly));
     // For a decoded zone (outer+holes), every ring is a real copper boundary;
     // measure the nearest of them to the edge. A hole boundary is copper too
     // (copper wraps the knockout), so including holes can only surface a real
@@ -55,10 +61,14 @@ export function check(b: Board, rules: RuleSet, items: CopperItem[]): DrcViolati
         at = r.at;
       }
     }
+    if (off) {
+      d = 0;
+      at = item.polygon.find((p) => !pointInPolygon(p, outlinePoly))!;
+    }
     if (d < rules.copperToEdge - DRC_EPSILON) {
       violations.push({
         rule: 'copper-to-edge',
-        message: `${item.kind} ${item.ref} (net "${item.net}") on ${item.layer} is ${d.toFixed(2)}mm from the board edge, minimum is ${rules.copperToEdge.toFixed(2)}mm`,
+        message: `${item.kind} ${item.ref} (net "${item.net}") on ${item.layer} is ${off ? 'outside the board outline' : `${d.toFixed(2)}mm from the board edge`}, minimum is ${rules.copperToEdge.toFixed(2)}mm`,
         at,
         items: [item.ref],
       });

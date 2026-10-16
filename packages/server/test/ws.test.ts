@@ -57,6 +57,16 @@ describe('WebSocket API', () => {
     await started.close();
   });
 
+  it('rejects the WS upgrade from a non-localhost Origin (CSRF guard)', async () => {
+    const ws = new WebSocket(wsUrl, { origin: 'https://evil.example' });
+    const status = await new Promise<number | undefined>((res) => {
+      ws.once('unexpected-response', (_req, resp) => res(resp.statusCode));
+      ws.once('open', () => res(undefined));
+    });
+    expect(status).toBe(403);
+    // Rejected during the handshake -- there's no established socket to close.
+  });
+
   it('sends the current board on connect', async () => {
     const ws = new WebSocket(wsUrl);
     const queue = messageQueue(ws);

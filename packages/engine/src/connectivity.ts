@@ -4,18 +4,15 @@
  *
  * Per-net connectivity model: nodes are the net's pins (pad world anchors)
  * plus the net's tracks and vias, which act as glue but are never returned
- * as group members. Two nodes are unioned when they touch within EPSILON_MM
- * on a shared copper layer (see union rules below). `connectedGroups`
- * collapses this to groups of pin refs only.
- *
- * Epsilon: 0.01mm, "exact-ish" contact — no added tolerance for track width.
- * Freerouting output snaps track/via endpoints to pad centers, so a plain
- * distance-based epsilon is sufficient without also inflating by half the
- * track width.
+ * as group members. Two nodes are unioned when their copper touches on a
+ * shared layer: anchors within EPSILON_MM, a track end or via anywhere on a
+ * pad's outline, a track end inside a via's disk, or a track end / via on
+ * another track's body (T-junction). `connectedGroups` collapses this to
+ * groups of pin refs only.
  *
  * Zones: a same-net zone WITH a computed fill acts as glue — every node whose
- * anchor point lies inside the fill (even-odd over the winding-encoded rings)
- * on the zone's layer is unioned through it, matching the physical copper.
+ * anchor point lies inside the same fill island (outer minus its holes) on the
+ * zone's layer is unioned through it, matching the physical copper.
  * Unfilled zones contribute nothing, so consumers of the live (never-filled)
  * board — ratsnest, autoroute — are unaffected; only filled-board consumers
  * (the DRC unconnected-net check inside export/api-drc, screenshots) get the
@@ -23,8 +20,9 @@
  */
 
 import type { Board, Net, Point, Track, LayerId } from './types.js';
-import { padWorld, dist, pointInPolygon } from './geometry.js';
+import { padWorld, padOutline, dist, bboxOf, groupFillRings, pointInGroup, pointInPolygon, pointSegDistance, polyGroupOverlapArea } from './geometry.js';
 import { copperLayersOf, padCopperLayers } from './layers.js';
+import { RULESETS } from './drc/rules.js';
 
 const EPSILON_MM = 0.01;
 
@@ -105,6 +103,8 @@ interface PinNode {
   ref: string;
   at: Point;
   layers: LayerId[];
+  /** World pad outline: a track end or via landing anywhere on it connects. */
+  outline: Point[];
 }
 
 interface TrackEndNode {
@@ -191,13 +191,17 @@ export function netIslands(b: Board, net: Net): NetIsland[] {
     const padNumber = ref.slice(dot + 1);
     const comp = b.components.find((c) => c.refdes === refdes);
     if (!comp) throw new Error(`netIslands: unknown refdes "${refdes}" (in pin "${ref}")`);
-    const pad = comp.footprint.pads.find((p) => p.number === padNumber);
-    if (!pad) {
+    // A pad number can repeat (USB-C shell tabs, split exposed pads): every
+    // copy is the same pin, so each gets a node and they're unioned below.
+    const pads = comp.footprint.pads.filter((p) => p.number === padNumber);
+    if (pads.length === 0) {
       throw new Error(`netIslands: pad "${padNumber}" not found on "${refdes}" (pin "${ref}")`);
     }
-    const at = padWorld(comp, pad).at;
-    const layers = padCopperLayers(pad, comp.side, cu);
-    nodes.push({ kind: 'pin', ref, at, layers });
+    for (const pad of pads) {
+      const at = padWorld(comp, pad).at;
+      const layers = padCopperLayers(pad, comp.side, cu);
+      nodes.push({ kind: 'pin', ref, at, layers, outline: padOutline(comp, pad) });
+    }
   }
 
   const netTracks = b.tracks.filter((t) => t.net === net.name);
@@ -231,33 +235,69 @@ export function netIslands(b: Board, net: Net): NetIsland[] {
     return cu; // via joins any copper layer
   }
 
+  // Copper that physically touches is connected: coincident anchors, a track
+  // end or via anywhere on a pad, a track end inside a via's disk. Pins only
+  // join other copies of themselves (same ref), never another pin directly.
+  const onPad = (pin: PinNode, p: Point): boolean =>
+    dist(pin.at, p) <= EPSILON_MM || pointInPolygon(p, pin.outline);
+  const touches = (a: Node, c: Node): boolean => {
+    if (a.kind === 'pin' && c.kind === 'pin') return a.ref === c.ref;
+    if (a.kind === 'pin') return onPad(a, c.at);
+    if (c.kind === 'pin') return onPad(c, a.at);
+    const d = dist(a.at, c.at);
+    if (a.kind === 'via' && c.kind === 'trackEnd') return d <= Math.max(EPSILON_MM, netVias[a.viaIdx].diameter / 2);
+    if (c.kind === 'via' && a.kind === 'trackEnd') return d <= Math.max(EPSILON_MM, netVias[c.viaIdx].diameter / 2);
+    return d <= EPSILON_MM;
+  };
   for (let i = 0; i < nodes.length; i++) {
     for (let j = i + 1; j < nodes.length; j++) {
       const a = nodes[i];
       const bNode = nodes[j];
-      if (a.kind === 'pin' && bNode.kind === 'pin') continue; // pins never touch each other directly
-      if (dist(a.at, bNode.at) > EPSILON_MM) continue;
       if (!sharesLayer(layersOf(a), layersOf(bNode))) continue;
-      uf.union(i, j);
+      if (touches(a, bNode)) uf.union(i, j);
     }
   }
 
-  // Filled same-net pours are copper too: union every node whose anchor sits
-  // inside the fill on the zone's layer (see the header). Even-odd membership
-  // honors hole rings, so a node inside a clearance knockout does NOT join.
-  const inFill = (fill: Point[][], p: Point): boolean => {
-    let crossings = 0;
-    for (const ring of fill) if (pointInPolygon(p, ring)) crossings++;
-    return crossings % 2 === 1;
-  };
+  // T-junctions: a track end or via landing on another track's body (not
+  // its endpoint) is connected to that track.
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    if (n.kind === 'pin') continue;
+    for (let k = 0; k < netTracks.length; k++) {
+      const t = netTracks[k];
+      if (n.kind === 'trackEnd' && (n.trackIdx === k || n.layer !== t.layer)) continue;
+      if (pointSegDistance(n.at, t.seg) <= t.width / 2) uf.union(i, trackNodeIdx[k].startIdx);
+    }
+  }
+
+  // Filled same-net pours are copper too: union the nodes whose anchor sits
+  // inside the same fill island on the zone's layer (see the header). Each
+  // island is its own conductor -- a pour split in two by a track or keepout
+  // does NOT join its halves -- and a node inside a knockout joins nothing.
   for (const z of b.zones) {
     if (z.net !== net.name || !z.fill || z.fill.length === 0) continue;
-    let first = -1;
-    for (let i = 0; i < nodes.length; i++) {
-      if (!layersOf(nodes[i]).includes(z.layer)) continue;
-      if (!inFill(z.fill, nodes[i].at)) continue;
-      if (first === -1) first = i;
-      else uf.union(first, i);
+    // A pad joins when pour copper overlaps it by a real area -- at least a
+    // minimum-track-width square, i.e. no worse than a minimum track -- not
+    // only when the pour covers its centre: fine-pitch pads are fed from
+    // their tip, between neighbours' knockouts.
+    const minOverlap = RULESETS[b.rules].minTrackWidth ** 2;
+    for (const group of groupFillRings(z.fill)) {
+      const gb = bboxOf(group.outer);
+      let first = -1;
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        if (!layersOf(n).includes(z.layer)) continue;
+        let joined = pointInGroup(n.at, group);
+        if (!joined && n.kind === 'pin') {
+          const pb = bboxOf(n.outline);
+          joined =
+            pb.minX <= gb.maxX && pb.maxX >= gb.minX && pb.minY <= gb.maxY && pb.maxY >= gb.minY &&
+            polyGroupOverlapArea(n.outline, group) >= minOverlap;
+        }
+        if (!joined) continue;
+        if (first === -1) first = i;
+        else uf.union(first, i);
+      }
     }
   }
 
@@ -274,7 +314,7 @@ export function netIslands(b: Board, net: Net): NetIsland[] {
     const node = nodes[i];
     const island = islandFor(uf.find(i));
     if (node.kind === 'pin') {
-      island.pins.push(node.ref);
+      if (!island.pins.includes(node.ref)) island.pins.push(node.ref);
     } else if (node.kind === 'trackEnd') {
       const id = netTracks[node.trackIdx].id;
       // Each track contributes two nodes; only record it once (on 'start').

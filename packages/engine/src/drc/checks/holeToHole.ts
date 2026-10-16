@@ -7,7 +7,7 @@
  * Gap = segment-to-segment distance - (d1+d2)/2, where d1/d2 are drill diameters.
  */
 import type { Board, PathSeg, Point } from '../../types.js';
-import { padWorld, segSegDistance, holeSlotCenterline, allHoles } from '../../geometry.js';
+import { padDrillCenterline, segSegDistance, holeSlotCenterline, allHoles } from '../../geometry.js';
 import { DRC_EPSILON } from '../rules.js';
 import type { RuleSet } from '../rules.js';
 import type { DrcViolation } from '../types.js';
@@ -35,8 +35,8 @@ export function check(b: Board, rules: RuleSet): DrcViolation[] {
   for (const c of b.components) {
     for (const pad of c.footprint.pads) {
       if (!pad.drill) continue;
-      const at = padWorld(c, pad).at;
-      drilled.push({ ref: `${c.refdes}.${pad.number}`, start: at, end: at, d: pad.drill.diameter });
+      const { start, end } = padDrillCenterline(c, pad);
+      drilled.push({ ref: `${c.refdes}.${pad.number}`, start, end, d: pad.drill.diameter });
     }
   }
 

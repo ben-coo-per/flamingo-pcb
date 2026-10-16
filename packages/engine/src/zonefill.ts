@@ -34,9 +34,10 @@
  */
 
 import polygonClipping from 'polygon-clipping';
+import ClipperLib from 'clipper-lib';
 import type { MultiPolygon, Polygon, Ring, Pair } from 'polygon-clipping';
 import type { Board, Point, Zone } from './types.js';
-import { expandTrack, padOutline, outlineToPolygon, isSlot, holeSlotCenterline, capsulePolygon, allHoles } from './geometry.js';
+import { bboxOf, expandTrack, padOutline, outlineToPolygon, isSlot, holeSlotCenterline, capsulePolygon, allHoles } from './geometry.js';
 import { copperLayersOf, padCopperLayers } from './layers.js';
 
 // ---------------------------------------------------------------------------
@@ -212,6 +213,9 @@ function runClip(op: ClipOp, geoms: MultiPolygon[]): MultiPolygon {
  *     unconstrained area. Conservative in the same direction as the
  *     difference fallback -- downstream DRC still gates the result.
  */
+/** Worst-case vertex movement from robustClip's grid snap (0.01mm grid, rounded up). */
+const SNAP_MARGIN = 0.01;
+
 function robustClip(op: ClipOp, ...geoms: MultiPolygon[]): MultiPolygon {
   for (const grid of [0.01, 0.02]) {
     try {
@@ -219,14 +223,10 @@ function robustClip(op: ClipOp, ...geoms: MultiPolygon[]): MultiPolygon {
         op,
         geoms.map((g) => snapMulti(g, grid)),
       );
-    } catch (e) {
-      if (process.env.FLAMINGO_CLIP_DEBUG)
-        console.error(`[clipdebug] ${op} threw at grid ${grid}: ${(e as Error).message} (operands: ${geoms.length})`);
+    } catch {
       // escalate to the coarser grid
     }
   }
-  if (process.env.FLAMINGO_CLIP_DEBUG)
-    console.error(`[clipdebug] ${op} FALLBACK reached (operands: ${geoms.length})`);
   switch (op) {
     case 'difference': {
       // A single degenerate operand (e.g. two buffered obstacles exactly
@@ -252,8 +252,6 @@ function robustClip(op: ClipOp, ...geoms: MultiPolygon[]): MultiPolygon {
           }
         }
         if (!done) {
-          if (process.env.FLAMINGO_CLIP_DEBUG)
-            console.error(`[clipdebug] difference subtrahend #${idx} unclippable; substituting its bbox`);
           const bb = multiBBox(g);
           if (bb) {
             try {
@@ -263,8 +261,6 @@ function robustClip(op: ClipOp, ...geoms: MultiPolygon[]): MultiPolygon {
               // truly stuck: skip this subtrahend, DRC still gates the result
             }
           }
-          if (!done && process.env.FLAMINGO_CLIP_DEBUG)
-            console.error(`[clipdebug] difference SKIPPED subtrahend #${idx}: ${JSON.stringify(g)}`);
         }
       }
       return acc;
@@ -325,23 +321,125 @@ function netOfPin(b: Board, pinRef: string): string {
 // Fill
 // ---------------------------------------------------------------------------
 
+/** Clipper works in integers: 1e5/mm = 10nm resolution, well inside its 32-bit fast path. */
+const CLIPPER_SCALE = 1e5;
+
+function clipperPath(pts: Point[]): ClipperLib.Path {
+  const S = CLIPPER_SCALE;
+  return pts.map((p) => ({ X: Math.round(p.x * S), Y: Math.round(p.y * S) }));
+}
+
+/** PolyTree -> MultiPolygon, closing each ring (polygon-clipping convention). */
+function fromPolyTree(tree: ClipperLib.PolyTree): MultiPolygon {
+  const S = CLIPPER_SCALE;
+  const ring = (path: ClipperLib.Path): Ring => {
+    const pts = path.map((q): Pair => [q.X / S, q.Y / S]);
+    if (pts.length > 0) pts.push(pts[0]);
+    return pts;
+  };
+  return ClipperLib.JS.PolyTreeToExPolygons(tree).map((ex): Polygon => [ring(ex.outer), ...ex.holes.map(ring)]);
+}
+
+/**
+ * `base` minus the union of `obstacles`, in one Clipper pass. polygon-clipping's
+ * sweep line is O(n^2)-ish in operand count and took 100-200s on a routed
+ * board with ~6-9k tracks (measured 2026-10-08); Clipper does the same job in
+ * well under a second and never throws on near-coincident vertices. Clip rings
+ * are re-oriented (outer positive, holes negative) so NonZero filling unions
+ * overlapping obstacles instead of cancelling opposite-wound ones.
+ */
+function clipperDifference(base: MultiPolygon, obstacles: MultiPolygon[]): MultiPolygon {
+  const c = new ClipperLib.Clipper();
+  for (const poly of base) c.AddPaths(poly.map((r) => clipperPath(fromRing(r))), ClipperLib.PolyType.ptSubject, true);
+  for (const o of obstacles) {
+    for (const poly of o) {
+      poly.forEach((r, ri) => {
+        const path = clipperPath(fromRing(r));
+        if (path.length < 3) return;
+        if (ClipperLib.Clipper.Orientation(path) !== (ri === 0)) path.reverse();
+        c.AddPath(path, ClipperLib.PolyType.ptClip, true);
+      });
+    }
+  }
+  const tree = new ClipperLib.PolyTree();
+  c.Execute(ClipperLib.ClipType.ctDifference, tree, ClipperLib.PolyFillType.pftEvenOdd, ClipperLib.PolyFillType.pftNonZero);
+  return fromPolyTree(tree);
+}
+
+/**
+ * Morphological opening (erode then dilate by `r`, round joins), clipped back
+ * to `m` so it can only remove copper: drops every neck and sliver narrower
+ * than 2r -- copper the fab can't etch reliably, which lifts and shorts --
+ * and leaves wider copper as-is. Area filtering alone keeps a 0.07 x 20mm
+ * strip between two tracks.
+ *
+ * Width is judged on the copper the fab actually sees: the pour UNION the
+ * same-net copper it merges with (`sameNet`). Pour lying on a same-net pad is
+ * often a thin strip between the neighbours' knockouts, but pad + strip is
+ * solid copper -- opening the pour alone would cut fine-pitch pads off.
+ */
+function openBy(m: MultiPolygon, r: number, sameNet: Point[][]): MultiPolygon {
+  if (r <= 1e-9 || m.length === 0) return m;
+  const S = CLIPPER_SCALE;
+  const toPath = clipperPath;
+  const paths: ClipperLib.Paths = m.flatMap((poly) => poly.map((ring) => toPath(fromRing(ring))));
+  const merged: ClipperLib.Paths = [];
+  const u = new ClipperLib.Clipper();
+  u.AddPaths(paths, ClipperLib.PolyType.ptSubject, true);
+  u.AddPaths(sameNet.map(toPath), ClipperLib.PolyType.ptClip, true);
+  u.Execute(ClipperLib.ClipType.ctUnion, merged, ClipperLib.PolyFillType.pftEvenOdd, ClipperLib.PolyFillType.pftNonZero);
+  const offset = (src: ClipperLib.Paths, delta: number): ClipperLib.Paths => {
+    const co = new ClipperLib.ClipperOffset(2, 0.01 * S); // 10µm arc tolerance: result is clipped to `m` anyway
+    co.AddPaths(src, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
+    const out: ClipperLib.Paths = [];
+    co.Execute(out, delta * S);
+    return out;
+  };
+  const opened = offset(offset(merged, -r), r);
+  const c = new ClipperLib.Clipper();
+  c.AddPaths(opened, ClipperLib.PolyType.ptSubject, true);
+  c.AddPaths(paths, ClipperLib.PolyType.ptClip, true);
+  const tree = new ClipperLib.PolyTree();
+  c.Execute(ClipperLib.ClipType.ctIntersection, tree, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftEvenOdd);
+  return fromPolyTree(tree);
+}
+
 /**
  * Compute the filled copper rings of `zone` against board `b`. See the file
  * header for the winding-encoding of the returned rings.
  */
 export function fillZone(b: Board, zone: Zone): Point[][] {
+  // robustClip snaps vertices to a 0.01mm grid (up to ~7µm of movement), so
+  // carve with that much extra clearance or the fill can land under the rule.
+  const clr = zone.clearance + SNAP_MARGIN;
   const zonePoly: Polygon = [toRing(zone.polygon)];
 
   // Base region: zone polygon, intersected with the outline inset by clearance.
   let base: MultiPolygon = [zonePoly];
   if (b.outline.length > 0) {
     const outlinePts = outlineToPolygon(b.outline);
-    const caps = edgeCapsules(outlinePts, zone.clearance);
+    const caps = edgeCapsules(outlinePts, clr);
     const band = robustClip('union', ...caps.map((c): MultiPolygon => [c]));
     const inset = robustClip('difference', [[toRing(outlinePts)]], band);
     base = robustClip('intersection', [zonePoly], inset);
   }
   if (base.length === 0) return [];
+
+  // Bbox prefilter: an obstacle can only carve the fill if its clearance-
+  // expanded shape reaches the zone polygon, so anything whose raw bbox lies
+  // outside the zone bbox grown by clearance is skipped before we pay for
+  // bufferPolygon (a full clip union) or add operands to the difference clip.
+  const zb = bboxOf(zone.polygon);
+  const reach = {
+    minX: zb.minX - clr,
+    minY: zb.minY - clr,
+    maxX: zb.maxX + clr,
+    maxY: zb.maxY + clr,
+  };
+  const nearZone = (pts: Point[]): boolean => {
+    const o = bboxOf(pts);
+    return o.minX <= reach.maxX && o.maxX >= reach.minX && o.minY <= reach.maxY && o.maxY >= reach.minY;
+  };
 
   // Obstacles: every other-net copper item on this layer, clearance-expanded.
   const obstacles: MultiPolygon[] = [];
@@ -349,13 +447,14 @@ export function fillZone(b: Board, zone: Zone): Point[][] {
   for (const t of b.tracks) {
     if (t.layer !== zone.layer || t.net === zone.net) continue;
     // Expand the capsule by widening the track by 2*clearance (cheap + exact).
-    const cap = expandTrack({ ...t, width: t.width + 2 * zone.clearance });
-    obstacles.push([[toRing(cap)]]);
+    const cap = expandTrack({ ...t, width: t.width + 2 * clr });
+    if (nearZone(cap)) obstacles.push([[toRing(cap)]]);
   }
 
   for (const v of b.vias) {
     if (v.net === zone.net) continue; // vias span every copper layer
-    obstacles.push([[toRing(disk(v.at, v.diameter / 2 + zone.clearance))]]);
+    const d = disk(v.at, v.diameter / 2 + clr);
+    if (nearZone(d)) obstacles.push([[toRing(d)]]);
   }
 
   const cu = copperLayersOf(b);
@@ -364,12 +463,13 @@ export function fillZone(b: Board, zone: Zone): Point[][] {
       if (!padCopperLayers(pad, c.side, cu).includes(zone.layer)) continue;
       const net = netOfPin(b, `${c.refdes}.${pad.number}`);
       if (net === zone.net) continue;
-      obstacles.push(bufferPolygon(padOutline(c, pad), zone.clearance));
+      const outline = padOutline(c, pad);
+      if (nearZone(outline)) obstacles.push(bufferPolygon(outline, clr));
     }
   }
 
   // Copper keepouts are a hard exclusion (no associated net to compare
-  // against) affecting this layer. Buffer by zone.clearance like every
+  // against) affecting this layer. Buffer by clr like every
   // other obstacle above for conservative, consistent behavior -- a pour
   // shouldn't hug a keepout boundary any closer than it hugs a track.
   // Via-only keepouts (keepout.copper === false, keepout.pour !== true) don't
@@ -378,21 +478,56 @@ export function fillZone(b: Board, zone: Zone): Point[][] {
   for (const k of b.keepouts) {
     if (!k.keepout.copper && !k.keepout.pour) continue;
     if (k.layers !== 'all' && !k.layers.includes(zone.layer)) continue;
-    obstacles.push(bufferPolygon(k.polygon, zone.clearance));
+    if (nearZone(k.polygon)) obstacles.push(bufferPolygon(k.polygon, clr));
   }
 
-  // Slotted mounting holes are milled cutouts (e.g. a slot to pass a display
-  // flex through the board): a pour must clear the slot's annulus footprint on
-  // every layer, buffered like any other obstacle. Round mounting holes keep
-  // the existing behavior (not subtracted from the pour).
+  // Other-net zones on this layer that are SMALLER than this one are carved
+  // out, clearance-buffered: an island plane nested in a bigger plane (an
+  // EasyEDA solid FILL inside a POUR, a KiCad higher-priority zone) must not
+  // be poured over, or the gerbers short the two nets while each zone's own
+  // fill looks fine. ponytail: smaller-outline-wins is the whole priority
+  // model; equal-area overlaps are left for DRC's zone-zone clearance check.
+  const ownArea = Math.abs(signedArea(zone.polygon));
+  for (const z of b.zones) {
+    if (z.id === zone.id || z.layer !== zone.layer || z.net === zone.net) continue;
+    if (Math.abs(signedArea(z.polygon)) >= ownArea) continue;
+    if (nearZone(z.polygon)) obstacles.push(bufferPolygon(z.polygon, clr));
+  }
+
+  // Every hole is an obstacle on every layer. Holes carry no net, so a pour
+  // touching a plated annulus would bond it to whatever else touches it (a
+  // VCC pour on F.Cu + GND pour on B.Cu over one plated hole = short), and a
+  // pour over an NPTH is drilled away. Slots clear their capsule, round holes
+  // a (circumscribed) disk.
   for (const h of allHoles(b)) {
-    if (!isSlot(h)) continue;
-    const { start, end } = holeSlotCenterline(h);
-    obstacles.push(bufferPolygon(capsulePolygon(start, end, h.padDiameter / 2), zone.clearance));
+    const r = h.padDiameter / 2;
+    let shape: MultiPolygon;
+    if (isSlot(h)) {
+      const { start, end } = holeSlotCenterline(h);
+      shape = bufferPolygon(capsulePolygon(start, end, r), clr);
+    } else {
+      shape = [[toRing(disk(h.at, r + clr))]];
+    }
+    if (nearZone(shape[0][0].map(([x, y]) => ({ x, y })))) obstacles.push(shape);
   }
 
-  const filled: MultiPolygon =
-    obstacles.length > 0 ? robustClip('difference', base, ...obstacles) : base;
+  const carved: MultiPolygon = obstacles.length > 0 ? clipperDifference(base, obstacles) : base;
+
+  // Same-net copper on this layer merges with the pour (see openBy).
+  const sameNet: Point[][] = [];
+  for (const t of b.tracks) {
+    if (t.layer === zone.layer && t.net === zone.net && nearZone(expandTrack(t))) sameNet.push(expandTrack(t));
+  }
+  for (const v of b.vias) if (v.net === zone.net) sameNet.push(disk(v.at, v.diameter / 2));
+  for (const c of b.components) {
+    for (const pad of c.footprint.pads) {
+      if (!padCopperLayers(pad, c.side, cu).includes(zone.layer)) continue;
+      if (netOfPin(b, `${c.refdes}.${pad.number}`) !== zone.net) continue;
+      const outline = padOutline(c, pad);
+      if (nearZone(outline)) sameNet.push(outline);
+    }
+  }
+  const filled = openBy(carved, zone.minWidth / 2, sameNet);
 
   // Emit rings, dropping islands whose net copper area < minWidth^2.
   const minArea = zone.minWidth * zone.minWidth;
@@ -411,7 +546,19 @@ export function fillZone(b: Board, zone: Zone): Point[][] {
   return rings;
 }
 
+/**
+ * Identity-keyed memo for fillAllZones. Safe because boards are handled
+ * immutably everywhere that matters: applyOp structuredClone()s the board on
+ * every op, so any content change yields a new object (= a cache miss), and
+ * callers treat the returned filled copy as read-only.
+ */
+const fillCache = new WeakMap<Board, Board>();
+
 /** Return a copy of `b` with every zone's `fill` populated by `fillZone`. */
 export function fillAllZones(b: Board): Board {
-  return { ...b, zones: b.zones.map((z) => ({ ...z, fill: fillZone(b, z) })) };
+  const hit = fillCache.get(b);
+  if (hit) return hit;
+  const filled = { ...b, zones: b.zones.map((z) => ({ ...z, fill: fillZone(b, z) })) };
+  fillCache.set(b, filled);
+  return filled;
 }

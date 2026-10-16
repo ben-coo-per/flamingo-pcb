@@ -19,6 +19,8 @@ import type { Board, ComponentInst, PathSeg, Point } from '@flamingo/engine';
 import {
   bboxOf,
   componentLabelPlacement,
+  componentLabelHidden,
+  componentSilkHidden,
   componentTransformPoints,
   fillAllZones,
   holeSlotCenterline,
@@ -90,7 +92,7 @@ const BOX_MATS: Record<string, THREE.Material> = {
  * Bare-pad footprints (test points, fiducials): a single pad with no silk has
  * no physical body — its gold pad is the whole part, so no box is drawn.
  */
-export function isBarePad(c: ComponentInst): boolean {
+function isBarePad(c: ComponentInst): boolean {
   return c.footprint.pads.length <= 1 && c.footprint.silk.length === 0;
 }
 
@@ -229,10 +231,9 @@ export function buildBoardGroup(board: Board): BoardGeometry {
     }
   });
 
-  const cutouts: Point[][] = [];
   const barrels: { at: Point; r: number }[] = [];
 
-  // Mounting holes / slots (board.holes) are cut through the WHOLE stack —
+  // Mounting holes / slots (board.holes) and pad drills are cut through the WHOLE stack —
   // substrate here, and the copper coats below (zone fills span the board and
   // would otherwise tent them shut). Kept separate so the copper loop can reuse
   // the same rings. `at` is the containment probe for which island to punch.
@@ -248,12 +249,12 @@ export function buildBoardGroup(board: Board): BoardGeometry {
       if (pad.drill) {
         const [at] = componentTransformPoints(c, [pad.at]);
         const rr = pad.drill.diameter / 2;
-        cutouts.push(circleRing(at, rr));
+        holeCuts.push({ ring: circleRing(at, rr), at });
         barrels.push({ at, r: rr + 0.15 });
       }
     }
   }
-  for (const ring of [...cutouts, ...holeCuts.map((h) => h.ring)]) {
+  for (const ring of holeCuts.map((h) => h.ring)) {
     const path = new THREE.Path(ring.map((p) => new THREE.Vector2(p.x, p.y)));
     path.closePath();
     shape.holes.push(path);
@@ -296,13 +297,15 @@ export function buildBoardGroup(board: Board): BoardGeometry {
     for (const pad of c.footprint.pads) {
       const ring = padOutline(c, pad);
       if (ring.length < 3) continue;
+      // Drilled pads get the drill punched out of the gold face so the hole reads open.
+      const drill = pad.drill ? [circleRing(componentTransformPoints(c, [pad.at])[0], pad.drill.diameter / 2)] : undefined;
       if (pad.layer === 'through') {
-        group.add(plate(ring, BOARD_T, 0.06, MAT_GOLD));
-        group.add(plate(ring, -0.06, 0.06, MAT_GOLD));
+        group.add(plate(ring, BOARD_T, 0.06, MAT_GOLD, drill));
+        group.add(plate(ring, -0.06, 0.06, MAT_GOLD, drill));
       } else {
         // A 'top' pad on a bottom-side component lands on the bottom face (XOR).
         const onTop = (pad.layer === 'top') !== (c.side === 'bottom');
-        group.add(plate(ring, onTop ? BOARD_T : -0.06, 0.06, MAT_GOLD));
+        group.add(plate(ring, onTop ? BOARD_T : -0.06, 0.06, MAT_GOLD, drill));
       }
     }
   }
@@ -352,7 +355,7 @@ function buildSilkGroup(board: Board): THREE.Group {
   for (const c of board.components) {
     const top = c.side !== 'bottom';
     const mirror = c.side === 'bottom';
-    for (const item of c.footprint.silk) {
+    for (const item of componentSilkHidden(c) ? [] : c.footprint.silk) {
       if (item.kind === 'line') {
         const [a, b] = componentTransformPoints(c, [item.start, item.end]);
         stroke(a, b, item.width, top);
@@ -372,6 +375,7 @@ function buildSilkGroup(board: Board): THREE.Group {
     // Refdes label — same pad-avoiding anchor as the Gerber legend / 2D
     // renderer (most footprints carry no text silk of their own, so without
     // this caps/resistors show no text at all in 3D).
+    if (componentLabelHidden(c)) continue;
     const lp = componentLabelPlacement(board, c);
     const label = buildSilkTextMesh(
       { text: c.refdes, height: lp.height, at: lp.at, rotationDeg: lp.rotation, side: top ? 'top' : 'bottom' },

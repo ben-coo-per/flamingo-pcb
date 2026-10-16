@@ -21,10 +21,12 @@ export interface DrcViolation {
  * without recomputing pad outlines / track strokes / via circles themselves.
  * Through pads and vias contribute one CopperItem per copper layer; zones
  * contribute one CopperItem per fill island (or the raw outline polygon if
- * unfilled).
+ * unfilled). Holes (mounting + footprint) contribute a net-less item per
+ * copper layer: the plated annulus, or the bare drill for NPTH (copper must
+ * clear it or the drill severs it). Net `''` never matches another net.
  */
 export interface CopperItem {
-  kind: 'track' | 'via' | 'pad' | 'zone';
+  kind: 'track' | 'via' | 'pad' | 'zone' | 'hole';
   net: string;
   ref: string;
   polygon: Point[];
@@ -38,4 +40,6 @@ export interface CopperItem {
    * `group.outer` so bbox/centroid/rendering consumers keep working unchanged.
    */
   group?: PolyGroup;
+  /** Hole items only: plated annulus (true) vs bare NPTH drill (false). */
+  plated?: boolean;
 }

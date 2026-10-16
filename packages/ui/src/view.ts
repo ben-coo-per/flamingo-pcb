@@ -11,10 +11,12 @@
 import type { Point } from '@flamingo/engine';
 import { MAX_SCALE, MIN_SCALE, type ViewTransform } from './state.js';
 
-// Exponential wheel zoom, proportional to the actual scroll delta: a notched
-// mouse wheel (|deltaY| ~ 100/notch) steps ~1.11x per notch, while trackpad
-// pixel deltas glide smoothly. Delta is clamped so momentum flings can't jump.
-const WHEEL_ZOOM_PER_PX = 0.001;
+// Wheel: plain two-finger scroll pans in every direction; pinch (browsers
+// deliver it as a wheel event with ctrlKey set) and ctrl/cmd+wheel zoom at the
+// cursor. Zoom is exponential in the delta: a notched mouse wheel (|deltaY| ~
+// 100/notch) steps ~1.35x per notch, pinch deltas glide smoothly. Delta is
+// clamped so momentum flings can't jump.
+const WHEEL_ZOOM_PER_PX = 0.003;
 const WHEEL_DELTA_CLAMP_PX = 400;
 const LINE_DELTA_PX = 16; // deltaMode===1 (Firefox line scrolling) -> px
 const FIT_MARGIN_PX = 32;
@@ -41,7 +43,7 @@ export function screenToWorld(view: ViewTransform, p: Point): Point {
 }
 
 /** Zoom by `factor`, keeping the world point currently under `screenPt` fixed on screen. */
-export function zoomAt(view: ViewTransform, screenPt: Point, factor: number): ViewTransform {
+function zoomAt(view: ViewTransform, screenPt: Point, factor: number): ViewTransform {
   const world = screenToWorld(view, screenPt);
   const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, view.scale * factor));
   const s = view.flipped ? -1 : 1;
@@ -136,8 +138,12 @@ export function attachViewControls(
 
   function onWheel(ev: WheelEvent): void {
     ev.preventDefault();
-    const rawPx = ev.deltaMode === 1 ? ev.deltaY * LINE_DELTA_PX : ev.deltaY;
-    const px = Math.max(-WHEEL_DELTA_CLAMP_PX, Math.min(WHEEL_DELTA_CLAMP_PX, rawPx));
+    const unit = ev.deltaMode === 1 ? LINE_DELTA_PX : 1;
+    if (!(ev.ctrlKey || ev.metaKey)) {
+      setView(panBy(getView(), -ev.deltaX * unit, -ev.deltaY * unit));
+      return;
+    }
+    const px = Math.max(-WHEEL_DELTA_CLAMP_PX, Math.min(WHEEL_DELTA_CLAMP_PX, ev.deltaY * unit));
     const factor = Math.exp(-px * WHEEL_ZOOM_PER_PX);
     setView(zoomAt(getView(), canvasPoint(ev), factor));
   }
