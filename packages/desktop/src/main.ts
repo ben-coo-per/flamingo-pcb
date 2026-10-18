@@ -58,7 +58,9 @@ function loadState(): AppState {
 }
 
 function saveState(): void {
-  const openBoards = [...sessions.values()].map((s) => s.doc.filePath ?? s.filePath);
+  const open = [...sessions.values()].map((s) => s.doc.filePath ?? s.filePath);
+  // Closing the last tab must not forget the set: 'activate' and the next launch reopen it.
+  const openBoards = open.length ? open : (loadState().openBoards ?? []);
   try {
     // On a fresh install the userData dir may not exist yet; writeFileSync won't create it.
     mkdirSync(app.getPath('userData'), { recursive: true });
@@ -316,12 +318,20 @@ function buildMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-/** Boards to (re)open at launch/activate: last session's tab set, else the legacy/default board. */
+/** Last session's tab set (legacy single-board field included), minus boards that vanished on disk. */
+function rememberedBoards(state: AppState): string[] {
+  const all = state.openBoards ?? (state.lastBoard ? [state.lastBoard] : []);
+  const missing = all.filter((p) => !existsSync(p));
+  if (missing.length) {
+    dialog.showErrorBox('Some boards could not be found', `They were open last time but have moved or been deleted:\n${missing.join('\n')}`);
+  }
+  return all.filter((p) => existsSync(p));
+}
+
+/** Boards to (re)open at launch/activate: last session's tab set, else the default board. */
 function boardsToRestore(state: AppState): string[] {
-  const remembered = (state.openBoards ?? []).filter((p) => existsSync(p));
-  if (remembered.length) return remembered;
-  if (state.lastBoard && existsSync(state.lastBoard)) return [state.lastBoard];
-  return [defaultBoardPath()];
+  const remembered = rememberedBoards(state);
+  return remembered.length ? remembered : [defaultBoardPath()];
 }
 
 async function openAll(paths: string[]): Promise<void> {
@@ -358,7 +368,8 @@ if (!gotLock) {
     buildMenu();
     const state = loadState();
     portByProject = state.ports ?? {};
-    const paths = pendingOpenPaths.length ? pendingOpenPaths : boardsToRestore(state);
+    // Launched by double-clicking a board: reopen last session's tabs too, then that board.
+    const paths = [...new Set(pendingOpenPaths.length ? [...rememberedBoards(state), ...pendingOpenPaths] : boardsToRestore(state))];
     pendingOpenPaths = [];
     await openAll(paths);
     if (sessions.size === 0) app.quit(); // nothing could open; error box already shown
