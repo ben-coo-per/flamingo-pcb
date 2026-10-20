@@ -244,5 +244,5 @@ export interface Board {
   silk: SilkText[];
   silkLines: SilkLine[];
   dimensions: Dimension[];
-  rules: 'jlcpcb-2l' | 'jlcpcb-4l' | 'jlcpcb-6l';
+  rules: 'jlcpcb-2l' | 'jlcpcb-4l' | 'jlcpcb-4l-adv' | 'jlcpcb-6l';
 }
