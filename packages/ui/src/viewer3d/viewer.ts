@@ -166,13 +166,14 @@ export function createViewer3D(canvas: HTMLCanvasElement, viewport: HTMLElement)
     } else if (ev.shiftKey) {
       // One screen pixel moves one world pixel at the target's depth.
       const perPx = (2 * offset.length() * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / canvas.clientHeight;
-      axis.setFromMatrixColumn(camera.matrix, 0).multiplyScalar(-dx * perPx);
+      axis.setFromMatrixColumn(camera.matrix, 0).multiplyScalar(dx * perPx);
       controls.target.add(axis);
-      axis.setFromMatrixColumn(camera.matrix, 1).multiplyScalar(dy * perPx);
+      axis.setFromMatrixColumn(camera.matrix, 1).multiplyScalar(-dy * perPx);
       controls.target.add(axis);
     } else {
-      spin.setFromAxisAngle(axis.setFromMatrixColumn(camera.matrix, 1), -dx * WHEEL_ROTATE_PER_PX);
-      tilt.setFromAxisAngle(axis.setFromMatrixColumn(camera.matrix, 0), -dy * WHEEL_ROTATE_PER_PX);
+      // Positive deltas swing the camera right/up, so the board turns with the fingers.
+      spin.setFromAxisAngle(axis.setFromMatrixColumn(camera.matrix, 1), dx * WHEEL_ROTATE_PER_PX);
+      tilt.setFromAxisAngle(axis.setFromMatrixColumn(camera.matrix, 0), dy * WHEEL_ROTATE_PER_PX);
       spin.multiply(tilt);
       offset.applyQuaternion(spin);
       camera.up.applyQuaternion(spin);
