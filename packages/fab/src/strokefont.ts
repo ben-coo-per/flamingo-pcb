@@ -7,9 +7,10 @@
  * y-up and the baseline at y=0, cap height at y=1. Each glyph is a list of
  * polylines (flat [x0,y0,x1,y1,...] arrays in glyph units).
  *
- * Coverage: 0-9 A-Z space - . + _ / . Unknown characters are skipped. This is a
- * legibility-adequate blocky font, not a typographic one -- fine for refdes and
- * short labels on a hobby board.
+ * Coverage: 0-9 A-Z space - . + _ / µ ( ) : , # % = ~ * < > ' " ! ?. Unknown
+ * characters render as '?' rather than vanishing. This is a legibility-adequate
+ * blocky font, not a typographic one -- fine for refdes and short labels on a
+ * hobby board.
  */
 
 import type { Point } from '@flamingo/engine';
@@ -61,8 +62,30 @@ const GLYPHS: Record<string, number[][]> = {
   'X': [[0, 0, 0.6, 1], [0, 1, 0.6, 0]],
   'Y': [[0, 1, 0.3, 0.5, 0.6, 1], [0.3, 0.5, 0.3, 0]],
   'Z': [[0, 1, 0.6, 1, 0, 0, 0.6, 0]],
+  'µ': [[0, 1, 0, 0.15, 0.2, 0, 0.45, 0.15, 0.45, 1], [0.45, 0.15, 0.45, -0.3]],
+  '(': [[0.4, 1, 0.2, 0.8, 0.15, 0.5, 0.2, 0.2, 0.4, 0]],
+  ')': [[0.2, 1, 0.4, 0.8, 0.45, 0.5, 0.4, 0.2, 0.2, 0]],
+  ':': [[0.25, 0.65, 0.35, 0.65, 0.35, 0.75, 0.25, 0.75, 0.25, 0.65], [0.25, 0.25, 0.35, 0.25, 0.35, 0.35, 0.25, 0.35, 0.25, 0.25]],
+  ',': [[0.3, 0.15, 0.25, 0.15, 0.2, -0.05]],
+  '#': [[0.15, 0, 0.15, 1], [0.45, 0, 0.45, 1], [0, 0.35, 0.6, 0.35], [0, 0.65, 0.6, 0.65]],
+  '%': [[0, 0, 0.6, 1], [0, 0.7, 0.15, 0.7, 0.15, 1, 0, 1, 0, 0.7], [0.45, 0, 0.6, 0, 0.6, 0.3, 0.45, 0.3, 0.45, 0]],
+  '=': [[0, 0.35, 0.6, 0.35], [0, 0.65, 0.6, 0.65]],
+  '~': [[0, 0.4, 0.15, 0.6, 0.3, 0.4, 0.45, 0.6, 0.6, 0.4]],
+  '*': [[0.3, 0.2, 0.3, 0.8], [0.05, 0.35, 0.55, 0.65], [0.55, 0.35, 0.05, 0.65]],
+  '<': [[0.5, 0.9, 0.1, 0.5, 0.5, 0.1]],
+  '>': [[0.1, 0.9, 0.5, 0.5, 0.1, 0.1]],
+  "'": [[0.3, 0.7, 0.3, 1]],
+  '"': [[0.15, 0.7, 0.15, 1], [0.45, 0.7, 0.45, 1]],
+  '!': [[0.3, 1, 0.3, 0.3], [0.25, 0, 0.35, 0, 0.35, 0.1, 0.25, 0.1, 0.25, 0]],
+  '?': [[0, 0.8, 0.2, 1, 0.5, 1, 0.6, 0.8, 0.6, 0.6, 0.3, 0.45, 0.3, 0.3], [0.25, 0, 0.35, 0, 0.35, 0.1, 0.25, 0.1, 0.25, 0]],
 };
 /* eslint-enable prettier/prettier */
+
+/** Uppercase a char, except the micro sign: 'µ'.toUpperCase() maps to Greek
+ * capital Mu ('Μ'), not itself, which would otherwise drop the glyph. */
+function upperChar(ch: string): string {
+  return ch === 'µ' ? ch : ch.toUpperCase();
+}
 
 /**
  * Stroke `text` as world-space polylines, centered on `at` (both axes, like the
@@ -77,15 +100,15 @@ export function strokeText(
   rotationDeg: number,
   mirror: boolean,
 ): Point[][] {
-  const upper = text.toUpperCase();
-  const width = upper.length > 0 ? upper.length * ADVANCE * height : 0;
+  const chars = [...text].map(upperChar);
+  const width = chars.length > 0 ? chars.length * ADVANCE * height : 0;
   const x0 = -width / 2;
   const y0 = -height / 2;
 
   const out: Point[][] = [];
   let cursor = 0;
-  for (const ch of upper) {
-    const glyph = GLYPHS[ch];
+  for (const ch of chars) {
+    const glyph = GLYPHS[ch] ?? GLYPHS['?'];
     if (glyph) {
       for (const stroke of glyph) {
         const poly: Point[] = [];

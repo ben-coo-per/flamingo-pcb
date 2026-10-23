@@ -77,10 +77,12 @@ describe('hit-testing skips hidden layers', () => {
   const crossing = { x: 0, y: 0 };
   const onlyIn2 = soloCopperLayer(allOn, copper, 'In2.Cu');
 
+  const zoneEdge = { x: 9, y: 0 };
+
   it('selects whichever track is at the crossing when all layers show', () => {
     expect(hitTest(board, crossing, 10)?.kind).toBe('track');
-    const kinds = hitEditTargets(board, crossing, 10, allOn).map((h) => (h.kind === 'track' ? h.id : h.kind));
-    expect(kinds).toEqual(['t-f', 't-in2', 'zone']);
+    expect(hitEditTargets(board, crossing, 10, allOn).map((h) => h.kind === 'track' && h.id)).toEqual(['t-f', 't-in2']);
+    expect(hitEditTargets(board, zoneEdge, 10, allOn)).toEqual([{ kind: 'zone', id: 'z1' }]);
   });
 
   it('cannot select, rip up or route from an F.Cu track while only In2.Cu shows', () => {
@@ -88,7 +90,8 @@ describe('hit-testing skips hidden layers', () => {
     expect(hitTrackOrVia(board, { x: 2, y: 0 }, 10, onlyIn2)).toBeNull();
     expect(hitTrackOrVia(board, { x: 0, y: 2 }, 10, onlyIn2)).toMatchObject({ id: 't-in2' });
     const targets = hitEditTargets(board, crossing, 10, onlyIn2);
-    expect(targets).toEqual([{ kind: 'track', id: 't-in2', net: 'B' }]); // no F.Cu track, no F.Cu zone
+    expect(targets).toEqual([{ kind: 'track', id: 't-in2', net: 'B' }]); // no F.Cu track
+    expect(hitEditTargets(board, zoneEdge, 10, onlyIn2)).toEqual([]); // no F.Cu zone either
     expect(hitEditTargets(board, { x: -3, y: -3 }, 10, onlyIn2)).toEqual([]); // silk is off while soloed
   });
 

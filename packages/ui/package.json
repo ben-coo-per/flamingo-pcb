@@ -1,7 +1,8 @@
 {
   "name": "@flamingo/ui",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.7.15",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "predev": "npm run build -w @flamingo/engine",

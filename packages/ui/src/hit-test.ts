@@ -187,11 +187,25 @@ export function hitEditTargets(board: Board, world: Point, scale: number, vis?: 
   for (const k of board.keepouts) {
     if (pointInPolygon(world, k.polygon)) hits.push({ kind: 'keepout', id: k.id });
   }
+  // Zones hit on their outline only. A pour is usually a board-sized
+  // rectangle, so containment would make every click on empty board select
+  // a pour -- and Delete then silently removes the plane (lost three pours on
+  // rt-v3.1, 2026-10-15).
   for (const z of board.zones) {
     if (!shown.zone(z.layer)) continue;
-    if (pointInPolygon(world, z.polygon)) hits.push({ kind: 'zone', id: z.id });
+    if (nearPolygonEdge(world, z.polygon, tolMm)) hits.push({ kind: 'zone', id: z.id });
   }
   return hits;
+}
+
+/** True when `p` is within `tol` of any edge of the polygon. */
+function nearPolygonEdge(p: Point, poly: Point[], tol: number): boolean {
+  for (let i = 0; i < poly.length; i++) {
+    const start = poly[i]!;
+    const end = poly[(i + 1) % poly.length]!;
+    if (pointSegDistance(p, { type: 'line', start, end }) < tol) return true;
+  }
+  return false;
 }
 
 /** True when two edit targets refer to the same board item. */

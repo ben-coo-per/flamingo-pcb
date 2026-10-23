@@ -630,3 +630,31 @@ describe('generateGerbers - demo board integration', () => {
     }
   });
 });
+
+describe('generateGerbers - zone island ordering', () => {
+  it('emits an island nested in another polygon\'s hole AFTER that hole (LPC clears earlier regions)', () => {
+    const b = newBoard('isl', 2);
+    const sq = (x0: number, y0: number, x1: number, y1: number, ccw: boolean): Point[] => {
+      const r = [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+      return ccw ? r : r.reverse();
+    };
+    // Pre-filled zone: island (small outer) listed FIRST, then the big outer with
+    // a hole that encloses the island -- the order zonefill may hand us.
+    b.zones.push({
+      id: 'z', layer: 'F.Cu', net: 'GND', polygon: sq(0, 0, 10, 10, true), clearance: 0.2, minWidth: 0.2,
+      thermal: { gap: 0.2, spokeWidth: 0.3 },
+      fill: [sq(4, 4, 6, 6, true), sq(0, 0, 10, 10, true), sq(3, 3, 7, 7, false)],
+    });
+    const gtl = generateGerbers(b).files.get('isl.GTL')!;
+    const regions = gtl.split('G36*').slice(1).map((s) => s.split('G37*')[0]);
+    const polarityBefore = (i: number): string => {
+      const head = gtl.split('G36*').slice(0, i + 1).join('G36*');
+      return head.lastIndexOf('%LPC*%') > head.lastIndexOf('%LPD*%') ? 'C' : 'D';
+    };
+    const kinds = regions.map((_, i) => polarityBefore(i));
+    // big outer (D), its hole (C), then the island (D) -- never island before hole
+    expect(kinds).toEqual(['D', 'C', 'D']);
+    expect(regions[2]).toContain('X4000000Y4000000');
+    assertGerberParses(gtl);
+  });
+});

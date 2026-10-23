@@ -19,7 +19,7 @@ import { hitTest } from './hit-test.js';
 import { createToolManager } from './tools/manager.js';
 import { snapPoint } from './tools/overlay-utils.js';
 import type { PointerEvt, ToolCtx } from './tools/tool.js';
-import { VERSION } from './version.js';
+import { version as VERSION } from '../package.json';
 import { createViewer3D } from './viewer3d/viewer.js';
 
 // Stamp the build version into the status bar (see index.html #status-version).
@@ -33,7 +33,8 @@ const viewportEl = document.getElementById('viewport') as HTMLElement;
 // Live sync -- set up first so `ctx.sendOp` exists before tools are created.
 // ---------------------------------------------------------------------------
 
-function onBoard(rawBoard: Board): void {
+function onBoard(rawBoard: Board, file?: string): void {
+  document.title = file ? `${file} — Flamingo` : 'Flamingo';
   const board = prepareBoard(rawBoard);
   const state = store.get();
   const ratsnestLines = ratsnest(board);
@@ -288,6 +289,7 @@ store.subscribe((state) => {
   if (!flipViewBtn) return;
   flipViewBtn.textContent = state.view.flipped ? 'Back' : 'Front';
   flipViewBtn.classList.toggle('flipped', state.view.flipped);
+  viewer3d.setFlipped(state.view.flipped);
 });
 
 (document.getElementById('v3d-components') as HTMLInputElement)?.addEventListener('change', (e) => {
@@ -378,6 +380,12 @@ window.addEventListener('keydown', (ev) => {
   if (ev.code === 'Escape') {
     // Escape always wins, even while typing in a tool-owned input (e.g. silk's inline text box).
     toolManager.setActive('select');
+    return;
+  }
+  if (ev.code === 'KeyF' && (ev.metaKey || ev.ctrlKey) && !ev.shiftKey && !ev.altKey) {
+    // Cmd/Ctrl+F focuses the header search box from anywhere, even another input.
+    ev.preventDefault();
+    (document.getElementById('search-input') as HTMLInputElement | null)?.focus();
     return;
   }
   if (isTypingTarget(ev)) return;

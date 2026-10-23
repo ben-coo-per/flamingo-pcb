@@ -44,6 +44,8 @@ export interface Pad {
   polygon?: Point[]; // when shape==='polygon', relative to `at`
   drill?: { diameter: number; slotLength?: number; plated: boolean };
   layer: 'top' | 'bottom' | 'through';
+  /** Through-hole pad that still gets stencil paste (paste-in-hole, e.g. USB-C shell legs reflowed on the SMT line). */
+  paste?: boolean;
 }
 
 export type SilkItem =
@@ -107,6 +109,23 @@ export interface ComponentInst {
     package?: string;
     basic?: boolean;
   };
+  /**
+   * Optional refdes silk label override. Absent = the board-aware automatic
+   * placement in labels.ts. `offset` pins the label's centre at
+   * `at + offset` (world-space mm, so the label rides along when the part
+   * moves; it never rotates — labels stay upright). `hidden` drops the label
+   * from the renderers, the Gerber legend, STEP and DRC's silk-over-pad
+   * check (JLCPCB assembly reads the CPL, not the legend).
+   */
+  label?: { offset?: Point; hidden?: boolean };
+  /**
+   * Optional footprint-silk override. `hidden` drops the footprint's own
+   * silk items (outline lines/arcs/text from the LCSC footprint) from the
+   * renderers, the Gerber legend, STEP and DRC's silk-over-pad check — for
+   * parts packed so tightly that their outline lands on a neighbour's pad.
+   * The refdes label is separate (`label`).
+   */
+  silk?: { hidden?: boolean };
 }
 
 export interface Net {

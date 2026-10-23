@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { newBoard, parseBoard } from '@flamingo/engine';
@@ -207,6 +207,32 @@ describe('Doc', () => {
 
       const after = readFileSync(filePath, 'utf8');
       expect(after).toBe(before);
+    });
+
+    it('an apply landing while a save is writing is not dropped by a later close()', async () => {
+      const doc = new Doc(newBoard('start', 2), filePath, DEBOUNCE_MS);
+      doc.apply(meta('A'));
+      const savePromise = doc.save(); // starts serializing/writing board 'A'
+      await Promise.resolve(); // let that write actually start before the next apply
+      doc.apply(meta('B')); // lands mid-write, re-marking the doc dirty
+      await savePromise; // the in-flight write for 'A' finishes
+      await doc.close(); // must still see dirty and flush 'B', not skip it
+      const saved = parseBoard(readFileSync(filePath, 'utf8'));
+      expect(saved.name).toBe('B');
+    });
+
+    it('lastSaveError records a failed save and clears on the next successful one', async () => {
+      const badPath = join(dir, 'missing-subdir', 'board.flamingo');
+      const doc = new Doc(newBoard('start', 2), badPath, DEBOUNCE_MS);
+      doc.apply(meta('A'));
+      expect(doc.lastSaveError).toBeUndefined();
+
+      await expect(doc.save()).rejects.toThrow();
+      expect(doc.lastSaveError).toBeTruthy();
+
+      mkdirSync(join(dir, 'missing-subdir'), { recursive: true });
+      await doc.save();
+      expect(doc.lastSaveError).toBeUndefined();
     });
 
     it('close() on an unpathed doc resolves without throwing, even with edits applied', async () => {
