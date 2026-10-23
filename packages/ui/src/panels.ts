@@ -19,6 +19,7 @@ import {
   SILK_KEY,
   ZONES_KEY,
   soloCopperLayer,
+  exitSolo,
   soloedCopperLayer,
   store,
   withLayerKeys,
@@ -160,30 +161,52 @@ export function initPanels(els: PanelEls, toolManager: ToolManager, actions: Pan
   let layerCopper: string[] = [];
   let lastLayerVis: AppState['layerVisibility'] | null = null;
   let lastHiddenCopper: AppState['hiddenCopper'] | null = null;
-  // Visibility from before the first "show only", put back by All (or by
-  // clicking the shown layer's tile again).
-  let preSoloVis: AppState['layerVisibility'] | null = null;
+  // A "show only" session: the visibility from just before it (`before`) and
+  // the one the solo set (`atSolo`), so All / the shown tile / 0 can put the
+  // overlays back while keeping any the viewer toggled meanwhile (exitSolo).
+  // Null outside a session: after a shift-click, or on a different board.
+  let soloSnapshot: { before: AppState['layerVisibility']; atSolo: AppState['layerVisibility'] } | null = null;
+  // Board name + copper layers the snapshot belongs to.
+  let soloBoardKey: string | null = null;
+
+  // Mouse clicks must not leave a layer control focused: with focus on a
+  // tile, releasing Space after a space-drag pan (or Enter closing a polygon)
+  // would click it again. Keyboard focus via Tab still works.
+  for (const el of [els.layerList, els.overlayList]) el.addEventListener('mousedown', (ev) => ev.preventDefault());
 
   function setVis(vis: AppState['layerVisibility']): void {
     store.set({ layerVisibility: vis });
   }
 
   function showAllLayers(): void {
-    const base = preSoloVis ?? store.get().layerVisibility;
-    preSoloVis = null;
-    const next = { ...base };
-    for (const k of layerCopper) next[k] = true;
-    setVis(next);
+    setVis(exitSolo(store.get().layerVisibility, layerCopper, soloSnapshot));
+    soloSnapshot = null;
   }
 
   function soloLayer(layer: string): void {
     const vis = store.get().layerVisibility;
-    if (soloedCopperLayer(vis, layerCopper) === layer && preSoloVis) {
+    if (soloedCopperLayer(vis, layerCopper) === layer) {
+      // The tile already reads as solo, whether or not a session is open.
       showAllLayers();
       return;
     }
-    if (!preSoloVis) preSoloVis = vis;
-    setVis(soloCopperLayer(vis, layerCopper, layer));
+    if (soloSnapshot) {
+      // Switching layer inside a session: the overlays stay as the viewer has them.
+      const next = { ...vis };
+      for (const k of layerCopper) next[k] = k === layer;
+      setVis(next);
+      return;
+    }
+    const next = soloCopperLayer(vis, layerCopper, layer);
+    soloSnapshot = { before: vis, atSolo: next };
+    setVis(next);
+  }
+
+  /** A manual (shift-click) change ends the solo session: All then only turns copper on. */
+  function toggleLayer(key: string): void {
+    const cur = store.get().layerVisibility;
+    if (layerCopper.includes(key)) soloSnapshot = null;
+    setVis({ ...cur, [key]: cur[key] === false });
   }
 
   function soloLayerAt(index: number | null): boolean {
@@ -242,6 +265,12 @@ export function initPanels(els: PanelEls, toolManager: ToolManager, actions: Pan
     const board = state.board;
     if (!board) return;
     layerCopper = copperLayersOf(board);
+    const boardKey = `${board.name}\n${layerCopper.join(',')}`;
+    if (boardKey !== soloBoardKey) {
+      // Another board (or layer count): its solo session must not carry over.
+      soloBoardKey = boardKey;
+      soloSnapshot = null;
+    }
     const overlays = [ZONES_KEY, SILK_KEY, RATSNEST_KEY, LABEL_PADS_KEY, LABEL_NETS_KEY, DIMS_KEY];
     store.set({ layerVisibility: withLayerKeys(state.layerVisibility, [...layerCopper, ...overlays]) });
 
@@ -273,12 +302,8 @@ export function initPanels(els: PanelEls, toolManager: ToolManager, actions: Pan
       bar.style.width = `${(st.lengthMm / maxLen) * 100}%`;
       tile.append(name, key, nums, bar);
       tile.addEventListener('click', (ev) => {
-        if (ev.shiftKey || ev.metaKey) {
-          const cur = store.get().layerVisibility;
-          setVis({ ...cur, [layer]: cur[layer] === false });
-        } else {
-          soloLayer(layer);
-        }
+        if (ev.shiftKey || ev.metaKey) toggleLayer(layer);
+        else soloLayer(layer);
       });
       grid.appendChild(tile);
       copperTiles.set(layer, tile);
@@ -320,10 +345,7 @@ export function initPanels(els: PanelEls, toolManager: ToolManager, actions: Pan
       chip.className = 'overlay-chip';
       chip.style.setProperty('--chip', LABEL_SWATCH[key] ?? '#888');
       chip.textContent = key;
-      chip.addEventListener('click', () => {
-        const cur = store.get().layerVisibility;
-        setVis({ ...cur, [key]: cur[key] === false });
-      });
+      chip.addEventListener('click', () => toggleLayer(key));
       els.overlayList.appendChild(chip);
       overlayChips.set(key, chip);
     }

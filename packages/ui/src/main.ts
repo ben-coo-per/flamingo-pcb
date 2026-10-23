@@ -317,7 +317,7 @@ function toPointerEvt(ev: MouseEvent, state: AppState): PointerEvt {
 canvas.addEventListener('mousemove', (ev) => {
   const state = store.get();
   const world = screenToWorld(state.view, canvasPoint(ev));
-  const hover = state.board ? hitTest(state.board, world, state.view.scale) : null;
+  const hover = state.board ? hitTest(state.board, world, state.view.scale, state.layerVisibility) : null;
   store.set({ cursorMm: world, hover });
   toolManager.active().onPointerMove?.(toPointerEvt(ev, store.get()), toolCtx);
 });

@@ -20,7 +20,7 @@ export function createRipupTool(): Tool {
       if (!state.board) return;
       // worldRaw (unsnapped): with the default 0.5mm snap, a precise click on
       // a thin track/via can snap to a point that no longer hits it.
-      const hit = hitTrackOrVia(state.board, ev.worldRaw, state.view.scale);
+      const hit = hitTrackOrVia(state.board, ev.worldRaw, state.view.scale, state.layerVisibility);
       if (!hit) return;
       if (ev.alt) {
         ctx.sendOp({ op: 'unroute', net: hit.net });

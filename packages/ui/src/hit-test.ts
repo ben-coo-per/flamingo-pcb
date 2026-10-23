@@ -18,16 +18,48 @@
 import type { Board, ComponentInst, Point, Track, Via } from '@flamingo/engine';
 import {
   componentTransformPoints,
+  copperLayersOf,
   dist,
+  padCopperLayers,
   padOutline,
   pointInPolygon,
   pointSegDistance,
   holeSlotCenterline,
 } from '@flamingo/engine';
-import type { HitInfo } from './state.js';
+import type { HitInfo, LayerKey } from './state.js';
+import { DIMS_KEY, SILK_KEY, ZONES_KEY } from './state.js';
 import { dimensionLine } from './renderer.js';
 
 const TOLERANCE_PX = 4;
+
+/**
+ * Layer visibility (`AppState.layerVisibility`). When given, items on a
+ * hidden or ghosted layer are not hit: what the viewer cannot see, they
+ * cannot select, rip up or start a route from. Mirrors renderer.ts: tracks,
+ * SMD pads and zones follow their copper layer; vias and through pads show
+ * while any copper layer does; silk and dimensions follow their overlay.
+ */
+export type Visibility = Record<LayerKey, boolean>;
+
+function shows(vis: Visibility | undefined, key: LayerKey): boolean {
+  return !vis || vis[key] !== false;
+}
+
+function visibilityOf(board: Board, vis: Visibility | undefined) {
+  // No visibility given: everything is hittable (and boards from tests may
+  // lack a layer count), so skip the copper lookup.
+  const copper = vis ? copperLayersOf(board) : [];
+  const anyCopper = !vis || copper.some((l) => shows(vis, l));
+  return {
+    track: (t: Track) => shows(vis, t.layer),
+    via: () => anyCopper,
+    pad: (c: ComponentInst, pad: ComponentInst['footprint']['pads'][number]) =>
+      !vis || padCopperLayers(pad, c.side, copper).some((l) => shows(vis, l)),
+    zone: (layer: string) => shows(vis, ZONES_KEY) && shows(vis, layer),
+    silk: shows(vis, SILK_KEY),
+    dimension: shows(vis, DIMS_KEY),
+  };
+}
 
 function findNet(board: Board, refdes: string, padNumber: string): string | undefined {
   const ref = `${refdes}.${padNumber}`;
@@ -35,8 +67,9 @@ function findNet(board: Board, refdes: string, padNumber: string): string | unde
 }
 
 /** Nearest pad (point-in-polygon) / track (distance-to-segment) / via (distance-to-center) under `world`. */
-export function hitTest(board: Board, world: Point, scale: number): HitInfo | null {
+export function hitTest(board: Board, world: Point, scale: number, vis?: Visibility): HitInfo | null {
   const tolMm = TOLERANCE_PX / scale;
+  const shown = visibilityOf(board, vis);
   let best: { score: number; hit: HitInfo } | null = null;
 
   function consider(score: number, hit: HitInfo): void {
@@ -45,6 +78,7 @@ export function hitTest(board: Board, world: Point, scale: number): HitInfo | nu
 
   for (const c of board.components as ComponentInst[]) {
     for (const pad of c.footprint.pads) {
+      if (!shown.pad(c, pad)) continue;
       const outline = padOutline(c, pad);
       const inside = pointInPolygon(world, outline);
       let edgeDist = Infinity;
@@ -61,6 +95,7 @@ export function hitTest(board: Board, world: Point, scale: number): HitInfo | nu
   }
 
   for (const t of board.tracks as Track[]) {
+    if (!shown.track(t)) continue;
     const d = pointSegDistance(world, t.seg);
     if (d < t.width / 2 + tolMm) {
       consider(Math.max(0, d - t.width / 2), { kind: 'track', id: t.id, net: t.net });
@@ -68,6 +103,7 @@ export function hitTest(board: Board, world: Point, scale: number): HitInfo | nu
   }
 
   for (const v of board.vias as Via[]) {
+    if (!shown.via()) break;
     const d = dist(world, v.at);
     if (d < v.diameter / 2 + tolMm) {
       consider(Math.max(0, d - v.diameter / 2), { kind: 'via', id: v.id, net: v.net });
@@ -108,8 +144,8 @@ function componentContains(c: ComponentInst, world: Point): boolean {
  * shadow individual pads -- selecting a part for move/rotate/flip/delete
  * operates on the whole component.
  */
-export function hitEditTarget(board: Board, world: Point, scale: number): EditTarget | null {
-  return hitEditTargets(board, world, scale)[0] ?? null;
+export function hitEditTarget(board: Board, world: Point, scale: number, vis?: Visibility): EditTarget | null {
+  return hitEditTargets(board, world, scale, vis)[0] ?? null;
 }
 
 /**
@@ -117,17 +153,19 @@ export function hitEditTarget(board: Board, world: Point, scale: number): EditTa
  * through this list on repeated clicks, so items stacked under a bigger item
  * (a keepout under its slot, a zone under everything) stay reachable.
  */
-export function hitEditTargets(board: Board, world: Point, scale: number): EditTarget[] {
+export function hitEditTargets(board: Board, world: Point, scale: number, vis?: Visibility): EditTarget[] {
   const tolMm = TOLERANCE_PX / scale;
+  const shown = visibilityOf(board, vis);
   const hits: EditTarget[] = [];
 
   for (const c of board.components) {
     if (componentContains(c, world)) hits.push({ kind: 'component', refdes: c.refdes });
   }
   for (const t of board.tracks) {
+    if (!shown.track(t)) continue;
     if (pointSegDistance(world, t.seg) < t.width / 2 + tolMm) hits.push({ kind: 'track', id: t.id, net: t.net });
   }
-  for (const v of board.vias) {
+  for (const v of shown.via() ? board.vias : []) {
     if (dist(world, v.at) < v.diameter / 2 + tolMm) hits.push({ kind: 'via', id: v.id, net: v.net });
   }
   for (const h of board.holes) {
@@ -136,10 +174,10 @@ export function hitEditTargets(board: Board, world: Point, scale: number): EditT
       hits.push({ kind: 'hole', id: h.id });
     }
   }
-  for (const s of board.silk) {
+  for (const s of shown.silk ? board.silk : []) {
     if (dist(world, s.at) < Math.max(s.height, 1) + tolMm) hits.push({ kind: 'silk', id: s.id });
   }
-  for (const dim of board.dimensions) {
+  for (const dim of shown.dimension ? board.dimensions : []) {
     const line = dimensionLine(dim.a, dim.b, dim.offset);
     if (!line) continue;
     if (pointSegDistance(world, { type: 'line', start: line.A, end: line.B }) < 0.5 + tolMm) {
@@ -150,6 +188,7 @@ export function hitEditTargets(board: Board, world: Point, scale: number): EditT
     if (pointInPolygon(world, k.polygon)) hits.push({ kind: 'keepout', id: k.id });
   }
   for (const z of board.zones) {
+    if (!shown.zone(z.layer)) continue;
     if (pointInPolygon(world, z.polygon)) hits.push({ kind: 'zone', id: z.id });
   }
   return hits;
@@ -167,13 +206,16 @@ export function hitTrackOrVia(
   board: Board,
   world: Point,
   scale: number,
+  vis?: Visibility,
 ): { kind: 'track'; id: string; net: string } | { kind: 'via'; id: string; net: string } | null {
   const tolMm = TOLERANCE_PX / scale;
+  const shown = visibilityOf(board, vis);
   for (const t of board.tracks) {
+    if (!shown.track(t)) continue;
     const d = pointSegDistance(world, t.seg);
     if (d < t.width / 2 + tolMm) return { kind: 'track', id: t.id, net: t.net };
   }
-  for (const v of board.vias) {
+  for (const v of shown.via() ? board.vias : []) {
     if (dist(world, v.at) < v.diameter / 2 + tolMm) return { kind: 'via', id: v.id, net: v.net };
   }
   return null;

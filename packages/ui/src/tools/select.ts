@@ -208,7 +208,7 @@ export function createSelectTool(): Tool {
       const state = ctx.getState();
       downScreen = ev.screen;
       if (!state.board) return;
-      const hit = hitEditTarget(state.board, ev.worldRaw, state.view.scale);
+      const hit = hitEditTarget(state.board, ev.worldRaw, state.view.scale, state.layerVisibility);
       if (hit && hit.kind === 'component') {
         // Grabbing a member of the window selection drags the whole group.
         const group = state.multiSelection.includes(hit.refdes) ? state.multiSelection : [hit.refdes];
@@ -320,14 +320,14 @@ export function createSelectTool(): Tool {
       // Use worldRaw (unsnapped), matching onPointerDown above -- with the
       // default 0.5mm snap, a precise click on a thin track/pad can snap to a
       // point that no longer hits it.
-      const netHit = hitTest(board, ev.worldRaw, state.view.scale);
+      const netHit = hitTest(board, ev.worldRaw, state.view.scale, state.layerVisibility);
       const cur = state.selectedNet;
       const selectedNet = netHit ? (cur === netHit.net ? null : netHit.net) : null;
 
       // ...alongside the broader edit-selection (component shadows its pads).
       // Clicking the same spot again cycles to the next item stacked under
       // the current selection (hole -> keepout -> zone -> hole -> ...).
-      const hits = hitEditTargets(board, ev.worldRaw, state.view.scale);
+      const hits = hitEditTargets(board, ev.worldRaw, state.view.scale, state.layerVisibility);
       let editHit = hits[0] ?? null;
       if (state.selection && hits.length > 1) {
         const idx = hits.findIndex((h) => sameEditTarget(h, state.selection!));

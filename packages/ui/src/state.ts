@@ -180,6 +180,29 @@ export function soloCopperLayer(
   return next;
 }
 
+/**
+ * Leave "show only": every copper layer back on. `before` is the visibility
+ * from just before the solo and `atSolo` the one the solo set; an overlay the
+ * viewer left alone since then goes back to what it was before the solo, one
+ * they toggled while soloed keeps its current state. With no snapshot (the
+ * single shown layer came from shift-clicks), the overlays stay as they are.
+ */
+export function exitSolo(
+  current: Record<LayerKey, boolean>,
+  copper: LayerKey[],
+  snapshot: { before: Record<LayerKey, boolean>; atSolo: Record<LayerKey, boolean> } | null,
+): Record<LayerKey, boolean> {
+  const next = { ...current };
+  if (snapshot) {
+    for (const k of Object.keys(snapshot.before)) {
+      if (copper.includes(k)) continue;
+      if (current[k] === snapshot.atSolo[k]) next[k] = snapshot.before[k];
+    }
+  }
+  for (const k of copper) next[k] = true;
+  return next;
+}
+
 /** The copper layer that is shown on its own, or null when none or several are. */
 export function soloedCopperLayer(vis: Record<LayerKey, boolean>, copper: LayerKey[]): LayerKey | null {
   const shown = copper.filter((k) => vis[k] !== false);

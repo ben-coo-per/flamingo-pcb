@@ -50,7 +50,7 @@ export function createViaTool(): Tool {
     onPointerMove(ev: PointerEvt, ctx: ToolCtx): void {
       hoverWorld = ev.world;
       const state = ctx.getState();
-      hoverNet = state.board ? (hitTest(state.board, ev.worldRaw, state.view.scale)?.net ?? null) : null;
+      hoverNet = state.board ? (hitTest(state.board, ev.worldRaw, state.view.scale, state.layerVisibility)?.net ?? null) : null;
     },
 
     onPointerDown(ev: PointerEvt, ctx: ToolCtx): void {
