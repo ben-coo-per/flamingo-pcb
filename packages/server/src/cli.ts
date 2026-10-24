@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { basename, dirname, extname, resolve } from 'node:path';
 import { newBoard } from '@flamingo/engine';
 import { Doc } from './document.js';
@@ -10,7 +11,7 @@ import { PANEL_USAGE, runPanelCli } from './panel/cli.js';
 import { PanelSession } from './panel/session.js';
 import { fetchPart } from '@flamingo/parts';
 
-const VERSION = '0.1.0';
+const VERSION = createRequire(import.meta.url)('../package.json').version as string;
 /** What panel files were called before they were `.plamingo`. */
 const OLD_PANEL_EXTENSION = '.flamingo-panel';
 
@@ -96,6 +97,20 @@ async function serve(fileArg: string, panelArg?: string): Promise<void> {
   shutDownOn(() => Promise.all([doc.close(), panel.close()]));
 }
 
+async function importCmd(srcArg: string, outArg: string | undefined, pcbName: string | undefined): Promise<void> {
+  const { importEpro } = await import('./import/epro.js');
+  const src = resolve(process.cwd(), srcArg);
+  const out = resolve(process.cwd(), outArg ?? basename(src, extname(src)) + '.flamingo');
+  const { board, warnings } = importEpro(src, { pcbName });
+  const doc = new Doc(board, out);
+  await doc.save();
+  for (const w of warnings) console.warn(`[import] ${w}`);
+  console.log(
+    `Imported "${board.name}" -> ${out}: ${board.components.length} components, ${board.nets.length} nets, ` +
+      `${board.tracks.length} tracks, ${board.vias.length} vias, ${board.zones.length} zones (${warnings.length} warning(s))`,
+  );
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0];
@@ -105,10 +120,19 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === 'import' && args[1]) {
+    const pcbFlag = args.indexOf('--pcb');
+    const pcbName = pcbFlag !== -1 ? args[pcbFlag + 1] : undefined;
+    const rest = args.slice(2).filter((a, i) => pcbFlag === -1 || (i + 2 !== pcbFlag && i + 2 !== pcbFlag + 1));
+    await importCmd(args[1], rest[0], pcbName);
+    return;
+  }
+
   if (command !== 'serve') {
     console.error(
       `Usage: flamingo serve [file.flamingo] [--panel file${PANEL_EXTENSION}]    the board editor, with a panel at /panel\n` +
-        `       flamingo serve <file${PANEL_EXTENSION}>    the panel view\n\n${PANEL_USAGE}`,
+        `       flamingo serve <file${PANEL_EXTENSION}>    the panel view\n` +
+        `       flamingo import <project.epro> [out.flamingo] [--pcb name]\n\n${PANEL_USAGE}`,
     );
     process.exitCode = 1;
     return;

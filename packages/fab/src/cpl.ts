@@ -13,7 +13,7 @@
  *
  * Rotation is degrees CCW, normalized to [0, 360):
  *   - top side:    rot % 360, shifted into [0, 360)
- *   - bottom side: (360 - normalized-rot) % 360
+ *   - bottom side: (normalized-rot + 180) % 360
  * The bottom-side flip matches JLCPCB's convention that CPL rotation for
  * bottom-side parts is measured after mirroring the board (so a part's
  * silkscreen-visible rotation, once physically flipped face-down, keeps
@@ -44,7 +44,10 @@ function mm4(n: number): string {
 
 function rotationOf(c: ComponentInst): string {
   const rot = normDeg(c.rotation);
-  const out = c.side === 'bottom' ? (360 - rot) % 360 : rot;
+  // Bottom: JLCPCB expects the EasyEDA-style value. Verified against the
+  // CPL JLC built the Random Together v3.1 pilot from (2026-05-26): with the
+  // engine's x-mirror convention that is rot + 180, NOT 360 - rot.
+  const out = c.side === 'bottom' ? (rot + 180) % 360 : rot;
   return trimNum(out);
 }
 

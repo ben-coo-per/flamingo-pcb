@@ -289,8 +289,8 @@ describe('merged BOM and CPL', () => {
     board.components.push(comp('R2', R0603, 5, 5, { side: 'bottom', rotation: 270 }));
     const src = resolved('F', board);
     const rows = csvRows(buildPanelFab(panelOf([src], [['F', 0, 7, { rotation: 90 }]]), [src], LIMITS).cpl);
-    // Board rotation 270 + 90 = 0 on the panel; bottom side reports (360 - 0) % 360.
-    expect(rows.find((r) => r[0] === 'F1_R2')).toEqual(['F1_R2', '7.0000', '12.0000', 'Bottom', '0']);
+    // Board rotation 270 + 90 = 0 on the panel; bottom side reports (0 + 180) % 360.
+    expect(rows.find((r) => r[0] === 'F1_R2')).toEqual(['F1_R2', '7.0000', '12.0000', 'Bottom', '180']);
   });
 
   it('uses one BOM comment per LCSC part across boards, and says so', () => {

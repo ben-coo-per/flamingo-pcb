@@ -36,6 +36,10 @@ export type Op =
   | { op: 'moveComponent'; refdes: string; at?: Point; rotation?: number; side?: 'top' | 'bottom' }
   | { op: 'moveComponents'; moves: Array<{ refdes: string; at: Point }> }
   | { op: 'setComponentFields'; refdes: string; fields: Partial<ComponentInst['fields']> }
+  /** Set (or, with `label` omitted, clear) the refdes silk label override. */
+  | { op: 'setComponentLabel'; refdes: string; label?: ComponentInst['label'] }
+  /** Hide / show the component's footprint silk items. */
+  | { op: 'setComponentSilk'; refdes: string; hidden: boolean }
   | { op: 'editHole'; id: string; hole: Partial<Omit<MountingHole, 'id'>> }
   | { op: 'editKeepout'; id: string; keepout: Partial<Omit<Keepout, 'id'>> }
   | { op: 'editZone'; id: string; zone: Partial<Omit<Zone, 'id' | 'fill'>> }
@@ -175,6 +179,22 @@ export function applyOp(b: Board, op: Op): OpResult | OpError {
       return ok(board, createdIds);
     }
 
+    case 'setComponentLabel': {
+      const comp = board.components.find((c) => c.refdes === op.refdes);
+      if (!comp) return err(`Unknown refdes "${op.refdes}"`);
+      if (op.label === undefined) delete comp.label;
+      else comp.label = op.label;
+      return ok(board, createdIds);
+    }
+
+    case 'setComponentSilk': {
+      const comp = board.components.find((c) => c.refdes === op.refdes);
+      if (!comp) return err(`Unknown refdes "${op.refdes}"`);
+      if (op.hidden) comp.silk = { hidden: true };
+      else delete comp.silk;
+      return ok(board, createdIds);
+    }
+
     case 'editHole': {
       const hole = board.holes.find((h) => h.id === op.id);
       if (!hole) return err(`No hole with id "${op.id}"`);
@@ -249,6 +269,14 @@ export function applyOp(b: Board, op: Op): OpResult | OpError {
     }
 
     case 'addZone': {
+      // A pour on a missing net, or on a layer the board doesn't fab (F.Silk,
+      // In1.Cu on a 2-layer board), would be silently dropped from the Gerbers.
+      if (!board.nets.some((n) => n.name === op.zone.net)) {
+        return err(`Unknown net "${op.zone.net}"`);
+      }
+      if (!copperLayersOf(board).includes(op.zone.layer)) {
+        return err(`Layer "${op.zone.layer}" is not valid for a ${board.copperLayers}-layer board`);
+      }
       const id = globalThis.crypto.randomUUID();
       const zone: Zone = { id, ...op.zone };
       board.zones.push(zone);

@@ -19,6 +19,7 @@
  *   fixture's ground-truth POLYGON points exactly under this transform.
  */
 
+import { rotate } from '@flamingo/engine';
 import type { Footprint, FootprintHole, Pad, SilkItem, Point } from '@flamingo/engine';
 
 export interface PartInfo {
@@ -40,7 +41,9 @@ const UNIT_MM = 0.254;
 const LAYER_TOP = 1;
 const LAYER_BOTTOM = 2;
 const LAYER_MULTI = 11; // through-hole / multi-layer pads
-const SILK_LAYERS = new Set([3, 4]); // 3 = F.Silk (TopSilk), 4 = B.Silk
+// 4 = B.Silk (bottom silk) is dropped: SilkItem has no side, so a bottom-silk
+// item would otherwise print on the top layer.
+const SILK_LAYERS = new Set([3]); // 3 = F.Silk (TopSilk)
 // Component body / lead-shape / document layers we fold into the courtyard.
 const COURTYARD_LAYERS = new Set([99, 100, 12]);
 
@@ -145,7 +148,10 @@ function parsePad(fields: string[], conv: Convert): Pad {
   }
 
   const at = conv(x, y);
-  const through = holeR > 0 || layerId === LAYER_MULTI;
+  // Only a layer-11 (multi/through) pad is plated-through. Layer 1/2 SMD pads
+  // sometimes carry a bogus near-zero holeRadius (e.g. C53100353 MBR0530,
+  // holeR 0.001) that must not turn them into through pads.
+  const through = layerId === LAYER_MULTI;
   const layer: Pad['layer'] = through
     ? 'through'
     : layerId === LAYER_BOTTOM
@@ -162,14 +168,20 @@ function parsePad(fields: string[], conv: Convert): Pad {
   };
 
   if (shape === 'polygon') {
-    // POLYGON outline points are absolute canvas coords; store relative to `at`.
+    // POLYGON outline points are absolute canvas coords that already include
+    // the pad's rotation baked in. Store them un-rotated (relative to `at`,
+    // rotated back by -pad.rotation): the engine's padLocalOutline applies
+    // pad.rotation again when building world geometry, so storing the raw
+    // (already-rotated) points would rotate them twice.
     pad.polygon = parsePairs(fields[10]).map(([px, py]) => {
       const p = conv(px, py);
-      return { x: p.x - at.x, y: p.y - at.y };
+      return rotate({ x: p.x - at.x, y: p.y - at.y }, -pad.rotation);
     });
   }
 
-  if (holeR > 0) {
+  // Hole diameters under 0.05mm are noise from EasyEDA's export, not a real
+  // hole (see C53100353 above); ignore them.
+  if (holeR > 0 && 2 * holeR * UNIT_MM >= 0.05) {
     pad.drill = {
       diameter: 2 * holeR * UNIT_MM,
       plated: platedFlag !== 'N',

@@ -170,7 +170,7 @@ boards + quantities → quote_order → panel_apply_scenario → panel_check →
 
 ### Panel MCP tools
 
-23 tools, served at the same `/mcp` endpoint as the 34 board tools:
+23 tools, served at the same `/mcp` endpoint as the 37 board tools:
 
 | Group | Tool | What it does |
 | --- | --- | --- |
@@ -339,3 +339,5 @@ tracespace-validates every Gerber.
 
 ## License
 
+
+MIT — see [LICENSE](LICENSE).

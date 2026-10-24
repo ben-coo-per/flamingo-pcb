@@ -32,6 +32,7 @@ export function check(b: Board, rules: RuleSet, items: CopperItem[]): DrcViolati
     if (k.keepout.copper) {
       for (const item of items) {
         if (layers !== 'all' && !layers.includes(item.layer)) continue;
+        if (item.kind === 'hole') continue; // keepouts around mounting holes are the norm
         // Zone items honor holes: copper inside a knockout is absence-of-copper.
         const hit = item.group
           ? polyGroupIntersects(k.polygon, item.group)

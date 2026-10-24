@@ -57,6 +57,16 @@ describe('WebSocket API', () => {
     await started.close();
   });
 
+  it('rejects the WS upgrade from a non-localhost Origin (CSRF guard)', async () => {
+    const ws = new WebSocket(wsUrl, { origin: 'https://evil.example' });
+    const status = await new Promise<number | undefined>((res) => {
+      ws.once('unexpected-response', (_req, resp) => res(resp.statusCode));
+      ws.once('open', () => res(undefined));
+    });
+    expect(status).toBe(403);
+    // Rejected during the handshake -- there's no established socket to close.
+  });
+
   it('sends the current board on connect', async () => {
     const ws = new WebSocket(wsUrl);
     const queue = messageQueue(ws);
@@ -65,6 +75,21 @@ describe('WebSocket API', () => {
     const msg = (await queue.next()) as { type: string; board: { name: string } };
     expect(msg.type).toBe('board');
     expect(msg.board.name).toBe('wstest');
+    ws.close();
+  });
+
+  it("names the board's file in each board message, following a switch of file", async () => {
+    const ws = new WebSocket(wsUrl);
+    const queue = messageQueue(ws);
+    await waitOpen(ws);
+
+    // An unsaved board has no file.
+    expect(((await queue.next()) as { file?: string }).file).toBeUndefined();
+
+    doc.resetBoard(newBoard('blinky', 2), '/some/dir/blinky.flamingo', false);
+    const msg = (await queue.next()) as { type: string; file?: string };
+    expect(msg.type).toBe('board');
+    expect(msg.file).toBe('blinky.flamingo');
     ws.close();
   });
 

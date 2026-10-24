@@ -16,7 +16,7 @@
  *    immediately after -- order matters and is guaranteed by zonefill.ts.
  *  - Soldermask openings = pads dilated 0.05mm; vias are TENTED (omitted from
  *    the mask). Mask files carry TF.FilePolarity Negative.
- *  - Paste = SMD pads exactly (no expansion), through-hole pads excluded.
+ *  - Paste = SMD pads exactly (no expansion), through-hole pads excluded unless `pad.paste` (paste-in-hole).
  *  - Silk text is stroked with a local vector font (strokefont.ts); every silk
  *    aperture is floored at the ruleset's minSilkWidth (see buildSilk).
  *  - The profile (.GKO) carries the outer outline plus a closed contour for
@@ -32,6 +32,8 @@ import {
   componentTransformPoints,
   componentTransformRotation,
   componentLabelPlacement,
+  componentLabelHidden,
+  componentSilkHidden,
   fillAllZones,
   bufferPolygon,
   isSlot,
@@ -294,11 +296,26 @@ function buildCopper(
   const g = new GerberBuilder();
   const cu = copperLayersOf(b);
 
+  // Zone rings, enclosing polygons first. A hole ring is an LPC region that
+  // clears everything drawn before it, so an island nested inside another
+  // polygon's hole must be emitted after that polygon and its holes. Group
+  // each outer (CCW) ring with the hole (CW) rings that follow it, then emit
+  // groups by outer area, descending -- a nested island is always smaller
+  // than the polygon whose hole contains it. Caught on rt-v3.1 2026-10-15:
+  // every GND pour island inside the main pour's holes was wiped (19 GND pads
+  // open) while Flamingo's own render and DRC looked fine.
+  const groups: { area: number; rings: Point[][] }[] = [];
   for (const z of filled.zones) {
-    if (z.layer !== layer || !z.fill || z.fill.length === 0) continue;
-    for (const ring of z.fill) g.region(ring, signedArea(ring) > 0);
-    g.resetDark();
+    if (z.layer !== layer || !z.fill) continue;
+    for (const ring of z.fill) {
+      const a = signedArea(ring);
+      if (a > 0 || groups.length === 0) groups.push({ area: a, rings: [ring] });
+      else groups[groups.length - 1].rings.push(ring);
+    }
   }
+  groups.sort((p, q) => q.area - p.area);
+  for (const gr of groups) for (const ring of gr.rings) g.region(ring, signedArea(ring) > 0);
+  g.resetDark();
 
   for (const t of b.tracks) {
     if (t.layer !== layer) continue;
@@ -377,7 +394,8 @@ function buildPaste(b: Board, side: 'F' | 'B', extras: GerberExtras): string {
   for (const comp of b.components) {
     if (extras.noPaste?.(comp.refdes)) continue;
     for (const pad of comp.footprint.pads) {
-      if (pad.layer === 'through') continue;
+      // Through pads get paste only on their component's side (paste-in-hole).
+      if (pad.layer === 'through' && (!pad.paste || (comp.side === 'top') !== (side === 'F'))) continue;
       if (!padCopperLayers(pad, comp.side, cu).includes(layer)) continue;
       emitPad(g, comp, pad, 0);
     }
@@ -407,7 +425,7 @@ function buildSilk(b: Board, side: 'F' | 'B', extras: GerberExtras): string {
   for (const comp of b.components) {
     if (comp.side !== compSide) continue;
     const mirror = comp.side === 'bottom';
-    for (const item of comp.footprint.silk) {
+    for (const item of componentSilkHidden(comp) ? [] : comp.footprint.silk) {
       switch (item.kind) {
         case 'line': {
           const [s, e] = componentTransformPoints(comp, [item.start, item.end]);
@@ -437,6 +455,7 @@ function buildSilk(b: Board, side: 'F' | 'B', extras: GerberExtras): string {
     }
     // refdes label (upright, adjacent to the component body, pad-avoiding —
     // anchor shared with the SVG/canvas renderers and DRC)
+    if (componentLabelHidden(comp)) continue;
     const given = extras.labels?.get(comp.refdes);
     const lp = given ?? { ...componentLabelPlacement(b, comp), text: comp.refdes };
     strokes(strokeText(lp.text, lp.at, lp.height, lp.rotation, mirror), 0.15);
@@ -529,7 +548,9 @@ function fileStem(name: string): string {
  * `extras` is for panels (see GerberExtras); leave it out for a single board.
  */
 export function generateGerbers(b: Board, extras: GerberExtras = {}): FabFiles {
-  const filled = extras.prefilled ? b : fillAllZones(b);
+  // An already-filled board (prefilled, or every zone carrying copper) is
+  // used as-is, matching the run_drc/screenshot convention.
+  const filled = extras.prefilled || !b.zones.some((z) => !z.fill) ? b : fillAllZones(b);
   const name = fileStem(b.name);
   const files = new Map<string, string>();
 

@@ -15,8 +15,8 @@
  * parser reads directly. Tools are deduped by diameter to 3 decimal places.
  */
 
-import type { Board, Pad, Point } from '@flamingo/engine';
-import { padWorld, rotate, isSlot, holeSlotCenterline, allHoles } from '@flamingo/engine';
+import type { Board, Point } from '@flamingo/engine';
+import { padWorld, padDrillCenterline, isSlot, holeSlotCenterline, allHoles } from '@flamingo/engine';
 
 interface DrillHole {
   diameter: number;
@@ -38,20 +38,6 @@ function tool(d: number): string {
   return d.toFixed(3);
 }
 
-/** Compute a slot pad's centerline endpoints in world space. */
-function slotEndpoints(pad: Pad, world: { at: Point; rotation: number }): { start: Point; end: Point } {
-  const diameter = pad.drill!.diameter;
-  const slotLength = pad.drill!.slotLength!;
-  const half = Math.max(0, (slotLength - diameter) / 2);
-  // Long axis in pad-local space, then rotated into world.
-  const local: Point = pad.size.w >= pad.size.h ? { x: 1, y: 0 } : { x: 0, y: 1 };
-  const dir = rotate(local, world.rotation);
-  return {
-    start: { x: world.at.x - dir.x * half, y: world.at.y - dir.y * half },
-    end: { x: world.at.x + dir.x * half, y: world.at.y + dir.y * half },
-  };
-}
-
 function collectHoles(b: Board): { plated: DrillHole[]; unplated: DrillHole[] } {
   const plated: DrillHole[] = [];
   const unplated: DrillHole[] = [];
@@ -66,7 +52,7 @@ function collectHoles(b: Board): { plated: DrillHole[]; unplated: DrillHole[] } 
       const world = padWorld(comp, pad);
       const isSlot = pad.drill.slotLength !== undefined && pad.drill.slotLength > pad.drill.diameter;
       const hole: DrillHole = isSlot
-        ? { diameter: pad.drill.diameter, at: world.at, slot: slotEndpoints(pad, world) }
+        ? { diameter: pad.drill.diameter, at: world.at, slot: padDrillCenterline(comp, pad) }
         : { diameter: pad.drill.diameter, at: world.at };
       (pad.drill.plated ? plated : unplated).push(hole);
     }

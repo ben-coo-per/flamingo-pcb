@@ -91,6 +91,19 @@ describe('attachViewControls - pan gestures', () => {
     expect(down.preventDefault).not.toHaveBeenCalled();
   });
 
+  it('plain wheel pans in both axes; ctrl-wheel (pinch) zooms at the cursor', () => {
+    attachViewControls(canvas as unknown as HTMLCanvasElement, () => view, setView);
+    canvas.dispatch('wheel', mouseEvent({ deltaX: 30, deltaY: -20, deltaMode: 0, ctrlKey: false }));
+    expect(view.scale).toBe(10);
+    expect(view.originPxX).toBe(70); // 100 - 30
+    expect(view.originPxY).toBe(120); // 100 + 20
+
+    canvas.dispatch('wheel', mouseEvent({ deltaX: 0, deltaY: -100, deltaMode: 0, ctrlKey: true, clientX: 70, clientY: 120 }));
+    expect(view.scale).toBeCloseTo(10 * Math.exp(0.3)); // zoom in, world origin under cursor stays put
+    expect(view.originPxX).toBeCloseTo(70);
+    expect(view.originPxY).toBeCloseTo(120);
+  });
+
   it('suppresses the canvas context menu so right-drag pans cleanly', () => {
     attachViewControls(canvas as unknown as HTMLCanvasElement, () => view, setView);
     const ctx = mouseEvent({});

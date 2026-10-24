@@ -1,31 +1,29 @@
 import http from 'node:http';
+import { existsSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ZipArchive } from 'archiver';
 import { WebSocket, WebSocketServer } from 'ws';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import type { Board, Op, RenderOpts } from '@flamingo/engine';
-import { fillAllZones, parseBoard, planZoneStitching, ratsnest, renderSVG, runDRC, splitLabelLayers } from '@flamingo/engine';
-import { exportFab, generateBOM, generateCPL, generateGerbers } from '@flamingo/fab';
+import type { Board, Op } from '@flamingo/engine';
+import { fillAllZones, parseBoard, renderSVG } from '@flamingo/engine';
+import { generateBOM, generateCPL, generateGerbers, zipFiles } from '@flamingo/fab';
 import type { Model3d } from '@flamingo/parts';
 import { extractModel3d, fetchJlcStock, fetchPart, readCache, searchParts } from '@flamingo/parts';
 import { runAutorouteBroadcast } from './autoroute.js';
 import { Doc } from './document.js';
 import type { McpContext, PartsApi } from './mcp.js';
-import { createMcpServer, resolveFabOutDir } from './mcp.js';
+import { boardSearchRoots, createMcpServer, runDrcWithStock } from './mcp.js';
 import type { RouteRunner } from './route.js';
 import { defaultRouteRunner } from './route.js';
 import type { ScreenshotOpts } from './screenshot.js';
 import { renderPNG } from './screenshot.js';
-import { render3dHtml } from './viewer3d.js';
-import { exportStep, exportStepDetail } from './step.js';
+import { BOARD_T, exportStep, exportStepDetail } from './step.js';
 import { parseObjMesh, placeMeshGroups } from './objmesh.js';
 import type { MeshGroup } from './objmesh.js';
-import { BOARD_T } from './viewer3d.js';
 import type { PanelChannel } from './panel/http.js';
 import { attachPanelChannel, handlePanelApi, isPanelChannel } from './panel/http.js';
 import { PanelSession } from './panel/session.js';
@@ -64,6 +62,25 @@ function mimeFor(path: string): string {
   return MIME_TYPES[extname(path)] ?? 'application/octet-stream';
 }
 
+/**
+ * CSRF guard shared by the mutating HTTP routes and the /ws upgrade: browsers
+ * attach an Origin header on cross-site requests (including a "simple"
+ * text/plain form POST, which needs no CORS preflight), so rejecting any
+ * request that names a non-local origin stops a malicious page from driving
+ * board mutations through a victim's open localhost session. A request with
+ * no Origin header at all (curl, an MCP client, the Electron app's own
+ * same-origin fetches) is allowed through.
+ */
+function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true;
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'; // WHATWG URL keeps IPv6 brackets
+  } catch {
+    return false;
+  }
+}
+
 function sendJSON(res: ServerResponse, status: number, body: unknown): void {
   const data = JSON.stringify(body);
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
@@ -79,15 +96,6 @@ function sendNotFound(res: ServerResponse): void {
   sendJSON(res, 404, { ok: false, error: 'not found' });
 }
 
-async function pathExists(p: string): Promise<boolean> {
-  try {
-    await stat(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = '';
@@ -101,7 +109,7 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 /** Serve uiDistDir at '/' if it exists, else a placeholder page. Returns true if handled. */
 async function serveStatic(pathname: string, res: ServerResponse, uiDistDir: string): Promise<boolean> {
-  const uiDistExists = await pathExists(uiDistDir);
+  const uiDistExists = existsSync(uiDistDir);
   if (!uiDistExists) {
     if (pathname === '/') {
       sendHTML(res, 200, PLACEHOLDER_HTML);
@@ -133,11 +141,6 @@ async function serveStatic(pathname: string, res: ServerResponse, uiDistDir: str
       return false;
     }
   }
-}
-
-/** Directories /api/projects lists boards from (and /api/open may open from). */
-function boardSearchRoots(ctx: McpContext): string[] {
-  return [...new Set([resolve(ctx.projectDir), resolve(process.cwd())])];
 }
 
 const SCAN_SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'fab', 'fixtures']);
@@ -261,34 +264,6 @@ async function collectDetailModels(board: Board): Promise<Map<string, MeshGroup[
   return out;
 }
 
-/**
- * Stream the fab fileset as one zip with the Gerber/drill files at TOP level
- * (plus bom.csv / cpl.csv / board.render.svg alongside). JLCPCB's uploader
- * ignores non-Gerber extras but can NOT see inside a nested zip — the old
- * bundle-around-gerbers.zip shape read as "no layers found" when uploaded
- * as-is. Resolves once fully flushed.
- */
-function streamFabZip(files: Map<string, string>, res: ServerResponse): Promise<void> {
-  return new Promise((resolveP, reject) => {
-    const archive = new ZipArchive({ zlib: { level: 9 } });
-    let done = false;
-    const finish = (): void => {
-      if (!done) {
-        done = true;
-        resolveP();
-      }
-    };
-    archive.on('error', reject);
-    // 'finish' fires once the response is fully flushed; 'close' covers a client
-    // that aborts mid-download.
-    res.on('finish', finish);
-    res.on('close', finish);
-    archive.pipe(res);
-    for (const [name, content] of files) archive.append(content, { name });
-    void archive.finalize();
-  });
-}
-
 async function handleApi(
   ctx: McpContext,
   method: string,
@@ -302,9 +277,17 @@ async function handleApi(
   // drain it so the connection can be reused instead of stalling on unread data.
   const readsBody =
     method === 'POST' &&
-    (pathname === '/api/op' || pathname === '/api/export' || pathname === '/api/route' || pathname === '/api/open');
+    (pathname === '/api/op' || pathname === '/api/route' || pathname === '/api/open');
   if (!readsBody) {
     req.resume();
+  }
+
+  // Every /api/* POST mutates the board (there are no read-only ones) -- gate
+  // them all here, once, instead of per-route, per the CSRF guard above.
+  if (method === 'POST' && !isAllowedOrigin(req.headers.origin)) {
+    req.resume();
+    sendJSON(res, 403, { ok: false, error: 'cross-origin request rejected' });
+    return true;
   }
 
   if (method === 'GET' && pathname === '/api/board') {
@@ -313,6 +296,12 @@ async function handleApi(
   }
 
   if (method === 'POST' && pathname === '/api/op') {
+    const contentType = req.headers['content-type'] ?? '';
+    if (!contentType.toLowerCase().includes('application/json')) {
+      req.resume();
+      sendJSON(res, 400, { ok: false, error: 'content-type must be application/json' });
+      return true;
+    }
     const raw = await readBody(req);
     let body: unknown;
     try {
@@ -346,36 +335,15 @@ async function handleApi(
     return true;
   }
 
-  if (method === 'GET' && pathname === '/api/ratsnest') {
-    sendJSON(res, 200, ratsnest(doc.board));
-    return true;
-  }
-
   if (method === 'GET' && pathname === '/api/drc') {
     // Run on the *filled* board, matching the export gate: the raw zone
     // outline polygon overlaps every non-pour-net pad, so an unfilled check
-    // would drown real findings in zone-clearance noise.
+    // would drown real findings in zone-clearance noise. Shares runDrcWithStock
+    // with the export_fab MCP tool and /api/export.fab below so the UI, MCP,
+    // and fab download all gate on exactly the same checks (geometry + stock).
     const board = doc.board.zones.length > 0 ? fillAllZones(doc.board) : doc.board;
-    sendJSON(res, 200, { ok: true, violations: runDRC(board) });
-    return true;
-  }
-
-  if (method === 'GET' && pathname === '/api/render.svg') {
-    const opts: RenderOpts = {};
-    const layersParam = url.searchParams.get('layers');
-    const rawLayers = layersParam
-      ? layersParam.split(',').map((s) => s.trim()).filter(Boolean)
-      : undefined;
-    const split = splitLabelLayers(rawLayers);
-    opts.layers = split.layers;
-    opts.showPadLabels = split.showPadLabels;
-    opts.showNetLabels = split.showNetLabels;
-    const highlightNet = url.searchParams.get('highlightNet');
-    if (highlightNet) opts.highlightNet = highlightNet;
-    const boardToRender = doc.board.zones.length > 0 ? fillAllZones(doc.board) : doc.board;
-    const svg = renderSVG(boardToRender, opts);
-    res.writeHead(200, { 'content-type': 'image/svg+xml' });
-    res.end(svg);
+    const { violations, advisories } = await runDrcWithStock(ctx, board);
+    sendJSON(res, 200, { ok: true, violations, advisories });
     return true;
   }
 
@@ -417,44 +385,6 @@ async function handleApi(
     return true;
   }
 
-  if (method === 'POST' && pathname === '/api/export') {
-    const raw = await readBody(req);
-    let body: unknown = {};
-    if (raw) {
-      try {
-        body = JSON.parse(raw);
-      } catch {
-        sendJSON(res, 400, { ok: false, error: 'invalid JSON body' });
-        return true;
-      }
-    }
-    const outDirRaw = typeof body === 'object' && body !== null ? (body as { outDir?: unknown }).outDir : undefined;
-    if (outDirRaw !== undefined && typeof outDirRaw !== 'string') {
-      sendJSON(res, 400, { ok: false, error: 'outDir must be a string' });
-      return true;
-    }
-
-    const filled = fillAllZones(doc.board);
-    const violations = runDRC(filled);
-    if (violations.length > 0) {
-      sendJSON(res, 400, {
-        ok: false,
-        error: 'DRC violations present; export refused',
-        violations,
-      });
-      return true;
-    }
-
-    const targetDir = resolveFabOutDir(ctx, outDirRaw);
-    try {
-      const result = await exportFab(doc.board, targetDir);
-      sendJSON(res, 200, { ok: true, outDir: targetDir, ...result });
-    } catch (err) {
-      sendJSON(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) });
-    }
-    return true;
-  }
-
   if (method === 'POST' && pathname === '/api/route') {
     const raw = await readBody(req);
     let body: unknown = {};
@@ -490,31 +420,6 @@ async function handleApi(
         ok: true,
         ...result,
         fullyRouted: result.remaining.length === 0,
-      });
-    } catch (err) {
-      sendJSON(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) });
-    }
-    return true;
-  }
-
-  if (method === 'POST' && pathname === '/api/stitch') {
-    // Plan + apply stitching vias for orphaned pour islands (also runs
-    // automatically as the last step of POST /api/route).
-    try {
-      const plan = planZoneStitching(doc.board);
-      if (plan.vias.length > 0) {
-        const r = doc.apply({ op: 'addTracks', tracks: [], vias: plan.vias });
-        if (!r.ok) {
-          sendJSON(res, 400, r);
-          return true;
-        }
-      }
-      sendJSON(res, 200, {
-        ok: true,
-        stitchedVias: plan.vias.length,
-        vias: plan.vias.map((v) => ({ at: v.at, net: v.net })),
-        unstitchedIslands: plan.unfixed,
-        ignoredSlivers: plan.ignoredSlivers,
       });
     } catch (err) {
       sendJSON(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) });
@@ -596,17 +501,19 @@ async function handleApi(
   }
 
   if (method === 'GET' && pathname === '/api/export.fab') {
-    // DRC-gated fab download (mirrors POST /api/export's gate). ?waive=1 bypasses
-    // the gate like the export_fab MCP tool's waiveDrc; violations are still
-    // computed but not fatal. Streams a single zip of the fab fileset.
+    // DRC + stock gated fab download (mirrors the export_fab MCP tool's gate,
+    // via the shared runDrcWithStock). ?waive=1 bypasses the gate like
+    // waiveDrc; violations are still computed but not fatal. Streams a single
+    // zip of the fab fileset.
     const waive = url.searchParams.get('waive') === '1';
     const filled = fillAllZones(doc.board);
-    const violations = runDRC(filled);
+    const { violations, advisories } = await runDrcWithStock(ctx, filled);
     if (violations.length > 0 && !waive) {
       sendJSON(res, 400, {
         ok: false,
         error: 'DRC violations present; export refused',
         violations,
+        advisories,
       });
       return true;
     }
@@ -622,7 +529,7 @@ async function handleApi(
         'content-type': 'application/zip',
         'content-disposition': `attachment; filename="${fileName}"`,
       });
-      await streamFabZip(files, res);
+      res.end(zipFiles(files));
     } catch (err) {
       if (!res.headersSent) {
         sendJSON(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) });
@@ -782,12 +689,6 @@ function makeRequestListener(
           return;
         }
         req.resume(); // static/unknown routes never read the body
-        if (method === 'GET' && pathname === '/3d') {
-          // Regenerated from the live board on every request.
-          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-          res.end(render3dHtml(ctx.doc.board));
-          return;
-        }
         if (ctx.panel && method === 'GET' && (pathname === '/panel' || pathname === '/panel/')) {
           // The panel view is a page of its own (packages/ui/panel.html).
           const served = await serveStatic('/panel.html', res, uiDistDir);
@@ -806,11 +707,26 @@ function makeRequestListener(
 }
 
 function attachWebSocket(doc: Doc, server: http.Server, panelChannel?: PanelChannel): WebSocketServer {
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  const wss = new WebSocketServer({
+    server,
+    path: '/ws',
+    // Same CSRF guard as the /api/* POSTs: refuse the upgrade if the browser
+    // sent an Origin that isn't local (a plain WS client / curl / the
+    // Electron app's own page sends none, and is allowed through).
+    verifyClient: (info, callback) => {
+      if (isAllowedOrigin(info.origin)) callback(true);
+      else callback(false, 403, 'cross-origin request rejected');
+    },
+  });
   const clients = new Set<WebSocket>();
 
+  // `file` is the board file's name (e.g. "blinky.flamingo"), which the UI
+  // shows as the browser tab title. Read per message: new_board/open_board
+  // switch files.
+  const fileName = (): string | undefined => (doc.filePath ? basename(doc.filePath) : undefined);
+
   const onChange = (board: unknown): void => {
-    const msg = JSON.stringify({ type: 'board', board });
+    const msg = JSON.stringify({ type: 'board', board, file: fileName() });
     for (const ws of clients) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
     }
@@ -836,7 +752,7 @@ function attachWebSocket(doc: Doc, server: http.Server, panelChannel?: PanelChan
       return;
     }
     clients.add(ws);
-    ws.send(JSON.stringify({ type: 'board', board: doc.board }));
+    ws.send(JSON.stringify({ type: 'board', board: doc.board, file: fileName() }));
 
     ws.on('message', (data: Buffer | ArrayBuffer | Buffer[]) => {
       let msg: unknown;
@@ -942,7 +858,6 @@ export function startServer(
   const uiDistDir = opts.uiDistDir ?? UI_DIST;
   const server = http.createServer(makeRequestListener(ctx, uiDistDir));
   const panelChannel = panel ? attachPanelChannel(panel) : undefined;
-  const wss = attachWebSocket(doc, server, panelChannel);
 
   // A board edited in the editor is a source board changed on disk: once its
   // autosave has landed, let the panel view notice (stale flag, new geometry).
@@ -961,6 +876,12 @@ export function startServer(
     server.once('error', reject);
     server.listen(port, () => {
       server.removeListener('error', reject);
+      // Attach only after listen succeeds. ws forwards the http server's
+      // 'error' to the WebSocketServer, where — with no listener — Node
+      // throws "unhandled 'error' event" *inside* the emit, so a listen
+      // failure (EADDRINUSE) would crash uncaught before `reject` ever ran.
+      // Late attach also keeps a failed listen from leaking doc listeners.
+      const wss = attachWebSocket(doc, server, panelChannel);
       const addr = server.address();
       const actualPort = typeof addr === 'object' && addr !== null ? addr.port : port;
       resolve({
@@ -975,6 +896,11 @@ export function startServer(
             for (const client of wss.clients) client.terminate();
             wss.close(() => {
               server.close((err) => (err ? rej(err) : res()));
+              // close() only stops the listener and then waits: a browser's
+              // idle keep-alive sockets or an attached MCP client's long-lived
+              // stream would keep it pending forever (a quitting desktop app
+              // turns into a zombie process). Destroy whatever remains.
+              server.closeAllConnections();
             });
           });
           await doc.close();

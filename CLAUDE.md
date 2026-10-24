@@ -14,11 +14,17 @@ node packages/server/dist/cli.js serve board.flamingo   # prints "Flamingo v0.1.
 
 - Serves the live UI at `http://localhost:4242`, streams board changes over
   `/ws`, and exposes the MCP endpoint at `/mcp`.
-- `.mcp.json` (repo root) wires the `flamingo` MCP server to `/mcp` — its **34
+- `.mcp.json` (repo root) wires the `flamingo` MCP server to `/mcp` — its **37
   tools are available only while the server is running**. Start the server
   first, then use the tools.
 - Port override: `FLAMINGO_PORT`. Autoroute timeout override:
   `FLAMINGO_ROUTE_TIMEOUT_MS` (default 300000).
+- **Desktop app tabs:** the Mac app opens each board in its own native tab,
+  each with its own server + MCP endpoint (ports scanned up from 4242, kept
+  stable per project across relaunches). On open it writes the board's MCP URL
+  into the project folder's `.mcp.json`, so a Claude Code session started in
+  that folder connects to that board automatically — separate sessions can
+  drive separate boards concurrently.
 
 ## Design workflow (tool names)
 
@@ -56,7 +62,7 @@ CLI commands. It is served in one of two ways:
   view is at `http://localhost:4242`, and `/mcp` has the 23 panel tools and
   **no board tools**. The file is created if it is missing.
 - `flamingo serve board.flamingo --panel combo.plamingo`: the board's server
-  with the panel added. All 57 tools at one `/mcp`; the panel view is at
+  with the panel added. All 60 tools at one `/mcp`; the panel view is at
   `/panel`. Use this when one session designs boards and panelizes them.
 
 Two servers on one machine need two ports (`FLAMINGO_PORT`); `.mcp.json` points
