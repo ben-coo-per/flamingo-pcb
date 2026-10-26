@@ -55,6 +55,7 @@ function geometry(instances: PlacedInstance[]): PanelGeometry {
     featureNotes: [],
     profile: [],
     dividers: [],
+    scores: [],
   };
 }
 

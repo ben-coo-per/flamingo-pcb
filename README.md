@@ -202,6 +202,27 @@ and CPL every designator is prefixed with its instance (`S1_U2`, `M3_R5`) and
 every position is in panel coordinates. Positions are the bottom-left corner of
 the instance's bounding box, in mm, y-up, like everything else in Flamingo.
 
+### Separating the boards
+
+`panel_set_settings separation=...` picks how the boards come apart:
+
+- **`mouse-bite`** (default): routed gaps bridged by tabs, each perforated with a
+  row of 0.6 mm holes. Snap the boards out by hand. Both assembly services take
+  it, and any board shape works.
+- **`silk-divider`**: no routing. The boards sit inside one rectangle with
+  silkscreen lines between them, which JLCPCB counts as one design. You cut
+  them apart yourself.
+- **`v-cut`**: the boards abut, and JLCPCB scores a straight V-groove along
+  every shared edge so they snap apart cleanly. JLCPCB only scores straight
+  lines that run edge to edge across the whole panel. So every board must be a
+  plain rectangle (no rounded corners), boards in a row must share their top
+  and bottom edges, and boards in a column their left and right edges. The panel
+  must measure 70 x 70 mm to 475 x 475 mm, parallel cuts must be at least 2 mm
+  apart, and only Standard PCBA takes V-cut panels. The score lines go on the
+  profile (`.GKO`) layer, each labelled `V-CUT`. Run `panel_arrange` after you
+  switch, so the boards close up. Flamingo never proposes V-cut in `quote_order`.
+  On a panel set to V-cut, its panel scenarios keep V-cut.
+
 ### What the check looks for
 
 - **Source boards**: unreadable, stale, or with DRC violations of their own.
@@ -215,6 +236,9 @@ the instance's bounding box, in mm, y-up, like everything else in Flamingo.
 - **Placement**: overlaps, spacing, overhanging parts that would hit a
   neighbour or a rail, instances that nothing holds.
 - **Size**: the fab's largest board and the assembly services' panel limits.
+- **V-cut** (on a V-cut panel only): rectangular boards, cuts that run between
+  boards and never through one, panel size, the spacing and count of the cuts,
+  and copper too close to a cut.
 
 Errors stop `export_panel_fab` unless `waive:true`. Limits and panel geometry
 defaults live in `packages/panel/config/panel-limits.json`.

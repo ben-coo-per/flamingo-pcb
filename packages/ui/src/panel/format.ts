@@ -118,6 +118,13 @@ export const ISSUE_TITLE: Record<IssueCode, string> = {
   'no-instances': 'Needed board not on panel',
   'silk-divider-designs': 'Too many designs',
   'silk-divider-shape': 'Not a plain rectangle',
+  'v-cut-shape': 'Not a rectangle for V-cut',
+  'v-cut-misaligned': 'V-cut through a board',
+  'v-cut-size': 'V-cut panel size',
+  'v-cut-lines': 'V-cut lines',
+  'v-cut-rails': 'V-cut without rails',
+  'v-cut-small-board': 'Small board on V-cut',
+  'v-cut-near-copper': 'V-cut near copper',
   'assembly-sides': 'Parts on both sides',
   empty: 'Empty panel',
 };

@@ -295,9 +295,9 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
         'Change panel settings. Only the fields given change. copperLayers promotes the panel: boards with fewer layers are then fabricated at that count, which is how boards with different layer counts can share a panel.',
       inputSchema: {
         separation: z
-          .enum(['mouse-bite', 'solid-tab', 'silk-divider'])
+          .enum(['mouse-bite', 'solid-tab', 'silk-divider', 'v-cut'])
           .optional()
-          .describe('mouse-bite: routed gaps bridged by perforated tabs. solid-tab: plain tabs. silk-divider: no routing, boards drawn in silkscreen inside one rectangular outline (one design as far as JLCPCB is concerned; you cut them apart)'),
+          .describe('mouse-bite: routed gaps bridged by perforated tabs. solid-tab: plain tabs. silk-divider: no routing, boards drawn in silkscreen inside one rectangular outline (one design as far as JLCPCB is concerned; you cut them apart). v-cut: boards abut and JLCPCB scores a straight V-groove along every shared edge, across the whole panel, so they snap apart by hand; boards must be plain rectangles lined up in rows and columns, the panel at least 70 x 70 mm, and only Standard PCBA takes it (spacing and tabs are ignored)'),
         spacing: z.number().positive().optional().describe('Gap between boards, and between boards and rails, in mm'),
         railTop: z.number().min(0).optional().describe('Top rail width in mm (0 = none)'),
         railBottom: z.number().min(0).optional().describe('Bottom rail width in mm (0 = none)'),
@@ -461,7 +461,7 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
     'export_panel_fab',
     {
       description:
-        'Export the fabrication fileset for the panel: gerbers.zip (Gerber X2 + Excellon for the whole panel, including rails, routed profile, mouse-bite and tooling holes, fiducials), bom.csv and cpl.csv merged across instances with designators prefixed per instance (S1_U2, M3_R5) and positions in panel coordinates, plus panel.render.svg. Parts of bare instances are left out of BOM and CPL. Runs panel_check first and refuses (isError) on any error unless waive is true. Writes files only; nothing is uploaded or ordered.',
+        'Export the fabrication fileset for the panel: gerbers.zip (Gerber X2 + Excellon for the whole panel, including rails, routed profile, mouse-bite and tooling holes, fiducials, and on a V-cut panel the score lines drawn edge to edge on the profile (GKO) layer with a V-CUT label beside each), bom.csv and cpl.csv merged across instances with designators prefixed per instance (S1_U2, M3_R5) and positions in panel coordinates, plus panel.render.svg. Parts of bare instances are left out of BOM and CPL. Runs panel_check first and refuses (isError) on any error unless waive is true. Writes files only; nothing is uploaded or ordered.',
       inputSchema: {
         outDir: z
           .string()

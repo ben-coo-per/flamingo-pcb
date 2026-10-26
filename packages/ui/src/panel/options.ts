@@ -20,6 +20,7 @@ import type {
   Scenario,
   ScenarioKind,
   ScenarioLine,
+  Separation,
 } from '@flamingo/panel';
 import { layoutMatches } from '@flamingo/panel';
 import { SCENARIO_LABEL, SCENARIO_MEANING, loadsOntoPanel, scenarioTags } from './format.js';
@@ -136,6 +137,13 @@ function fromScenario(s: Scenario): Option {
   };
 }
 
+const SEPARATION_TAG: Record<Separation, string> = {
+  'mouse-bite': 'mouse bites',
+  'solid-tab': 'solid tabs',
+  'silk-divider': 'silk lines',
+  'v-cut': 'V-cut',
+};
+
 /** The panel on the plate, as an option. */
 function ownPanel(view: PanelView): Option {
   const q = view.quote;
@@ -148,7 +156,7 @@ function ownPanel(view: PanelView): Option {
     id: OWN,
     kind: view.panel.settings.separation === 'silk-divider' ? 'silk-divider' : 'merged',
     label: 'Your panel',
-    tags: [view.panel.settings.separation === 'silk-divider' ? 'silk lines' : view.panel.settings.separation === 'solid-tab' ? 'solid tabs' : 'mouse bites'],
+    tags: [SEPARATION_TAG[view.panel.settings.separation]],
     meaning: 'A panel you arranged yourself, priced and ranked like the others.',
     orders: q.order
       ? [{ panel: q.order.piece.boards > 1, counts, made: q.order.pcbQty, assembled: q.order.assembly?.qty ?? 0, minMade: false, minAssembled: false }]

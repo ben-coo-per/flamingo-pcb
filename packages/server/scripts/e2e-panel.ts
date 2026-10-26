@@ -14,6 +14,8 @@
  *   5. exports the fab fileset and validates it: every Gerber and drill file
  *      through tracespace, the BOM and CPL row by row
  *   6. marks one instance bare and checks it leaves BOM and CPL
+ *   7. switches to V-cut: the check refuses the rounded boards, and a waived
+ *      export carries edge-to-edge score lines on the profile
  *
  *     npx tsx packages/server/scripts/e2e-panel.ts
  *
@@ -360,6 +362,42 @@ async function main(): Promise<void> {
     console.log('  M5 is fabricated but absent from BOM and CPL');
     summary.push(['Bare instance', 'M5 left out of BOM and CPL, still fabricated']);
     await call('panel_undo');
+
+    // --- V-cut -------------------------------------------------------------
+    // Both reference boards have rounded corners, so V-cut must be refused by
+    // the check; a waived export still has to carry the scores on the profile.
+    step('panel_set_settings separation v-cut, check, export waived, then panel_undo');
+    console.log('  ' + (await call('panel_set_settings', { separation: 'v-cut' })));
+    const vcutCheck = await call('panel_check');
+    assert(/not a plain rectangle \(rounded corners/.test(vcutCheck), 'panel_check did not refuse V-cut for boards with rounded corners');
+    const vcutDir = join(projectDir, 'fab-panel-vcut');
+    const refused = await raw('export_panel_fab', { outDir: vcutDir });
+    assert(refused.isError === true, 'export_panel_fab wrote a V-cut panel of rounded boards without a waiver');
+    await call('export_panel_fab', { outDir: vcutDir, waive: true });
+    const vEntries = new AdmZip(join(vcutDir, 'gerbers.zip')).getEntries();
+    const vGko = vEntries.find((e) => e.entryName === 'combo.GKO')!.getData().toString('utf8');
+    const vParser = createParser();
+    vParser.feed(vGko);
+    assert(vParser.results().done === true, 'the V-cut profile does not parse');
+    const vNpth = vEntries.find((e) => e.entryName === 'combo-NPTH.DRL')?.getData().toString('utf8') ?? '';
+    // The boards bring non-plated holes of their own; the mouse bites must be gone.
+    const hits = (drl: string): number => drl.split('\n').filter((l) => /^X/.test(l)).length;
+    assert(hits(vNpth) < hits(npth), `a V-cut panel still has mouse-bite holes (${hits(vNpth)} non-plated hits, ${hits(npth)} with mouse bites)`);
+    // Profile: the frame (one contour of 4 strokes), then one open stroke per score, then label text.
+    const vState = await call('panel_get_state');
+    const vSize = /Size: ([\d.]+) x ([\d.]+) mm/.exec(vState);
+    assert(vSize, 'V-cut panel size missing from the state');
+    const [vw, vh] = [Number(vSize[1]), Number(vSize[2])];
+    const scoreLines = [...vGko.matchAll(/X(-?\d+)Y(-?\d+)D02\*\nX(-?\d+)Y(-?\d+)D01\*/g)].filter((m) => {
+      const [x1, y1, x2, y2] = m.slice(1, 5).map((n) => Number(n) / 1e6);
+      return (Math.abs(x1! - x2!) < 1e-6 && Math.abs(Math.abs(y2! - y1!) - vh) < 1e-3) || (Math.abs(y1! - y2!) < 1e-6 && Math.abs(Math.abs(x2! - x1!) - vw) < 1e-3);
+    });
+    assert(scoreLines.length >= 2, `expected edge-to-edge V-cut lines on the profile, found ${scoreLines.length}`);
+    assert(/%ADD\d+C,0\.18\*%/.test(vGko), 'no V-CUT label stroke on the profile');
+    console.log(`  ${scoreLines.length} edge-to-edge V-cut lines with labels on combo.GKO; V-cut refused for rounded boards`);
+    summary.push(['V-cut', `${scoreLines.length} score lines on the profile; rounded boards refused`]);
+    await call('panel_undo');
+    assert(/mouse-bite/.test(await call('panel_get_state')), 'undo did not restore mouse bites');
 
     // --- keep the artifacts ------------------------------------------------
     step(`save + copy artifacts to ${OUT_DIR}`);

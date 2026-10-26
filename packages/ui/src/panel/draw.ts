@@ -19,6 +19,7 @@
  *   overhanging part   thin dashed polygon
  *   board-edge keepout cross hatch
  *   tab                filled bar; mouse-bite holes as open circles
+ *   V-cut score        thin dashed line across the whole panel, over the boards
  *   error / warning    second outline outside the board (solid / dashed), label ERROR / WARNING
  *
  * The plate shows one of two things: the panel, which can be edited, or a
@@ -415,6 +416,7 @@ function drawScenario(ctx: Ctx, state: PanelState, scenario: Scenario): void {
     for (const inst of order.plate.instances) {
       drawInstance(ctx, look, inst, undefined, false, boardColor(keys, inst.source));
     }
+    drawScores(ctx, look, order.plate);
     // How many of this piece, where the eye lands first.
     const corner = worldToScreen(t, { x: frame.outer.minX, y: frame.outer.maxY });
     label(ctx, `× ${made}`, corner.x, corner.y - 34, 22, true, 'left');
@@ -463,4 +465,13 @@ export function drawPlate(ctx: Ctx, state: PanelState, width: number, height: nu
   }
   const top = geometry.instances.find((i) => i.id === dragged);
   if (top) drawInstance(ctx, look, top, worst.get(top.id), stale.has(top.source), boardColor(keys, top.source));
+  drawScores(ctx, look, geometry);
+}
+
+/** V-cut lines, drawn after the boards so a line through a board shows. */
+function drawScores(ctx: Ctx, look: Look, geometry: PanelGeometry): void {
+  for (const s of geometry.scores ?? []) {
+    trace(ctx, look.t, [s.start, s.end], false);
+    stroke(ctx, 1, [6, 3]);
+  }
 }
