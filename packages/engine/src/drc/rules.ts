@@ -20,7 +20,7 @@
 export const DRC_EPSILON = 0.01;
 
 export interface RuleSet {
-  id: 'jlcpcb-2l' | 'jlcpcb-4l' | 'jlcpcb-6l';
+  id: 'jlcpcb-2l' | 'jlcpcb-4l' | 'jlcpcb-4l-adv' | 'jlcpcb-6l';
   minTrackWidth: number;
   minClearance: number;
   minDrill: number;
@@ -52,6 +52,25 @@ export const RULESETS: Record<RuleSet['id'], RuleSet> = {
     minAnnular: 0.13,
     copperToEdge: 0.3,
     holeToHole: 0.5,
+    minSilkWidth: 0.15,
+  },
+  /**
+   * 4-layer with JLCPCB's "advanced" via tier: 0.15mm drill / 0.25mm pad. Needed
+   * for 0.35mm-pitch QFNs (e.g. ESP32-P4): a 0.45mm standard via cannot sit
+   * beside its neighbours at that pitch, so a dogbone fanout is impossible
+   * without it. The tier costs extra at JLCPCB -- these numbers follow the
+   * KiCadRoutingTools JLC "advanced" fab model (via 0.25/0.15, hole-to-hole
+   * 0.2); confirm against a live JLCPCB quote before ordering.
+   */
+  'jlcpcb-4l-adv': {
+    id: 'jlcpcb-4l-adv',
+    minTrackWidth: 0.09,
+    minClearance: 0.09,
+    minDrill: 0.15,
+    minViaDiameter: 0.25,
+    minAnnular: 0.05,
+    copperToEdge: 0.3,
+    holeToHole: 0.2,
     minSilkWidth: 0.15,
   },
   'jlcpcb-6l': {

@@ -153,7 +153,7 @@ export function createTrackTool(): Tool {
     onPointerDown(ev: PointerEvt, ctx: ToolCtx): void {
       reconcileLayer(ctx);
       const state = ctx.getState();
-      const hit = state.board ? hitTest(state.board, ev.worldRaw, state.view.scale) : null;
+      const hit = state.board ? hitTest(state.board, ev.worldRaw, state.view.scale, state.layerVisibility) : null;
 
       if (net === null) {
         // First click must land on copper -- its net becomes the route's net.
