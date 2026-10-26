@@ -172,7 +172,7 @@ export function polygonOutline(pts: Array<{ x: number; y: number }>): PathSeg[] 
 export function pentagonPoints(side: number): Array<{ x: number; y: number }> {
   const r = side / (2 * Math.sin(Math.PI / 5));
   const pts = Array.from({ length: 5 }, (_, i) => {
-    const a = Math.PI / 2 + (i * 2 * Math.PI) / 5 + Math.PI / 5; // first vertex is bottom-right of the flat side
+    const a = Math.PI / 2 + (i * 2 * Math.PI) / 5; // first vertex at the top, so the opposite side is flat and at the bottom
     return { x: r * Math.cos(a), y: r * Math.sin(a) };
   });
   const minX = Math.min(...pts.map((p) => p.x));

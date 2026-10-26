@@ -11,6 +11,11 @@
  * a strip ("bottom-left"), trying the instance as it is and turned by 90
  * degrees. That is repeated for a range of strip widths and the smallest
  * panel that fits the limit wins.
+ *
+ * Boards that are not rectangles, or a `rotationStep` other than 90, switch
+ * the same search to the real outlines (nest.ts): each board is tried at
+ * every multiple of the step and dropped where its grown outline overlaps
+ * nothing, so pentagons interlock and an L-shaped board tucks into a corner.
  */
 
 import type { PanelLimits } from './config.js';
@@ -23,6 +28,7 @@ import {
   usesTabs,
   type PlacedInstance,
 } from './geometry.js';
+import { dedupeOptions, growth, nestOption, obstacleShape, packNest, type NestItem, type Shape } from './nest.js';
 import type { InstancePlacement } from './ops.js';
 import type { ResolvedSources } from './resolved.js';
 import type { EdgeInfo } from './source.js';
@@ -34,6 +40,10 @@ import { SIDES } from './types.js';
 const EPS = 1e-6;
 /** How many strip widths are tried at most. */
 const MAX_WIDTHS = 32;
+/** Fewer when nesting outlines, which costs far more per strip. */
+const MAX_WIDTHS_NEST = 6;
+/** Outlines filling less of their box than this are packed as outlines, not boxes. */
+const NEST_FILL_RATIO = 0.9;
 
 export interface SizeLimit {
   width: number;
@@ -43,8 +53,10 @@ export interface SizeLimit {
 }
 
 export interface ArrangeOptions {
-  /** Try each instance turned by 90 degrees as well (default true). */
+  /** Try each instance turned as well (default true): by quarter turns, or by `rotationStep`. */
   rotate?: boolean;
+  /** Angle step to try, degrees; overrides `settings.rotationStep`. */
+  rotationStep?: number;
   /** Override the size limit (default: `sizeLimit(panel, sources, limits)`). */
   limit?: SizeLimit;
 }
@@ -130,30 +142,6 @@ interface Item {
 
 function overlaps(a: Rect, b: Rect): boolean {
   return a.x < b.x + b.w - EPS && b.x < a.x + a.w - EPS && a.y < b.y + b.h - EPS && b.y < a.y + a.h - EPS;
-}
-
-/**
- * How far each side of an instance grows. Grown rectangles may touch, so two
- * growths add up to the gap between two boards:
- *  - a plain edge grows by half the spacing, giving the spacing between two;
- *  - a blocked edge grows by its clearance less the half spacing a plain
- *    neighbour brings, giving exactly its clearance;
- *  - an edge with an overhanging part grows by at least the overhang plus half
- *    the margin, so that two such edges facing each other keep the margin
- *    between the parts, not merely between a part and a board.
- */
-function growth(
-  edges: Record<Side, EdgeInfo>,
-  spacing: number,
-  overhangMargin: number,
-): Record<Side, number> {
-  const g = {} as Record<Side, number>;
-  for (const s of SIDES) {
-    const e = edges[s];
-    const margin = Math.max(spacing, e.clearance);
-    g[s] = Math.max(0, margin - spacing / 2, e.overhang > 0 ? e.overhang + overhangMargin / 2 : 0);
-  }
-  return g;
 }
 
 /** A board's edges keyed by the panel side each faces once turned by `rotation`. */
@@ -306,17 +294,52 @@ export function arrange(
   const overhangMargin = limits.blockedEdges.overhangMargin.value;
   const obstacles = pinnedPlaced.map((p) => grownRect(p, spacing, overhangMargin));
 
+  const geometryOf = (inst: PanelInstance) => sources.find((s) => s.key === inst.source)!.geometry!;
+  const step = opts.rotationStep ?? panel.settings.rotationStep ?? 90;
+  // Outlines are nested when a board is clearly not a rectangle, or when the
+  // boards may turn by something other than quarter turns.
+  const nesting = Math.abs(step - 90) > EPS || usable.some((i) => geometryOf(i).fillRatio < NEST_FILL_RATIO);
+
+  const bySize = <T extends { options: Array<{ w: number; h: number }> }>(a: T & { id: string }, b: T & { id: string }): number => {
+    const size = (it: T): [number, number] => [
+      Math.max(...it.options.map((o) => Math.max(o.w, o.h))),
+      Math.max(...it.options.map((o) => o.w * o.h)),
+    ];
+    const [la, aa] = size(a);
+    const [lb, ab] = size(b);
+    return lb - la || ab - aa || a.id.localeCompare(b.id, undefined, { numeric: true });
+  };
   const items: Item[] = free
     .map((inst) => ({ id: inst.id, options: optionsFor(inst, sources, spacing, overhangMargin, rotate) }))
-    .sort((a, b) => {
-      const size = (it: Item): [number, number] => [
-        Math.max(...it.options.map((o) => Math.max(o.w, o.h))),
-        Math.max(...it.options.map((o) => o.w * o.h)),
-      ];
-      const [la, aa] = size(a);
-      const [lb, ab] = size(b);
-      return lb - la || ab - aa || a.id.localeCompare(b.id, undefined, { numeric: true });
-    });
+    .sort(bySize);
+  const nestItems: NestItem[] = nesting
+    ? free
+        .map((inst) => {
+          const g = geometryOf(inst);
+          // Every multiple of the step, and the quarter turns whatever the
+          // step: a sideways pentagon is as good a candidate as a tilted one.
+          const angles = rotate
+            ? [
+                ...Array.from({ length: Math.max(1, Math.round(360 / step)) }, (_, k) => k * step),
+                0,
+                90,
+                180,
+                270,
+              ]
+            : [0];
+          const options = angles.map((a) => nestOption(g.outline, g.edges, inst.rotation + a, spacing, overhangMargin));
+          return { id: inst.id, options: dedupeOptions(options) };
+        })
+        .sort(bySize)
+    : [];
+  const nestObstacles: Shape[] = nesting
+    ? pinned.map((inst) => {
+        const g = geometryOf(inst);
+        return obstacleShape(g.outline, g.edges, inst.rotation, inst.at, spacing, overhangMargin);
+      })
+    : [];
+  // What the strip search sees: grown boxes, or the boxes of grown outlines.
+  const sized: Array<{ options: Array<{ w: number; h: number }> }> = nesting ? nestItems : items;
 
   // The strip starts where a panel anchored at the origin puts its first
   // board, or further out when a pinned board sits beyond that.
@@ -331,27 +354,39 @@ export function arrange(
 
   const narrowest = Math.max(
     obstacleRight - x0,
-    ...items.map((it) => Math.min(...it.options.map((o) => o.w))),
+    ...sized.map((it) => Math.min(...it.options.map((o) => o.w))),
   );
-  const widest = obstacleRight - x0 + items.reduce((sum, it) => sum + Math.max(...it.options.map((o) => o.w)), 0);
+  const widest = obstacleRight - x0 + sized.reduce((sum, it) => sum + Math.max(...it.options.map((o) => o.w)), 0);
 
   // Candidate strip widths: every run of 1..n boards of each size, which are
-  // the widths at which a row gains a board.
+  // the widths at which a row gains a board. Nested shapes interlock at
+  // widths no run predicts, so the limit itself is a candidate too.
   const widths = new Set<number>([narrowest, widest]);
-  for (const it of items) {
+  for (const it of sized) {
     for (const o of it.options) {
-      for (let k = 1; k <= items.length; k++) {
+      for (let k = 1; k <= sized.length; k++) {
         const w = obstacleRight - x0 + k * o.w;
         if (w >= narrowest - EPS && w <= widest + EPS) widths.add(Math.round(w * 1000) / 1000);
         if (k * o.w >= widest) break;
       }
     }
   }
-  let sorted = [...widths].sort((a, b) => a - b);
-  if (sorted.length > MAX_WIDTHS) {
-    const step = (sorted.length - 1) / (MAX_WIDTHS - 1);
-    sorted = Array.from({ length: MAX_WIDTHS }, (_, i) => sorted[Math.round(i * step)]!);
+  const limitWidths: number[] = [];
+  if (nesting) {
+    for (const lw of [limit.width, limit.height]) {
+      const inner = lw - (rails.left > 0 ? rails.left + halfGap : 0) - (rails.right > 0 ? rails.right + halfGap : 0);
+      if (inner >= narrowest - EPS && inner <= widest + EPS) limitWidths.push(Math.round(inner * 1000) / 1000);
+    }
   }
+  let sorted = [...widths].sort((a, b) => a - b);
+  const maxWidths = nesting ? MAX_WIDTHS_NEST : MAX_WIDTHS;
+  if (sorted.length > maxWidths) {
+    const stride = (sorted.length - 1) / (maxWidths - 1);
+    sorted = Array.from({ length: maxWidths }, (_, i) => sorted[Math.round(i * stride)]!);
+  }
+  // The strips that are exactly as wide as the limit allows are always tried.
+  for (const lw of limitWidths) if (!sorted.some((w) => Math.abs(w - lw) < 1e-3)) sorted.push(lw);
+  sorted.sort((a, b) => a - b);
 
   // The smallest panel either assembly service takes.
   const populated = usable.some((i) => i.populate);
@@ -365,14 +400,22 @@ export function arrange(
   let bestFit: Candidate | null = null;
   let bestAny: Candidate | null = null;
 
-  for (const width of sorted) {
+  const packAt = (width: number): InstancePlacement[] | null => {
+    if (nesting) {
+      const nested = packNest(nestItems, nestObstacles, x0, y0, width);
+      return nested
+        ? nested.map((p) => ({ id: p.id, at: { x: p.x + p.option.dx, y: p.y + p.option.dy }, rotation: p.option.rotation }))
+        : null;
+    }
     const packed = packStrip(items, obstacles, x0, y0, width);
-    if (!packed) continue;
-    const placements: InstancePlacement[] = packed.map((p) => ({
-      id: p.id,
-      at: { x: p.rect.x + p.option.dx, y: p.rect.y + p.option.dy },
-      rotation: p.option.rotation,
-    }));
+    return packed
+      ? packed.map((p) => ({ id: p.id, at: { x: p.rect.x + p.option.dx, y: p.rect.y + p.option.dy }, rotation: p.option.rotation }))
+      : null;
+  };
+
+  for (const width of sorted) {
+    const placements = packAt(width);
+    if (!placements) continue;
     const moved: PanelInstance[] = usable.map((inst) => {
       const pl = placements.find((q) => q.id === inst.id);
       return pl ? { ...inst, at: pl.at, rotation: pl.rotation ?? inst.rotation } : inst;
