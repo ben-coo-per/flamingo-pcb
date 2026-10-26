@@ -473,6 +473,7 @@ describe('panel gerbers', () => {
     expect(await readFile(result.bomCsv, 'utf8')).toContain('S1_U1');
     expect(await readFile(result.cplCsv, 'utf8')).toContain('M5_R1');
     expect(await readFile(result.renderSvg, 'utf8')).toContain('<svg');
+    expect(await readFile(result.fabSvg, 'utf8')).toContain('fill-rule="evenodd"');
     expect(result.placed).toBe(BLINKER.components.length + 5);
   });
 });

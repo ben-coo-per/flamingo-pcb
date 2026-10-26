@@ -49,7 +49,7 @@ export const PANEL_USAGE = `Usage: flamingo panel <command> <file${PANEL_EXTENSI
              [--name NAME]
   arrange <file> [--no-rotate] [--rotation-step DEG]
   check <file>                                    exit status 1 when there are errors
-  screenshot <file> [--out panel.png] [--width PX]
+  screenshot <file> [--out panel.png] [--width PX] [--view layout|fab]
   quote <file> [--objective total|per-board|overage] [--brief] [--json] [--offline]
   apply-scenario <file> <scenario-id>
   export <file> [--out DIR] [--waive]
@@ -319,7 +319,12 @@ export async function runPanelCli(argv: string[], io: PanelCliIo = { out: consol
       }
       case 'screenshot': {
         const out = resolve(process.cwd(), string(args, 'out') ?? `${basename(file, PANEL_EXTENSION)}.png`);
-        await writeFile(out, await s.renderPng(number(args, 'width')));
+        const view = string(args, 'view') ?? 'layout';
+        if (view !== 'layout' && view !== 'fab') {
+          io.err(`--view must be layout or fab, not "${view}"`);
+          return 2;
+        }
+        await writeFile(out, await s.renderPng(number(args, 'width'), view));
         io.out(`Wrote ${out}`);
         return 0;
       }
@@ -362,7 +367,7 @@ export async function runPanelCli(argv: string[], io: PanelCliIo = { out: consol
           return 1;
         }
         io.out(`Exported panel fab outputs to ${r.outDir}:`);
-        for (const f of [r.result.gerberZip, r.result.bomCsv, r.result.cplCsv, r.result.renderSvg]) io.out(`  ${f}`);
+        for (const f of [r.result.gerberZip, r.result.bomCsv, r.result.cplCsv, r.result.renderSvg, r.result.fabSvg]) io.out(`  ${f}`);
         io.out(`Placed by assembly: ${r.result.placed} component(s). Left off (bare instances): ${r.result.skipped}.`);
         for (const n of r.result.notes) io.out(`Note: ${n}`);
         if (r.waived.length > 0) io.out(`Waived ${r.waived.length} error(s):\n${formatIssues(r.waived)}`);

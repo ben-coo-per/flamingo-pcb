@@ -237,6 +237,11 @@ describe('panel MCP tools', () => {
     expect(png.subarray(1, 4).toString('ascii')).toBe('PNG');
     expect(png.readUInt32BE(16)).toBe(800);
     expect(r.text).toMatch(/800x\d+px, panel [\d.]+ x [\d.]+ mm, 4 instance\(s\), \d+ tab\(s\), 0 error\(s\)/);
+    const fab = await call('panel_screenshot', { widthPx: 600, view: 'fab' });
+    const fabImg = (fab.raw.content as Array<{ type: string; data?: string }>).find((c) => c.type === 'image')!;
+    expect(Buffer.from(fabImg.data!, 'base64').readUInt32BE(16)).toBe(600);
+    const layout = await call('panel_screenshot', { widthPx: 600 });
+    expect((layout.raw.content as Array<{ data?: string }>).find((c) => c.data)!.data).not.toBe(fabImg.data);
   });
 
   it('quote_order ranks scenarios and flags estimates', async () => {
@@ -293,7 +298,7 @@ describe('panel MCP tools', () => {
     expect(out).toContain(`Exported panel fab outputs to ${fab}`);
     expect(out).toContain('Placed by assembly: 4 component(s). Left off (bare instances): 1.');
 
-    for (const f of ['gerbers.zip', 'bom.csv', 'cpl.csv', 'panel.render.svg']) {
+    for (const f of ['gerbers.zip', 'bom.csv', 'cpl.csv', 'panel.render.svg', 'panel.fab.svg']) {
       expect((await stat(join(fab, f))).size).toBeGreaterThan(0);
     }
     const entries = new AdmZip(join(fab, 'gerbers.zip')).getEntries();

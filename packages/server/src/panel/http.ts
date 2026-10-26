@@ -50,6 +50,11 @@ function objectiveOf(v: unknown): Objective {
   return typeof v === 'string' && (OBJECTIVES as readonly string[]).includes(v) ? (v as Objective) : 'total';
 }
 
+/** `?view=fab` asks for the fabricated view; anything else is the layout. */
+function viewOf(v: string | null): 'layout' | 'fab' {
+  return v === 'fab' ? 'fab' : 'layout';
+}
+
 /** Handle a request under /api/panel. Returns false when the route is unknown. */
 export async function handlePanelApi(
   session: PanelSession,
@@ -94,12 +99,12 @@ export async function handlePanelApi(
       }
       case 'render.svg': {
         res.writeHead(200, { 'content-type': 'image/svg+xml' });
-        res.end(await session.renderSvg());
+        res.end(await session.renderSvg(undefined, viewOf(url.searchParams.get('view'))));
         return true;
       }
       case 'render.png': {
         const w = Number(url.searchParams.get('widthPx'));
-        const png = await session.renderPng(Number.isFinite(w) && w > 0 ? w : undefined);
+        const png = await session.renderPng(Number.isFinite(w) && w > 0 ? w : undefined, viewOf(url.searchParams.get('view')));
         res.writeHead(200, { 'content-type': 'image/png' });
         res.end(png);
         return true;
@@ -116,6 +121,7 @@ export async function handlePanelApi(
         files.set('bom.csv', built.files.bom);
         files.set('cpl.csv', built.files.cpl);
         files.set('panel.render.svg', built.files.svg);
+        files.set('panel.fab.svg', built.files.fabSvg);
         const name = `${session.panel.name.replace(/[^\w.-]+/g, '_') || 'panel'}-panel-fab.zip`;
         const zip = zipFiles(files);
         res.writeHead(200, {
@@ -143,6 +149,7 @@ export async function handlePanelApi(
           files.set(`${o.folder}/bom.csv`, o.bom);
           files.set(`${o.folder}/cpl.csv`, o.cpl);
           files.set(`${o.folder}/${o.svgName}`, o.svg);
+          if (o.fabSvg) files.set(`${o.folder}/panel.fab.svg`, o.fabSvg);
           plan.push(`${o.folder}/  ${o.label}: PCB qty ${o.made}, ${o.assembled > 0 ? `assemble ${o.assembled}` : 'no assembly'}`);
         }
         files.set('orders.txt', `${plan.join('\n')}\n`);

@@ -140,7 +140,7 @@ describe('flamingo panel CLI', () => {
 
     const out = await ok('export', file, '--out', join(dir, 'out'));
     expect(out).toContain('Placed by assembly: 5 component(s). Left off (bare instances): 0.');
-    for (const f of ['gerbers.zip', 'bom.csv', 'cpl.csv', 'panel.render.svg']) {
+    for (const f of ['gerbers.zip', 'bom.csv', 'cpl.csv', 'panel.render.svg', 'panel.fab.svg']) {
       expect((await stat(join(dir, 'out', f))).size).toBeGreaterThan(0);
     }
   });

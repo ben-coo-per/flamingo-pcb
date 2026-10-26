@@ -61,7 +61,7 @@ import {
   panelRules,
   targetLayers,
 } from '@flamingo/panel';
-import type { ExportPanelFabResult, PanelFabFiles } from '@flamingo/panel/node';
+import type { ExportPanelFabResult, PanelFabFiles, PanelRenderView } from '@flamingo/panel/node';
 import {
   buildPanelFab,
   exportPanelFab,
@@ -105,6 +105,8 @@ export interface ScenarioFab {
   cpl: string;
   svgName: string;
   svg: string;
+  /** A panel order's fabricated view, `panel.fab.svg`. */
+  fabSvg?: string;
 }
 
 export type Outcome<T> = ({ ok: true } & T) | { ok: false; error: string };
@@ -662,19 +664,21 @@ export class PanelSession extends EventEmitter {
     return (await this.view()).issues;
   }
 
-  async renderSvg(widthPx?: number): Promise<string> {
+  /** `layout` is the schematic the panel view edits; `fab` is what the fab makes. */
+  async renderSvg(widthPx?: number, render: PanelRenderView = 'layout'): Promise<string> {
     const view = await this.view();
     const sources = this.cached?.sources ?? (await this.resolved());
     return renderPanelSVG(this.panel, sources, view.geometry, {
       issues: view.issues,
       limits: view.limits.map((l) => ({ width: l.width, height: l.height, label: l.label })),
+      view: render,
       ...(widthPx !== undefined ? { widthPx } : {}),
     });
   }
 
-  async renderPng(widthPx = 1200): Promise<Buffer> {
+  async renderPng(widthPx = 1200, render: PanelRenderView = 'layout'): Promise<Buffer> {
     const width = Math.max(200, Math.min(2400, Math.round(widthPx)));
-    return new Resvg(await this.renderSvg(width)).render().asPng();
+    return new Resvg(await this.renderSvg(width, render)).render().asPng();
   }
 
   async quote(objective: Objective = 'total'): Promise<QuoteResult> {
@@ -820,6 +824,7 @@ export class PanelSession extends EventEmitter {
           cpl: built.cpl,
           svgName: 'panel.render.svg',
           svg: built.svg,
+          fabSvg: built.fabSvg,
         });
       }
     } catch (err) {

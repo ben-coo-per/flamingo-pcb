@@ -385,13 +385,17 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
     'panel_screenshot',
     {
       description:
-        'Render the panel to a PNG so you can see it. Each board design has its own colour, the same as in the panel view; colour means nothing else. State is drawn, not coloured: bare boards are hatched with a dashed outline, blocked edges are heavy with a comb of ticks, tabs are solid bars, instances with errors or warnings get a second outline, size limits are long-dash rectangles.',
+        'Render the panel to a PNG so you can see it, in one of two views. view "layout" (default) is the schematic the panel view edits: each board design has its own colour, the same as in the panel view, and colour means nothing else; state is drawn, not coloured: bare boards are hatched with a dashed outline, blocked edges are heavy with a comb of ticks, tabs are solid bars, instances with errors or warnings get a second outline, size limits are long-dash rectangles. view "fab" is what comes back from the fab: green laminate where material stays (boards, tabs, rails a shade lighter), white where the router cuts it away, mouse-bite and tooling holes punched through at true size, fiducials as copper dots, V-cut scores as dark lines, silk dividers as white lines; a red (error) or amber (warning) "!" badge flags issues, with the count above the panel.',
       inputSchema: {
         widthPx: z.number().int().positive().optional().describe('Image width in px (default 1200, at most 2400)'),
+        view: z
+          .enum(['layout', 'fab'])
+          .optional()
+          .describe('"layout" (default): the editable schematic, coloured by design. "fab": the fabricated panel, material, routed openings and drilled holes.'),
       },
     },
-    async ({ widthPx }): Promise<CallToolResult> => {
-      const png = await session.renderPng(widthPx);
+    async ({ widthPx, view: render }): Promise<CallToolResult> => {
+      const png = await session.renderPng(widthPx, render);
       const view = await session.view();
       const f = view.geometry.frame;
       const errors = view.issues.filter((i) => i.severity === 'error').length;
@@ -471,7 +475,7 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
     'export_panel_fab',
     {
       description:
-        'Export the fabrication fileset for the panel: gerbers.zip (Gerber X2 + Excellon for the whole panel, including rails, routed profile, mouse-bite and tooling holes, fiducials, and on a V-cut panel the score lines drawn edge to edge on the profile (GKO) layer with a V-CUT label beside each), bom.csv and cpl.csv merged across instances with designators prefixed per instance (S1_U2, M3_R5) and positions in panel coordinates, plus panel.render.svg. Parts of bare instances are left out of BOM and CPL. Runs panel_check first and refuses (isError) on any error unless waive is true. Writes files only; nothing is uploaded or ordered.',
+        'Export the fabrication fileset for the panel: gerbers.zip (Gerber X2 + Excellon for the whole panel, including rails, routed profile, mouse-bite and tooling holes, fiducials, and on a V-cut panel the score lines drawn edge to edge on the profile (GKO) layer with a V-CUT label beside each), bom.csv and cpl.csv merged across instances with designators prefixed per instance (S1_U2, M3_R5) and positions in panel coordinates, plus panel.render.svg (the layout view) and panel.fab.svg (the fabricated view: material, routed openings, drilled holes). Parts of bare instances are left out of BOM and CPL. Runs panel_check first and refuses (isError) on any error unless waive is true. Writes files only; nothing is uploaded or ordered.',
       inputSchema: {
         outDir: z
           .string()
@@ -494,6 +498,7 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
         `  ${r.result.bomCsv}`,
         `  ${r.result.cplCsv}`,
         `  ${r.result.renderSvg}`,
+        `  ${r.result.fabSvg}`,
         `Placed by assembly: ${r.result.placed} component(s). Left off (bare instances): ${r.result.skipped}.`,
       ];
       for (const n of r.result.notes) lines.push(`Note: ${n}`);

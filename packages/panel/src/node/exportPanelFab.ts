@@ -8,7 +8,8 @@
  *   gerbers.zip       Gerber X2 + Excellon for the whole panel
  *   bom.csv           merged BOM, designators prefixed per instance (S1_U2)
  *   cpl.csv           merged placement list, panel coordinates
- *   panel.render.svg  reference picture of the panel
+ *   panel.render.svg  reference picture of the panel (the layout view)
+ *   panel.fab.svg     what the fab makes: material, routed openings, drilled holes
  *
  * Instances with populate=false are fabricated like any other, but none of
  * their parts appear in the BOM or CPL (JLCPCB's do-not-place), and their pads
@@ -33,6 +34,8 @@ export interface PanelFabFiles {
   bom: string;
   cpl: string;
   svg: string;
+  /** The fabricated view (render.ts, view 'fab'). */
+  fabSvg: string;
   /** Components placed by assembly, and components left off because their board ships bare. */
   placed: number;
   skipped: number;
@@ -44,6 +47,7 @@ export interface ExportPanelFabResult {
   bomCsv: string;
   cplCsv: string;
   renderSvg: string;
+  fabSvg: string;
   placed: number;
   skipped: number;
   gerberFiles: string[];
@@ -82,6 +86,7 @@ export function buildPanelFab(
     bom: generateBOM(assembled),
     cpl: generateCPL(assembled),
     svg: renderPanelSVG(panel, sources, geometry, { issues: opts.issues }),
+    fabSvg: renderPanelSVG(panel, sources, geometry, { issues: opts.issues, view: 'fab' }),
     placed: assembled.components.length,
     skipped: merged.bare.size,
     notes: merged.notes,
@@ -108,12 +113,15 @@ export async function exportPanelFab(
   await writeFile(cplCsv, built.cpl, 'utf8');
   const renderSvg = resolve(abs, 'panel.render.svg');
   await writeFile(renderSvg, built.svg, 'utf8');
+  const fabSvg = resolve(abs, 'panel.fab.svg');
+  await writeFile(fabSvg, built.fabSvg, 'utf8');
 
   return {
     gerberZip,
     bomCsv,
     cplCsv,
     renderSvg,
+    fabSvg,
     placed: built.placed,
     skipped: built.skipped,
     gerberFiles: [...built.gerbers.keys()],

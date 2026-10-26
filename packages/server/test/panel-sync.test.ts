@@ -280,7 +280,7 @@ describe('panel sync: MCP, HTTP and WebSocket act on one panel', () => {
     expect(zipRes.headers.get('content-type')).toBe('application/zip');
     expect(zipRes.headers.get('content-disposition')).toBe('attachment; filename="combo-panel-fab.zip"');
     const names = new AdmZip(Buffer.from(await zipRes.arrayBuffer())).getEntries().map((e) => e.entryName);
-    expect(names).toEqual(expect.arrayContaining(['combo.GTL', 'combo.GKO', 'combo-NPTH.DRL', 'bom.csv', 'cpl.csv', 'panel.render.svg']));
+    expect(names).toEqual(expect.arrayContaining(['combo.GTL', 'combo.GKO', 'combo-NPTH.DRL', 'bom.csv', 'cpl.csv', 'panel.render.svg', 'panel.fab.svg']));
 
     // Errors refuse the download, with the findings, unless waived.
     await post('/api/panel/op', { op: 'moveInstance', id: 'M1', at: { x: 1, y: 8 }, pin: true });
@@ -344,6 +344,9 @@ describe('panel sync: MCP, HTTP and WebSocket act on one panel', () => {
     expect(svg.headers.get('content-type')).toBe('image/svg+xml');
     const png = await fetch(`${base}/api/panel/render.png?widthPx=400`);
     expect(Buffer.from(await png.arrayBuffer()).readUInt32BE(16)).toBe(400);
+    const fab = await fetch(`${base}/api/panel/render.svg?view=fab`);
+    expect(fab.status).toBe(200);
+    expect(await fab.text()).toMatch(/^<svg /);
   });
 
   it('an unsaved panel gets a file as soon as it gains a board', async () => {

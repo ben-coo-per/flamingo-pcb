@@ -224,6 +224,10 @@ async function main(): Promise<void> {
     assert(img?.data, 'panel_screenshot returned no image');
     await writeFile(join(OUT_DIR, 'panel.png'), Buffer.from(img.data, 'base64'));
     console.log('  ' + textOf(shot));
+    const fabShot = await raw('panel_screenshot', { widthPx: 1600, view: 'fab' });
+    const fabImg = (fabShot.content as Array<{ type: string; data?: string }>).find((c) => c.type === 'image');
+    assert(fabImg?.data, 'panel_screenshot view=fab returned no image');
+    await writeFile(join(OUT_DIR, 'panel.fab.png'), Buffer.from(fabImg.data, 'base64'));
 
     // --- quote -------------------------------------------------------------
     step('quote_order');
@@ -259,7 +263,7 @@ async function main(): Promise<void> {
     assert(exported.includes(`Placed by assembly: ${totalParts} component(s)`), `expected ${totalParts} placed components`);
 
     step('validate the fab fileset');
-    for (const f of ['gerbers.zip', 'bom.csv', 'cpl.csv', 'panel.render.svg']) {
+    for (const f of ['gerbers.zip', 'bom.csv', 'cpl.csv', 'panel.render.svg', 'panel.fab.svg']) {
       const st = await stat(join(fabDir, f));
       assert(st.isFile() && st.size > 0, `${f} missing or empty`);
     }

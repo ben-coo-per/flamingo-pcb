@@ -765,7 +765,7 @@ async function main(): Promise<void> {
     const zipPath = join(projectDir, 'download.zip');
     await download.saveAs(zipPath);
     const names = new AdmZip(zipPath).getEntries().map((e) => e.entryName).sort();
-    for (const n of ['combo.GTL', 'combo.GBL', 'combo.GKO', 'combo-PTH.DRL', 'combo-NPTH.DRL', 'bom.csv', 'cpl.csv', 'panel.render.svg']) {
+    for (const n of ['combo.GTL', 'combo.GBL', 'combo.GKO', 'combo-PTH.DRL', 'combo-NPTH.DRL', 'bom.csv', 'cpl.csv', 'panel.render.svg', 'panel.fab.svg']) {
       assert(names.includes(n), `the zip has no ${n}`);
     }
     const bom = new AdmZip(zipPath).getEntry('bom.csv')!.getData().toString('utf8');
