@@ -24,6 +24,10 @@ export class PanelDoc extends EventEmitter {
   private readonly debounceMs: number;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private dirty = false;
+  /** Bumped on every change to the panel, so a finishing save knows whether it wrote the current one. */
+  private version = 0;
+  /** Saves run one at a time, in call order, so an older panel's rename never lands last. */
+  private saveChain: Promise<void> = Promise.resolve();
 
   constructor(initial: Panel, filePath?: string, debounceMs: number = DEFAULT_DEBOUNCE_MS) {
     super();
@@ -81,6 +85,7 @@ export class PanelDoc extends EventEmitter {
       this.saveTimer = null;
     }
     this.history.reset(panel);
+    this.version++;
     if (filePath !== undefined) this._filePath = filePath;
     this.dirty = false;
     if (persist && this._filePath) this.dirty = true;
@@ -97,6 +102,7 @@ export class PanelDoc extends EventEmitter {
   }
 
   private changed(): void {
+    this.version++;
     if (this._filePath) this.dirty = true;
     this.emit('change', this.panel);
     this.scheduleSave();
@@ -114,17 +120,32 @@ export class PanelDoc extends EventEmitter {
     }, this.debounceMs);
   }
 
-  /** Write now, atomically (tmp file + rename). Throws without a file path. */
-  async save(): Promise<void> {
+  /**
+   * Write now, atomically (tmp file + rename). Rejects without a file path.
+   * Chained like `Doc.save()`: the autosave and a panel_save or close() in
+   * flight together write in call order, so the last one called wins.
+   */
+  save(): Promise<void> {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
       this.saveTimer = null;
     }
-    if (!this._filePath) throw new Error('no file path set — cannot save');
-    const tmpPath = `${this._filePath}.tmp-${randomUUID()}`;
+    if (!this._filePath) return Promise.reject(new Error('no file path set — cannot save'));
+    const task = this.saveChain.then(() => this.doSave());
+    // A failed save must not wedge the ones queued after it.
+    this.saveChain = task.catch(() => undefined);
+    return task;
+  }
+
+  private async doSave(): Promise<void> {
+    const filePath = this._filePath;
+    if (!filePath) throw new Error('no file path set — cannot save');
+    const version = this.version;
+    const tmpPath = `${filePath}.tmp-${randomUUID()}`;
     await writeFile(tmpPath, serializePanel(this.panel), 'utf8');
-    await rename(tmpPath, this._filePath);
-    this.dirty = false;
+    await rename(tmpPath, filePath);
+    // An edit made while this was writing is not on disk yet.
+    if (this.version === version) this.dirty = false;
   }
 
   /** Flush unsaved changes, if any. Safe to call repeatedly. */

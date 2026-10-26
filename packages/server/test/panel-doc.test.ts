@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { newPanel, parsePanel, serializePanel } from '@flamingo/panel';
@@ -96,6 +96,44 @@ describe('PanelDoc', () => {
     await new Promise((r) => setTimeout(r, 60));
     await doc.close();
     expect(await readFile(file, 'utf8')).toBe(original);
+  });
+
+  it('saves in flight together land in call order', async () => {
+    const file = join(dir, 'p.plamingo');
+    const one = new PanelDoc(newPanel('p'));
+    one.apply(ADD);
+    one.apply({ op: 'addInstance', source: 'A' });
+    const inst = one.panel.instances[0]!;
+    // A big panel first, then a small one: unchained, the small write finishes
+    // first and the big one's rename lands last.
+    const instances = Array.from({ length: 50_000 }, (_, i) => ({ ...inst, id: `A${i + 1}`, at: { x: i, y: 0 } }));
+    const doc = new PanelDoc({ ...one.panel, instances }, file, 10_000);
+    const big = doc.save();
+    doc.reset(newPanel('small'));
+    const small = doc.save();
+    await Promise.all([big, small]);
+    expect(parsePanel(await readFile(file, 'utf8')).name).toBe('small');
+  });
+
+  it('an edit made while a save is writing is still saved by close', async () => {
+    const file = join(dir, 'p.plamingo');
+    const doc = new PanelDoc(newPanel('p'), file, 10_000);
+    doc.apply(ADD);
+    const saving = doc.save();
+    doc.apply({ op: 'addInstance', source: 'A' });
+    await saving;
+    await doc.close();
+    expect(parsePanel(await readFile(file, 'utf8')).instances).toHaveLength(1);
+  });
+
+  it('a failed save does not stop later ones', async () => {
+    const file = join(dir, 'missing-dir', 'p.plamingo');
+    const doc = new PanelDoc(newPanel('p'), file, 10_000);
+    doc.apply(ADD);
+    await expect(doc.save()).rejects.toThrow();
+    await mkdir(join(dir, 'missing-dir'));
+    await doc.save();
+    expect(parsePanel(await readFile(file, 'utf8')).sources).toHaveLength(1);
   });
 
   it('load rejects a board file', async () => {
