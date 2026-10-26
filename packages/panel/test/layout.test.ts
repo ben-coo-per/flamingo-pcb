@@ -379,4 +379,18 @@ describe('rails, tabs, fiducials and tooling holes', () => {
     expect(tabCentres(0, 120, 5, 50)).toEqual([20, 60, 100]);
     expect(tabCentres(0, 4, 5, 50)).toEqual([]);
   });
+
+  it('finishes on a pathological pitch, as a hand-edited file could carry', () => {
+    // Settings set directly, past validation: the geometry must still terminate.
+    expect(tabCentres(0, 1e6, 5, 0)).toHaveLength(Math.floor((1e6 - 2) / 5));
+    expect(tabCentres(0, 40, 5, 1e-300).length).toBeLessThanOrEqual(7);
+    expect(tabCentres(0, 40, 5, Number.NaN)).toEqual([]);
+    for (const holePitch of [0, 1e-300, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const panel = grid();
+      panel.settings.tabs.holePitch = holePitch;
+      const g = computeGeometry(panel, [a]);
+      expect(g.tabs.length).toBeGreaterThan(0);
+      for (const t of g.tabs) expect(t.holes.length).toBeLessThanOrEqual(400);
+    }
+  });
 });

@@ -56,6 +56,18 @@ describe('panel format', () => {
     expect(text).not.toContain('components');
   });
 
+  it('refuses settings an op would refuse, so a bad file cannot hang the tab layout', () => {
+    const withTabs = (tabs: Record<string, unknown>): string => {
+      const raw = JSON.parse(serializePanel(demo()));
+      raw.settings.tabs = { ...raw.settings.tabs, ...tabs };
+      return JSON.stringify(raw);
+    };
+    expect(() => parsePanel(withTabs({ holePitch: 0 }))).toThrow('tabs.holePitch must be a number > 0');
+    expect(() => parsePanel(withTabs({ pitch: -1 }))).toThrow('tabs.pitch');
+    expect(() => parsePanel(withTabs({ width: 'wide' }))).toThrow('tabs.width');
+    expect(parsePanel(withTabs({ holePitch: 0.8 })).settings.tabs.holePitch).toBe(0.8);
+  });
+
   it('fills in settings missing from an older file', () => {
     const p = demo();
     const raw = JSON.parse(serializePanel(p));

@@ -69,6 +69,45 @@ export function mergeSettings(base: PanelSettings, patch: unknown): PanelSetting
 }
 
 /**
+ * What is wrong with `s`, or null. Shared by the ops and the file parser, so a
+ * hand-edited file cannot carry a value an op would refuse: a zero or
+ * non-finite pitch would otherwise reach the tab layout and never finish.
+ */
+export function validateSettings(s: PanelSettings): string | null {
+  const nonNeg = (v: number, name: string): string | null =>
+    Number.isFinite(v) && v >= 0 ? null : `${name} must be a number >= 0`;
+  const pos = (v: number, name: string): string | null =>
+    Number.isFinite(v) && v > 0 ? null : `${name} must be a number > 0`;
+  if (!['mouse-bite', 'solid-tab', 'silk-divider'].includes(s.separation)) {
+    return 'separation must be "mouse-bite", "solid-tab" or "silk-divider"';
+  }
+  if (s.copperLayers !== 'auto' && ![2, 4, 6].includes(s.copperLayers)) {
+    return 'copperLayers must be "auto", 2, 4 or 6';
+  }
+  if (typeof s.fiducials.enabled !== 'boolean') return 'fiducials.enabled must be a boolean';
+  if (typeof s.toolingHoles.enabled !== 'boolean') return 'toolingHoles.enabled must be a boolean';
+  if (!(s.tabs.holeOverlap >= 0 && s.tabs.holeOverlap <= 0.5)) return 'tabs.holeOverlap must be between 0 and 0.5';
+  return (
+    nonNeg(s.rails.top, 'rails.top') ??
+    nonNeg(s.rails.bottom, 'rails.bottom') ??
+    nonNeg(s.rails.left, 'rails.left') ??
+    nonNeg(s.rails.right, 'rails.right') ??
+    pos(s.spacing, 'spacing') ??
+    pos(s.tabs.width, 'tabs.width') ??
+    pos(s.tabs.pitch, 'tabs.pitch') ??
+    pos(s.tabs.maxLength, 'tabs.maxLength') ??
+    pos(s.tabs.holeDiameter, 'tabs.holeDiameter') ??
+    pos(s.tabs.holePitch, 'tabs.holePitch') ??
+    pos(s.fiducials.copperDiameter, 'fiducials.copperDiameter') ??
+    pos(s.fiducials.maskDiameter, 'fiducials.maskDiameter') ??
+    nonNeg(s.fiducials.edgeDistance, 'fiducials.edgeDistance') ??
+    nonNeg(s.fiducials.cornerOffset, 'fiducials.cornerOffset') ??
+    pos(s.toolingHoles.diameter, 'toolingHoles.diameter') ??
+    nonNeg(s.toolingHoles.cornerOffset, 'toolingHoles.cornerOffset')
+  );
+}
+
+/**
  * Parse and validate a panel file. Throws with a message naming the first
  * problem found. Settings missing from the file take their defaults, so panels
  * written before a setting existed still load.
@@ -141,12 +180,16 @@ export function parsePanel(json: string): Panel {
     ids.add(inst.id);
   }
 
+  const settings = mergeSettings(DEFAULT_SETTINGS, parsed.settings);
+  const problem = validateSettings(settings);
+  if (problem) throw new Error(`settings: ${problem}`);
+
   return {
     formatVersion: 1,
     kind: 'flamingo-panel',
     name: parsed.name,
     sources,
     instances,
-    settings: mergeSettings(DEFAULT_SETTINGS, parsed.settings),
+    settings,
   };
 }

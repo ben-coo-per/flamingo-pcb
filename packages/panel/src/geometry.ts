@@ -34,6 +34,8 @@ const TAB_CORNER_MARGIN = 1;
 const TAB_MIN_GAP = 2;
 /** Tabs and rails overlap what they join by this much so the union is one piece. */
 const WELD = 0.01;
+/** Most mouse-bite holes in one row of a tab; the defaults give five. */
+const MAX_TAB_HOLES = 200;
 
 export interface PlacedOverhang {
   refdes: string;
@@ -310,7 +312,8 @@ export function tabCentres(lo: number, hi: number, width: number, pitch: number)
   if (len < width - EPS) return [];
   const usable = len - 2 * TAB_CORNER_MARGIN;
   if (usable < width) return [(lo + hi) / 2];
-  let n = Math.max(1, Math.ceil(len / pitch));
+  // Capped at what fits, so a tiny pitch cannot make the loop below run for ever.
+  let n = Math.min(Math.max(1, Math.ceil(len / pitch)), Math.max(1, Math.floor(usable / width)) + 1);
   // One tab in the middle of an edge lets the board rock: give it two as soon
   // as two fit, clear of the corners and with a gap between them.
   if (n === 1 && len >= 2 * width + 2 * TAB_CORNER_MARGIN + TAB_MIN_GAP - EPS) n = 2;
@@ -398,7 +401,8 @@ function computeTabs(settings: PanelSettings, instances: PlacedInstance[], rails
             const holes: Point[] = [];
             if (withHoles) {
               const d = ts.holeDiameter;
-              const n = Math.max(1, Math.floor((ts.width - d) / ts.holePitch + 1e-9) + 1);
+              // Capped: a zero or tiny holePitch must not ask for endless holes.
+              const n = Math.min(MAX_TAB_HOLES, Math.max(1, Math.floor((ts.width - d) / ts.holePitch + 1e-9) + 1));
               const off = d * (0.5 - ts.holeOverlap);
               const rows = [level + outward * off];
               if (f.board) rows.push(level + outward * (f.gap - off));

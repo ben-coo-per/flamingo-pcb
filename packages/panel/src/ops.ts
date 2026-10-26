@@ -8,7 +8,7 @@
  */
 
 import type { Point } from '@flamingo/engine';
-import { mergeSettings } from './panel.js';
+import { mergeSettings, validateSettings } from './panel.js';
 import type { Panel, PanelInstance, PanelSettings, PanelSource, Rotation } from './types.js';
 
 /** Recursive partial of the settings: patch one number without restating its group. */
@@ -111,40 +111,6 @@ export function nextInstanceId(panel: Panel, key: string): string {
 function normRotation(deg: number): Rotation {
   const r = ((Math.round(deg / 90) * 90) % 360 + 360) % 360;
   return r as Rotation;
-}
-
-function validateSettings(s: PanelSettings): string | null {
-  const nonNeg = (v: number, name: string): string | null =>
-    Number.isFinite(v) && v >= 0 ? null : `${name} must be a number >= 0`;
-  const pos = (v: number, name: string): string | null =>
-    Number.isFinite(v) && v > 0 ? null : `${name} must be a number > 0`;
-  if (!['mouse-bite', 'solid-tab', 'silk-divider'].includes(s.separation)) {
-    return 'separation must be "mouse-bite", "solid-tab" or "silk-divider"';
-  }
-  if (s.copperLayers !== 'auto' && ![2, 4, 6].includes(s.copperLayers)) {
-    return 'copperLayers must be "auto", 2, 4 or 6';
-  }
-  if (typeof s.fiducials.enabled !== 'boolean') return 'fiducials.enabled must be a boolean';
-  if (typeof s.toolingHoles.enabled !== 'boolean') return 'toolingHoles.enabled must be a boolean';
-  if (!(s.tabs.holeOverlap >= 0 && s.tabs.holeOverlap <= 0.5)) return 'tabs.holeOverlap must be between 0 and 0.5';
-  return (
-    nonNeg(s.rails.top, 'rails.top') ??
-    nonNeg(s.rails.bottom, 'rails.bottom') ??
-    nonNeg(s.rails.left, 'rails.left') ??
-    nonNeg(s.rails.right, 'rails.right') ??
-    pos(s.spacing, 'spacing') ??
-    pos(s.tabs.width, 'tabs.width') ??
-    pos(s.tabs.pitch, 'tabs.pitch') ??
-    pos(s.tabs.maxLength, 'tabs.maxLength') ??
-    pos(s.tabs.holeDiameter, 'tabs.holeDiameter') ??
-    pos(s.tabs.holePitch, 'tabs.holePitch') ??
-    pos(s.fiducials.copperDiameter, 'fiducials.copperDiameter') ??
-    pos(s.fiducials.maskDiameter, 'fiducials.maskDiameter') ??
-    nonNeg(s.fiducials.edgeDistance, 'fiducials.edgeDistance') ??
-    nonNeg(s.fiducials.cornerOffset, 'fiducials.cornerOffset') ??
-    pos(s.toolingHoles.diameter, 'toolingHoles.diameter') ??
-    nonNeg(s.toolingHoles.cornerOffset, 'toolingHoles.cornerOffset')
-  );
 }
 
 function validateInstance(panel: Panel, inst: PanelInstance, seen: Set<string>): string | null {
