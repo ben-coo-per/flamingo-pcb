@@ -11,7 +11,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { ZipArchive } from 'archiver';
+import { zipFiles } from '@flamingo/fab';
 import { WebSocket } from 'ws';
 import type { Objective, PanelOp } from '@flamingo/panel';
 import { OBJECTIVES, listSourced } from '@flamingo/panel';
@@ -48,38 +48,6 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown> |
 
 function objectiveOf(v: unknown): Objective {
   return typeof v === 'string' && (OBJECTIVES as readonly string[]).includes(v) ? (v as Objective) : 'total';
-}
-
-/** Zip a name -> content map into memory. */
-function zipBuffer(files: Map<string, string | Buffer>): Promise<Buffer> {
-  return new Promise((resolveP, reject) => {
-    const archive = new ZipArchive({ zlib: { level: 9 } });
-    const chunks: Buffer[] = [];
-    archive.on('data', (c: Buffer) => chunks.push(c));
-    archive.on('end', () => resolveP(Buffer.concat(chunks)));
-    archive.on('error', reject);
-    for (const [name, content] of files) archive.append(content, { name });
-    void archive.finalize();
-  });
-}
-
-function streamZip(files: Map<string, string | Buffer>, res: ServerResponse): Promise<void> {
-  return new Promise((resolveP, reject) => {
-    const archive = new ZipArchive({ zlib: { level: 9 } });
-    let done = false;
-    const finish = (): void => {
-      if (!done) {
-        done = true;
-        resolveP();
-      }
-    };
-    archive.on('error', reject);
-    res.on('finish', finish);
-    res.on('close', finish);
-    archive.pipe(res);
-    for (const [name, content] of files) archive.append(content, { name });
-    void archive.finalize();
-  });
 }
 
 /** Handle a request under /api/panel. Returns false when the route is unknown. */
@@ -149,11 +117,13 @@ export async function handlePanelApi(
         files.set('cpl.csv', built.files.cpl);
         files.set('panel.render.svg', built.files.svg);
         const name = `${session.panel.name.replace(/[^\w.-]+/g, '_') || 'panel'}-panel-fab.zip`;
+        const zip = zipFiles(files);
         res.writeHead(200, {
           'content-type': 'application/zip',
           'content-disposition': `attachment; filename="${name}"`,
+          'content-length': zip.length,
         });
-        await streamZip(files, res);
+        res.end(zip);
         return true;
       }
       case 'scenario-export.zip': {
@@ -169,7 +139,7 @@ export async function handlePanelApi(
         const files = new Map<string, string | Buffer>();
         const plan = [`${built.scenario.title}`, ''];
         for (const o of built.orders) {
-          files.set(`${o.folder}/gerbers.zip`, await zipBuffer(new Map(o.gerbers)));
+          files.set(`${o.folder}/gerbers.zip`, zipFiles(o.gerbers));
           files.set(`${o.folder}/bom.csv`, o.bom);
           files.set(`${o.folder}/cpl.csv`, o.cpl);
           files.set(`${o.folder}/${o.svgName}`, o.svg);
@@ -177,11 +147,13 @@ export async function handlePanelApi(
         }
         files.set('orders.txt', `${plan.join('\n')}\n`);
         const name = `${session.panel.name.replace(/[^\w.-]+/g, '_') || 'panel'}-${built.scenario.kind}-fab.zip`;
+        const zip = zipFiles(files);
         res.writeHead(200, {
           'content-type': 'application/zip',
           'content-disposition': `attachment; filename="${name}"`,
+          'content-length': zip.length,
         });
-        await streamZip(files, res);
+        res.end(zip);
         return true;
       }
       default:

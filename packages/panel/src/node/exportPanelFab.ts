@@ -15,11 +15,9 @@
  * get no solder paste.
  */
 
-import { createWriteStream } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { ZipArchive } from 'archiver';
-import { generateBOM, generateCPL, generateGerbers } from '@flamingo/fab';
+import { generateBOM, generateCPL, generateGerbers, zipFiles } from '@flamingo/fab';
 import type { PanelIssue } from '../check.js';
 import type { PanelLimits } from '../config.js';
 import type { PanelGeometry } from '../geometry.js';
@@ -80,19 +78,6 @@ export function buildPanelFab(
   };
 }
 
-function zipFiles(files: Map<string, string>, outPath: string): Promise<void> {
-  return new Promise((resolveP, reject) => {
-    const output = createWriteStream(outPath);
-    const archive = new ZipArchive({ zlib: { level: 9 } });
-    output.on('close', () => resolveP());
-    output.on('error', reject);
-    archive.on('error', reject);
-    archive.pipe(output);
-    for (const [name, content] of files) archive.append(content, { name });
-    void archive.finalize();
-  });
-}
-
 /** Write the panel's fab fileset into `outDir` (created if missing). Returns absolute paths. */
 export async function exportPanelFab(
   panel: Panel,
@@ -106,7 +91,7 @@ export async function exportPanelFab(
   await mkdir(abs, { recursive: true });
 
   const gerberZip = resolve(abs, 'gerbers.zip');
-  await zipFiles(built.gerbers, gerberZip);
+  await writeFile(gerberZip, zipFiles(built.gerbers));
   const bomCsv = resolve(abs, 'bom.csv');
   await writeFile(bomCsv, built.bom, 'utf8');
   const cplCsv = resolve(abs, 'cpl.csv');
