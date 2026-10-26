@@ -6,6 +6,7 @@
  * WebSocket as JSON, so the browser draws exactly what MCP reads.
  */
 
+import type { RuleSet } from '@flamingo/engine';
 import type { PanelIssue } from './check.js';
 import type { PanelGeometry } from './geometry.js';
 import type { PanelQuote } from './order.js';
@@ -60,6 +61,8 @@ export interface PanelView {
   minimums: OrderMinimums;
   /** Layer count the panel will be made at; null while the boards disagree. */
   layers: 2 | 4 | 6 | null;
+  /** DRC ruleset the panel is made to (the loosest tier its boards need); null while the boards disagree. */
+  rules: RuleSet['id'] | null;
   /** Milliseconds it took to derive this view. */
   derivedMs: number;
   /** Counts up on every change, so a client can drop views that arrive late. */

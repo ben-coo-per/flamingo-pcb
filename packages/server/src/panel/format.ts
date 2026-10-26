@@ -64,7 +64,7 @@ export function formatView(view: PanelView): string {
   lines.push(`Panel "${panel.name}"${view.filePath ? ` — ${view.filePath}` : ' — not saved yet'}`);
   if (geometry.frame) {
     lines.push(
-      `Size: ${fmt(geometry.frame.width)} x ${fmt(geometry.frame.height)} mm, ${view.layers ?? '?'}-layer, ${panel.settings.separation}, spacing ${fmt(panel.settings.spacing)} mm`,
+      `Size: ${fmt(geometry.frame.width)} x ${fmt(geometry.frame.height)} mm, ${view.layers ?? '?'}-layer${view.rules ? ` (${view.rules})` : ''}, ${panel.settings.separation}, spacing ${fmt(panel.settings.spacing)} mm`,
     );
   } else {
     lines.push(`Size: empty, ${panel.settings.separation}, spacing ${fmt(panel.settings.spacing)} mm`);

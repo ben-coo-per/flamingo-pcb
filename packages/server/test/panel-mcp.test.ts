@@ -117,7 +117,7 @@ describe('panel MCP tools', () => {
     await build();
     const state = await ok('panel_get_state');
     expect(state).toContain('Panel "combo"');
-    expect(state).toMatch(/Size: [\d.]+ x [\d.]+ mm, 2-layer, mouse-bite, spacing 2 mm/);
+    expect(state).toMatch(/Size: [\d.]+ x [\d.]+ mm, 2-layer \(jlcpcb-2l\), mouse-bite, spacing 2 mm/);
     expect(state).toContain('S = sensor.flamingo "sensor" (40 x 30 mm, 2-layer, 2 part line(s), 1 extended) — need 1, nice to have 0, on panel 1 (1 populated)');
     expect(state).toContain('M = mini.flamingo "mini"');
     expect(state).toMatch(/M3 at \([\d.]+, [\d.]+\) rot (0|90) — populated/);

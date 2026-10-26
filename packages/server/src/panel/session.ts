@@ -55,6 +55,7 @@ import {
   quotePanel,
   settingsFromLimits,
   sizeLimit,
+  panelRules,
   targetLayers,
 } from '@flamingo/panel';
 import type { ExportPanelFabResult, PanelFabFiles } from '@flamingo/panel/node';
@@ -280,6 +281,7 @@ export class PanelSession extends EventEmitter {
       (a, b) => rankOf(a) - rankOf(b),
     );
     const quote = quotePanel(panel, sources, geometry, this.limits, this.fees);
+    const layers = targetLayers(panel, sources);
     const view: PanelView = {
       panel,
       filePath: this.doc.filePath ?? null,
@@ -315,7 +317,8 @@ export class PanelSession extends EventEmitter {
       quote,
       limits: this.limitViews(panel, sources),
       minimums: this.minimums(),
-      layers: targetLayers(panel, sources),
+      layers,
+      rules: layers === null ? null : panelRules(layers, sources.filter((s) => panel.instances.some((i) => i.source === s.key))).id,
       derivedMs: Math.round((performance.now() - t0) * 10) / 10,
       revision,
     };
