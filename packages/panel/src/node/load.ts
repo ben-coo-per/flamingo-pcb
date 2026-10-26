@@ -4,11 +4,13 @@
  * Reads every board a panel refers to, hashes it, and compares the hash with
  * the one the panel recorded. A source whose board changed since is `stale`;
  * one whose file is missing or unreadable carries an `error` and no geometry.
- * Parsed boards are cached on path + mtime + size, so re-resolving on every
- * panel edit costs a `stat` per source, not a parse.
+ * Parsed boards are cached per path and reused only while the file's bytes
+ * are the same, so re-resolving on every panel edit costs a read per source,
+ * not a parse. File times are not trusted: two quick saves of the same length
+ * can share an mtime (coarse clocks, FAT/exFAT, bind mounts).
  */
 
-import { readFile, stat } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 import type { Board } from '@flamingo/engine';
 import { parseBoard } from '@flamingo/engine';
@@ -19,8 +21,8 @@ import type { Panel, PanelSource } from '../types.js';
 import { hashBoard } from './hash.js';
 
 interface CacheEntry {
-  mtimeMs: number;
-  size: number;
+  /** The file's text the board was parsed from. */
+  text: string;
   board: Board;
   hash: string;
 }
@@ -39,14 +41,12 @@ export interface LoadedBoard {
 
 /** Read, parse and hash one board file. Throws when it cannot be read or parsed. */
 export async function loadBoardFile(absPath: string): Promise<LoadedBoard> {
-  const st = await stat(absPath);
+  const text = await readFile(absPath, 'utf8');
   const hit = cache.get(absPath);
-  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
-    return { board: hit.board, hash: hit.hash };
-  }
-  const board = parseBoard(await readFile(absPath, 'utf8'));
+  if (hit && hit.text === text) return { board: hit.board, hash: hit.hash };
+  const board = parseBoard(text);
   const hash = hashBoard(board);
-  cache.set(absPath, { mtimeMs: st.mtimeMs, size: st.size, board, hash });
+  cache.set(absPath, { text, board, hash });
   return { board, hash };
 }
 

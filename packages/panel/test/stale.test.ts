@@ -67,10 +67,6 @@ describe('source resolution and stale detection', () => {
     const edited = structuredClone(board);
     edited.components[0]!.at.x += 1;
     await writeFile(file, serializeBoard(edited));
-    // Same size, and possibly the same mtime tick: force the mtime forward so
-    // the cache key differs, as a real later edit would.
-    const later = new Date(Date.now() + 5000);
-    await utimes(file, later, later);
 
     const [stale] = await resolveSources(panel, dir, LIMITS);
     expect(stale!.stale).toBe(true);
@@ -83,6 +79,30 @@ describe('source resolution and stale detection', () => {
     if (!r.ok) throw new Error(r.error);
     panel = r.panel;
     expect((await resolveSources(panel, dir, LIMITS))[0]!.stale).toBe(false);
+  });
+
+  it('a same-length rewrite with the same mtime is still seen', async () => {
+    const file = join(dir, 'boards', 'sensor.flamingo');
+    const board = plainBoard('sensor', 20, 10);
+    const text = serializeBoard(board);
+    await writeFile(file, text);
+    const pinned = new Date('2026-01-01T00:00:00Z');
+    await utimes(file, pinned, pinned);
+    const panel = await panelWith('boards/sensor.flamingo', hashBoard(board));
+    expect((await resolveSources(panel, dir, LIMITS))[0]!.name).toBe('sensor');
+
+    // Two quick saves inside one mtime tick: same length, same time, new bytes.
+    const edited = structuredClone(board);
+    edited.name = 'rosnes';
+    const editedText = serializeBoard(edited);
+    expect(editedText.length).toBe(text.length);
+    await writeFile(file, editedText);
+    await utimes(file, pinned, pinned);
+
+    const [src] = await resolveSources(panel, dir, LIMITS);
+    expect(src!.name).toBe('rosnes');
+    expect(src!.hash).toBe(hashBoard(edited));
+    expect(src!.stale).toBe(true);
   });
 
   it('a missing board file is an error, not a crash', async () => {
