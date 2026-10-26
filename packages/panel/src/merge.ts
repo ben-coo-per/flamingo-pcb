@@ -39,6 +39,7 @@ import type { PanelLimits } from './config.js';
 import type { Fiducial, PanelGeometry } from './geometry.js';
 import { computeGeometry } from './geometry.js';
 import type { ResolvedSources } from './resolved.js';
+import { panelRules } from './rules.js';
 import { applyTransform, boxCorners, type Transform } from './transform.js';
 import type { Panel } from './types.js';
 
@@ -64,8 +65,6 @@ export interface MergedPanel {
   /** Things the caller should tell the user about. */
   notes: string[];
 }
-
-const RULES = { 2: 'jlcpcb-2l', 4: 'jlcpcb-4l', 6: 'jlcpcb-6l' } as const;
 
 /** The refdes a component gets on the panel. */
 export function mergedRefdes(instanceId: string, refdes: string): string {
@@ -120,6 +119,13 @@ export function mergePanel(
   }
 
   const notes: string[] = [];
+  const onPanel = new Set(panel.instances.map((i) => i.source));
+  const rules = panelRules(layers, sources.filter((s) => onPanel.has(s.key)));
+  if (rules.id === 'jlcpcb-4l-adv') {
+    notes.push(
+      'the panel is made to jlcpcb-4l-adv (advanced vias); JLCPCB charges extra for that tier and the quote does not include it',
+    );
+  }
   const filledBySource = new Map<string, Board>();
   const labelsBySource = new Map<string, Map<string, MergedLabel>>();
   for (const src of sources) {
@@ -284,7 +290,7 @@ export function mergePanel(
     silk,
     silkLines,
     dimensions: [],
-    rules: RULES[layers],
+    rules: rules.id,
   };
 
   return { board, profile: geometry.profile, fiducials: geometry.fiducials, labels, bare, origin, notes };

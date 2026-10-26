@@ -3,6 +3,7 @@ import { newBoard } from '@flamingo/engine';
 import { assemblyFit, checkPanel, hasErrors, targetLayers } from '../src/check.js';
 import type { IssueCode, PanelIssue } from '../src/check.js';
 import { computeGeometry } from '../src/geometry.js';
+import { panelRules } from '../src/rules.js';
 import { resolveSourceGeometry } from '../src/source.js';
 import { EDGE_CONN, LIMITS, awkwardBoard, comp, panelOf, plainBoard, rectOutline, resolved } from './helpers.js';
 
@@ -209,6 +210,41 @@ describe('checkPanel: sources and stackup', () => {
     const src = resolved('A', odd);
     const issue = find(checkPanel(panelOf([src], [['A', 0, 7]]), [src], LIMITS), 'rules-mismatch');
     expect(issue.message).toContain('minTrackWidth');
+  });
+
+  describe('advanced-via boards', () => {
+    const advBoard = (name: string): ReturnType<typeof plainBoard> => {
+      const b = plainBoard(name, 30, 20, 4);
+      b.rules = 'jlcpcb-4l-adv';
+      return b;
+    };
+
+    it('a 4l-adv board on a 4-layer panel passes, and the panel takes 4l-adv', () => {
+      const adv = resolved('C', advBoard('adv'));
+      const panel = panelOf([adv], [['C', 0, 7]]);
+      expect(codes(checkPanel(panel, [adv], LIMITS))).not.toContain('rules-mismatch');
+      expect(panelRules(4, [adv]).id).toBe('jlcpcb-4l-adv');
+    });
+
+    it('4l and 4l-adv boards together make a 4l-adv panel', () => {
+      const adv = resolved('C', advBoard('adv'));
+      const panel = panelOf([four, adv], [
+        ['B', 0, 7],
+        ['C', 32, 7],
+      ]);
+      expect(codes(checkPanel(panel, [four, adv], LIMITS))).not.toContain('rules-mismatch');
+      expect(panelRules(4, [four, adv]).id).toBe('jlcpcb-4l-adv');
+      expect(panelRules(4, [four]).id).toBe('jlcpcb-4l');
+    });
+
+    it('a 4l-adv board on a 6-layer panel is still a mismatch', () => {
+      const adv = resolved('C', advBoard('adv'));
+      const panel = panelOf([adv], [['C', 0, 7]], [{ op: 'setSettings', settings: { copperLayers: 6 } }]);
+      const issue = find(checkPanel(panel, [adv], LIMITS), 'rules-mismatch');
+      expect(issue.severity).toBe('error');
+      expect(issue.message).toContain('minDrill');
+      expect(issue.message).toContain('jlcpcb-6l');
+    });
   });
 
   it('warns when a needed board has no populated instance', () => {

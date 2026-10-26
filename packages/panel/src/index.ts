@@ -78,6 +78,8 @@ export {
   tabCounts,
 } from './geometry.js';
 
+export { panelRules, tighterLimits } from './rules.js';
+
 export type { Severity, IssueCode, PanelIssue } from './check.js';
 export { checkPanel, hasErrors, targetLayers, usedLayerCounts, assemblyFit } from './check.js';
 

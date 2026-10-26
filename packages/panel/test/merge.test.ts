@@ -211,6 +211,25 @@ describe('mergePanel: refdes and coordinates', () => {
     expect([...files.keys()]).toEqual(expect.arrayContaining(['test.GTL', 'test.G1', 'test.G2', 'test.GBL']));
   });
 
+  it('merges a 4l-adv board under jlcpcb-4l-adv and says the quote leaves out the surcharge', () => {
+    const adv = plainBoard('adv', 30, 20, 4);
+    adv.rules = 'jlcpcb-4l-adv';
+    const a = resolved('A', adv);
+    const four = resolved('F', plainBoard('four', 30, 20, 4));
+    const panel = arrangedPanel([a, four], [
+      ['A', 0, 0],
+      ['F', 0, 0],
+    ]);
+    const merged = mergePanel(panel, [a, four], LIMITS);
+    expect(merged.board.rules).toBe('jlcpcb-4l-adv');
+    expect(merged.notes.some((n) => n.includes('jlcpcb-4l-adv') && n.includes('quote'))).toBe(true);
+
+    // A 4l-adv board that is only listed, not placed, does not loosen the panel.
+    const plain = mergePanel(arrangedPanel([a, four], [['F', 0, 0]]), [a, four], LIMITS);
+    expect(plain.board.rules).toBe('jlcpcb-4l');
+    expect(plain.notes).toEqual([]);
+  });
+
   it('refuses mixed layer counts that were not promoted', () => {
     const four = resolved('F', plainBoard('four', 30, 20, 4));
     const panel = arrangedPanel([s, four], [

@@ -15,6 +15,7 @@ import type { AssemblyType, PanelLimits, SizeRange } from './config.js';
 import type { PanelGeometry, PlacedInstance } from './geometry.js';
 import { computeGeometry, effectiveSpacing, tabCounts } from './geometry.js';
 import type { ResolvedSources } from './resolved.js';
+import { panelRules, tighterLimits } from './rules.js';
 import { applyTransform, boxCorners } from './transform.js';
 import type { Box, Panel, Side } from './types.js';
 import { SIDES } from './types.js';
@@ -211,11 +212,12 @@ function stackupIssues(panel: Panel, sources: ResolvedSources): PanelIssue[] {
     }
   }
 
-  // Rules: a board may have been designed to tighter limits than the panel's
-  // ruleset allows only if the panel's ruleset is at least as permissive.
+  // Rules: the panel takes the loosest tier its boards need (panelRules); a
+  // board still designed tighter than that, such as a 4l-adv board on a
+  // 6-layer panel, cannot be made to the panel's rules.
   const target = targetLayers(panel, sources);
   if (target !== null) {
-    const panelRules = RULESETS[`jlcpcb-${target}l`];
+    const rules = panelRules(target, pool);
     for (const s of pool) {
       const own = RULESETS[s.geometry!.rules];
       if (!own) {
@@ -228,14 +230,12 @@ function stackupIssues(panel: Panel, sources: ResolvedSources): PanelIssue[] {
         });
         continue;
       }
-      const tighter = (Object.keys(panelRules) as Array<keyof typeof panelRules>).filter(
-        (k) => typeof panelRules[k] === 'number' && (own[k] as number) < (panelRules[k] as number) - 1e-9,
-      );
+      const tighter = tighterLimits(own, rules);
       if (tighter.length > 0) {
         issues.push({
           code: 'rules-mismatch',
           severity: 'error',
-          message: `${s.key} was designed to ${own.id}, which allows smaller ${tighter.join(', ')} than the panel's ${panelRules.id}`,
+          message: `${s.key} was designed to ${own.id}, which allows smaller ${tighter.join(', ')} than the panel's ${rules.id}`,
           instances: idsOf([s.key]),
           sources: [s.key],
         });
