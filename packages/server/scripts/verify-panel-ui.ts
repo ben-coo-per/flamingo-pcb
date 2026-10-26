@@ -930,7 +930,7 @@ async function main(): Promise<void> {
 
     // --- a panel file served on its own ------------------------------------
     step('a server started on a panel file has the view at the root');
-    const alone = await startServer(new Doc(newBoard('unused', 2)), 0, { projectDir, panel: true, panelOnly: true });
+    const alone = await startServer(null, 0, { projectDir, panel: true });
     try {
       const root = `http://127.0.0.1:${alone.port}`;
       const made = await fetch(`${root}/api/panel/new`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'alone' }) });

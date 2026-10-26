@@ -65,7 +65,8 @@ export interface PartsApi {
 }
 
 export interface McpContext {
-  doc: Doc;
+  /** The board being edited. Absent on a server started on a panel file: there is no board there. */
+  doc?: Doc;
   projectDir: string;
   partsApi: PartsApi;
   /**
@@ -79,9 +80,10 @@ export interface McpContext {
    * tool list is exactly the board tools.
    */
   panel?: PanelSession;
-  /** The server was started on a panel file: panel tools only. */
-  panelOnly?: boolean;
 }
+
+/** A context that has a board: what the board tools and routes work on. */
+export type BoardMcpContext = McpContext & { doc: Doc };
 
 // ---------------------------------------------------------------------------
 // Small formatting / result helpers
@@ -102,7 +104,7 @@ function errorResult(error: string): CallToolResult {
 
 /** Apply an Op via ctx.doc and turn the OpResult/OpError into a CallToolResult. */
 function applyAndReport(
-  ctx: McpContext,
+  ctx: BoardMcpContext,
   op: Op,
   onOk: (result: OpResult) => string,
 ): CallToolResult {
@@ -218,7 +220,7 @@ function formatStockAdvisories(advisories: DrcViolation[]): string {
  * been saved (no filePath yet). Shared between the export_fab MCP tool and
  * the POST /api/export HTTP route so both pick the same default.
  */
-export function resolveFabOutDir(ctx: McpContext, outDir?: string): string {
+export function resolveFabOutDir(ctx: BoardMcpContext, outDir?: string): string {
   if (outDir) return isAbsolute(outDir) ? outDir : join(ctx.projectDir, outDir);
   const base = ctx.doc.filePath ? dirname(ctx.doc.filePath) : ctx.projectDir;
   return join(base, 'fab');
@@ -362,14 +364,16 @@ const regionSchema = z.object({
  * stateless mode (see http.ts) -- cheap since it just registers closures over
  * `ctx`, no board state lives on the McpServer itself.
  */
-export function createMcpServer(ctx: McpContext): McpServer {
+export function createMcpServer(context: McpContext): McpServer {
   const server = new McpServer({ name: 'flamingo', version: createRequire(import.meta.url)('../package.json').version });
 
   // A server started on a panel file has no board of its own to work on.
-  if (ctx.panelOnly && ctx.panel) {
-    registerPanelTools(server, ctx.panel);
+  const doc = context.doc;
+  if (!doc) {
+    if (context.panel) registerPanelTools(server, context.panel);
     return server;
   }
+  const ctx: BoardMcpContext = { ...context, doc };
 
   server.registerTool(
     'new_board',

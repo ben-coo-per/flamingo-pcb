@@ -15,7 +15,7 @@ import type { Model3d } from '@flamingo/parts';
 import { extractModel3d, fetchJlcStock, fetchPart, readCache, searchParts } from '@flamingo/parts';
 import { runAutorouteBroadcast } from './autoroute.js';
 import { Doc } from './document.js';
-import type { McpContext, PartsApi } from './mcp.js';
+import type { BoardMcpContext, McpContext, PartsApi } from './mcp.js';
 import { boardSearchRoots, createMcpServer, runDrcWithStock } from './mcp.js';
 import type { RouteRunner } from './route.js';
 import { defaultRouteRunner } from './route.js';
@@ -265,7 +265,7 @@ async function collectDetailModels(board: Board): Promise<Map<string, MeshGroup[
 }
 
 async function handleApi(
-  ctx: McpContext,
+  ctx: BoardMcpContext,
   method: string,
   pathname: string,
   url: URL,
@@ -635,7 +635,6 @@ function makeRequestListener(
   ctx: McpContext,
   uiDistDir: string,
 ): (req: IncomingMessage, res: ServerResponse) => void {
-  const doc = ctx.doc;
   return (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const pathname = url.pathname;
@@ -662,7 +661,8 @@ function makeRequestListener(
           if (!handled) sendNotFound(res);
           return;
         }
-        if (ctx.panelOnly && ctx.panel) {
+        const doc = ctx.doc;
+        if (!doc) {
           // Started on a panel file: the panel view is the page at '/', the
           // way the editor is for a board file, and there is no board here.
           req.resume();
@@ -684,7 +684,7 @@ function makeRequestListener(
           return;
         }
         if (pathname.startsWith('/api/')) {
-          const handled = await handleApi(ctx, method, pathname, url, req, res);
+          const handled = await handleApi({ ...ctx, doc }, method, pathname, url, req, res);
           if (!handled) sendNotFound(res);
           return;
         }
@@ -706,7 +706,7 @@ function makeRequestListener(
   };
 }
 
-function attachWebSocket(doc: Doc, server: http.Server, panelChannel?: PanelChannel): WebSocketServer {
+function attachWebSocket(doc: Doc | null, server: http.Server, panelChannel?: PanelChannel): WebSocketServer {
   const wss = new WebSocketServer({
     server,
     path: '/ws',
@@ -714,10 +714,16 @@ function attachWebSocket(doc: Doc, server: http.Server, panelChannel?: PanelChan
     // sent an Origin that isn't local (a plain WS client / curl / the
     // Electron app's own page sends none, and is allowed through).
     verifyClient: (info, callback) => {
-      if (isAllowedOrigin(info.origin)) callback(true);
-      else callback(false, 403, 'cross-origin request rejected');
+      if (!isAllowedOrigin(info.origin)) callback(false, 403, 'cross-origin request rejected');
+      // A server with no board has only the panel channel to offer.
+      else if (!doc && !(panelChannel && isPanelChannel(info.req))) callback(false, 404, 'no board on this server');
+      else callback(true);
     },
   });
+  if (!doc) {
+    wss.on('connection', (ws: WebSocket) => panelChannel?.add(ws));
+    return wss;
+  }
   const clients = new Set<WebSocket>();
 
   // `file` is the board file's name (e.g. "blinky.flamingo"), which the UI
@@ -819,20 +825,18 @@ export interface StartServerOptions {
    * true for a fresh session, or a session to use (e.g. one that opened a file).
    */
   panel?: boolean | PanelSession;
-  /**
-   * The server is started on a panel file, not on a board: the panel view is
-   * the page at '/', only the panel tools are served over MCP, and the board
-   * editor, its routes and its tools are not. Needs `panel`; `doc` is unused.
-   */
-  panelOnly?: boolean;
 }
 
 /**
  * Start the Flamingo HTTP + WebSocket server for the given Doc.
  * Pass port 0 to bind an ephemeral port (tests must do this).
+ *
+ * `doc` null is a server started on a panel file: there is no board, so the
+ * panel view is the page at '/', only the panel tools are served over MCP,
+ * and the board routes, tools and WebSocket are not. It needs `panel`.
  */
 export function startServer(
-  doc: Doc,
+  doc: Doc | null,
   port: number = DEFAULT_PORT,
   opts: StartServerOptions = {},
 ): Promise<StartedServer> {
@@ -847,20 +851,21 @@ export function startServer(
             priceLookup: async (lcsc) => (await partsApi.fetchPart(lcsc)).info.price,
           })
         : undefined;
+  if (!doc && !panel) return Promise.reject(new Error('a server with no board needs a panel'));
   const ctx: McpContext = {
-    doc,
+    ...(doc ? { doc } : {}),
     projectDir,
     partsApi,
     route: opts.routeRunner ?? defaultRouteRunner,
     ...(panel ? { panel } : {}),
-    ...(panel && opts.panelOnly ? { panelOnly: true } : {}),
   };
   const uiDistDir = opts.uiDistDir ?? UI_DIST;
   const server = http.createServer(makeRequestListener(ctx, uiDistDir));
   const panelChannel = panel ? attachPanelChannel(panel) : undefined;
 
-  // A board edited in the editor is a source board changed on disk: once its
-  // autosave has landed, let the panel view notice (stale flag, new geometry).
+  // A board edited in the editor is a source board changed on disk: about when
+  // its autosave lands, let the panel view notice (stale flag, new geometry).
+  // A save that lands later still shows up through the session's file watcher.
   let staleTimer: ReturnType<typeof setTimeout> | null = null;
   const onBoardChange = (): void => {
     if (!panel || panel.panel.sources.length === 0) return;
@@ -870,7 +875,7 @@ export function startServer(
       panel.touch();
     }, 900);
   };
-  if (panel) doc.on('change', onBoardChange);
+  if (panel) doc?.on('change', onBoardChange);
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -890,7 +895,7 @@ export function startServer(
         ...(panel ? { panel } : {}),
         close: async () => {
           if (staleTimer) clearTimeout(staleTimer);
-          doc.removeListener('change', onBoardChange);
+          doc?.removeListener('change', onBoardChange);
           panelChannel?.close();
           await new Promise<void>((res, rej) => {
             for (const client of wss.clients) client.terminate();
@@ -903,7 +908,7 @@ export function startServer(
               server.closeAllConnections();
             });
           });
-          await doc.close();
+          await doc?.close();
           await panel?.close();
         },
       });

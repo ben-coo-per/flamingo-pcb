@@ -6,6 +6,7 @@ import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { WebSocket } from 'ws';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { serializeBoard } from '@flamingo/engine';
@@ -28,7 +29,7 @@ describe('a server started on a panel file', () => {
     await writeFile(join(uiDir, 'panel.html'), '<title>panel</title>');
     await writeFile(join(uiDir, 'assets', 'panel.js'), '// panel');
     await writeBoards(dir);
-    started = await startPanelServer(dir, uiDir, { panelOnly: true });
+    started = await startPanelServer(dir, uiDir, { board: false });
     base = `http://localhost:${started.port}`;
   });
 
@@ -59,6 +60,27 @@ describe('a server started on a panel file', () => {
     expect(view.panel.instances).toEqual([]);
     expect((await fetch(`${base}/api/board`)).status).toBe(404);
     expect((await fetch(`${base}/3d`)).status).toBe(404);
+  });
+
+  it('refuses a board socket, and serves the panel one', async () => {
+    const wsBase = `ws://localhost:${started.port}/ws`;
+    const board = new WebSocket(wsBase);
+    const status = await new Promise<number | undefined>((res) => {
+      board.once('unexpected-response', (_req, resp) => res(resp.statusCode));
+      board.once('open', () => res(undefined));
+    });
+    expect(status).toBe(404);
+
+    const panel = new WebSocket(`${wsBase}?channel=panel`);
+    try {
+      const first = await new Promise<{ type: string }>((res, rej) => {
+        panel.once('message', (data: Buffer) => res(JSON.parse(data.toString()) as { type: string }));
+        panel.once('error', rej);
+      });
+      expect(first.type).toBe('panel');
+    } finally {
+      panel.close();
+    }
   });
 
   it('serves the panel tools and none of the board tools', async () => {
@@ -96,7 +118,7 @@ describe('a board server', () => {
 describe('a panel notices its boards changing on disk', () => {
   it('pushes a new view when a source board is rewritten by someone else', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'flamingo-panel-watch-'));
-    const session = testSession(dir);
+    const session = testSession(dir, { watchMs: 25 });
     try {
       const { mini } = await writeBoards(dir);
       await session.create('watched');
@@ -104,7 +126,6 @@ describe('a panel notices its boards changing on disk', () => {
       expect(added.ok).toBe(true);
       expect((await session.view()).sources[0]!.stale).toBe(false);
 
-      session.watchSources(25);
       await new Promise((r) => setTimeout(r, 80)); // the watcher has seen the file as it is
       const changed = new Promise<void>((resolve) => session.doc.once('change', () => resolve()));
       const edited = miniBoard();

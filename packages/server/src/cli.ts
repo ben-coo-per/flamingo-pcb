@@ -53,12 +53,10 @@ async function servePanel(fileArg: string): Promise<void> {
     const created = await panel.create(basename(filePath, PANEL_EXTENSION) || 'panel', filePath);
     if (!created.ok) throw new Error(created.error);
   }
-  panel.watchSources();
 
   const port = process.env.FLAMINGO_PORT ? Number(process.env.FLAMINGO_PORT) : 4242;
-  // The server is built around a board; on a panel file it is handed an empty
-  // one that nothing reads and nothing saves.
-  const started = await startServer(new Doc(newBoard('panel', 2)), port, { projectDir, panel, panelOnly: true });
+  // No board: the server has only the panel to offer.
+  const started = await startServer(null, port, { projectDir, panel });
   console.log(`Flamingo v${VERSION} serving ${fileArg} at http://localhost:${started.port}`);
   shutDownOn(() => started.close());
 }
@@ -87,7 +85,6 @@ async function serve(fileArg: string, panelArg?: string): Promise<void> {
   } else {
     panel = new PanelSession({ projectDir, priceLookup });
   }
-  panel.watchSources();
 
   const port = process.env.FLAMINGO_PORT ? Number(process.env.FLAMINGO_PORT) : 4242;
   const started = await startServer(doc, port, { projectDir, panel });

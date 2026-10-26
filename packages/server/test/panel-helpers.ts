@@ -8,6 +8,7 @@ import { Doc } from '../src/document.js';
 import { startServer } from '../src/http.js';
 import type { StartedServer } from '../src/http.js';
 import { PanelSession } from '../src/panel/session.js';
+import type { PanelSessionOptions } from '../src/panel/session.js';
 
 export function rect(w: number, h: number): PathSeg[] {
   const p = [
@@ -95,19 +96,19 @@ export async function writeBoards(dir: string): Promise<{ sensor: string; mini: 
   return { sensor, mini };
 }
 
-export function testSession(projectDir: string): PanelSession {
-  return new PanelSession({ projectDir, priceLookup: async (lcsc) => PRICES[lcsc], debounceMs: 20 });
+export function testSession(projectDir: string, opts: Partial<PanelSessionOptions> = {}): PanelSession {
+  return new PanelSession({ projectDir, priceLookup: async (lcsc) => PRICES[lcsc], debounceMs: 20, ...opts });
 }
 
 export async function startPanelServer(
   projectDir: string,
   uiDistDir?: string,
-  opts: { panelOnly?: boolean; session?: PanelSession } = {},
+  /** `board: false` is a server started on a panel file: no board at all. */
+  opts: { board?: boolean; session?: PanelSession } = {},
 ): Promise<StartedServer> {
-  return startServer(new Doc(newBoard('editor', 2)), 0, {
+  return startServer(opts.board === false ? null : new Doc(newBoard('editor', 2)), 0, {
     projectDir,
     panel: opts.session ?? testSession(projectDir),
-    ...(opts.panelOnly ? { panelOnly: true } : {}),
     partsApi: {
       fetchPart: async () => {
         throw new Error('no network in tests');

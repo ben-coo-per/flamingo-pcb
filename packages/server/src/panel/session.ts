@@ -82,6 +82,8 @@ export interface PanelSessionOptions {
   priceLookup?: PriceLookup;
   /** Debounce for the panel's autosave, ms. */
   debounceMs?: number;
+  /** How often to look at the source boards' file times, ms. */
+  watchMs?: number;
 }
 
 export type { LimitView, PanelView, SourceView } from '@flamingo/panel';
@@ -121,14 +123,15 @@ export class PanelSession extends EventEmitter {
   readonly fees: FeeTable;
   private readonly priceLookup: PriceLookup | undefined;
   private readonly prices = new Map<string, number | undefined>();
-  private readonly drcCache = new Map<string, DrcViolation[]>();
+  /** Last DRC result per source key: one entry each, replaced when the board's hash changes. */
+  private readonly drcCache = new Map<string, { hash: string; violations: DrcViolation[] }>();
   /** DRC runs in flight, by content hash, so one board is never checked twice at once. */
   private readonly drcRuns = new Map<string, Promise<DrcViolation[]>>();
   /** Boards being checked, by content hash. Cleared when the last one finishes. */
   private readonly checking = new Map<string, BoardLoading>();
   private checkingSince = 0;
-  private cached: { panel: Panel; view: PanelView; sources: ResolvedSource[] } | null = null;
-  private deriving: { panel: Panel; view: Promise<PanelView> } | null = null;
+  private cached: { panel: Panel; revision: number; view: PanelView; sources: ResolvedSource[] } | null = null;
+  private deriving: { panel: Panel; revision: number; view: Promise<PanelView> } | null = null;
   private revision = 0;
   private watch: ReturnType<typeof setInterval> | null = null;
 
@@ -144,6 +147,7 @@ export class PanelSession extends EventEmitter {
       this.revision++;
       this.emit('change');
     });
+    this.watchSources(opts.watchMs ?? 1500);
   }
 
   get panel(): Panel {
@@ -161,31 +165,39 @@ export class PanelSession extends EventEmitter {
 
   /** Sources of the current panel, resolved against the disk, with known prices filled in. */
   async resolved(): Promise<ResolvedSource[]> {
-    const raw = await resolveSources(this.panel, this.panelDir, this.limits);
-    return raw.map((s) => {
-      if (!s.geometry) return s;
-      return {
-        ...s,
-        geometry: {
-          ...s.geometry,
-          parts: s.geometry.parts.map((p) => {
-            const price = this.prices.get(p.lcsc);
-            return price === undefined ? p : { ...p, unitPrice: price };
-          }),
-        },
-      };
-    });
+    return this.resolvedFor(this.panel);
+  }
+
+  /** Sources of `panel`, resolved against the disk, with known prices filled in. */
+  private async resolvedFor(panel: Panel): Promise<ResolvedSource[]> {
+    const raw = await resolveSources(panel, this.panelDir, this.limits);
+    return raw.map((s) =>
+      s.geometry
+        ? {
+            ...s,
+            geometry: {
+              ...s.geometry,
+              parts: s.geometry.parts.map((p) => {
+                const price = this.prices.get(p.lcsc);
+                return price === undefined ? p : { ...p, unitPrice: price };
+              }),
+            },
+          }
+        : s,
+    );
   }
 
   /**
-   * DRC of a source board, as it would gate that board's own export. Cached
-   * per content hash. While it runs, the board is listed in `loading()`.
+   * DRC of a source board, as it would gate that board's own export. The last
+   * result is kept per source until its content hash changes. While it runs,
+   * the board is listed in `loading()`.
    */
   private async sourceDrc(src: ResolvedSource): Promise<DrcViolation[]> {
     if (!src.board || !src.hash) return [];
     const hash = src.hash;
-    const cached = this.drcCache.get(hash);
-    if (cached) return cached;
+    const key = src.key;
+    const cached = this.drcCache.get(key);
+    if (cached?.hash === hash) return cached.violations;
     let run = this.drcRuns.get(hash);
     if (!run) {
       if (this.checking.size === 0) this.checkingSince = Date.now();
@@ -197,7 +209,7 @@ export class PanelSession extends EventEmitter {
         this.emit('loading');
       })
         .then((v) => {
-          this.drcCache.set(hash, v);
+          this.drcCache.set(key, { hash, violations: v });
           return v;
         })
         .finally(() => {
@@ -218,6 +230,10 @@ export class PanelSession extends EventEmitter {
   }
 
   private async drcIssues(panel: Panel, sources: ResolvedSource[]): Promise<PanelIssue[]> {
+    // Forget the results of boards that left the panel.
+    for (const key of this.drcCache.keys()) {
+      if (!panel.sources.some((s) => s.key === key)) this.drcCache.delete(key);
+    }
     const used = sources
       .map((s) => ({ s, instances: panel.instances.filter((i) => i.source === s.key).map((i) => i.id) }))
       .filter((u) => u.instances.length > 0);
@@ -243,20 +259,22 @@ export class PanelSession extends EventEmitter {
   /** Everything a client needs to draw and judge the panel. Cached until the next change. */
   async view(): Promise<PanelView> {
     const panel = this.panel;
-    if (this.cached && this.cached.panel === panel) return this.cached.view;
-    // Every caller waiting on the same panel shares one derivation.
-    if (this.deriving?.panel === panel) return this.deriving.view;
-    const view = this.derive(panel).finally(() => {
+    const revision = this.revision;
+    // Keyed on the revision too: touch() leaves the panel as it is but means
+    // a source board changed, so a view derived before it is out of date.
+    if (this.cached?.panel === panel && this.cached.revision === revision) return this.cached.view;
+    // Every caller waiting on the same state shares one derivation.
+    if (this.deriving?.panel === panel && this.deriving.revision === revision) return this.deriving.view;
+    const view = this.derive(panel, revision).finally(() => {
       if (this.deriving?.view === view) this.deriving = null;
     });
-    this.deriving = { panel, view };
+    this.deriving = { panel, revision, view };
     return view;
   }
 
-  private async derive(panel: Panel): Promise<PanelView> {
+  private async derive(panel: Panel, revision: number): Promise<PanelView> {
     const t0 = performance.now();
-    const revision = this.revision;
-    const sources = await this.resolved();
+    const sources = await this.resolvedFor(panel);
     const geometry = computeGeometry(panel, sources);
     const issues = [...checkPanel(panel, sources, this.limits, geometry), ...(await this.drcIssues(panel, sources))].sort(
       (a, b) => rankOf(a) - rankOf(b),
@@ -302,7 +320,7 @@ export class PanelSession extends EventEmitter {
       revision,
     };
     // Only keep it if nothing changed while the sources were being read.
-    if (this.panel === panel) this.cached = { panel, view, sources };
+    if (this.panel === panel && this.revision === revision) this.cached = { panel, revision, view, sources };
     return view;
   }
 
@@ -387,7 +405,9 @@ export class PanelSession extends EventEmitter {
         while (queue.length > 0) await one(queue.shift()!);
       }),
     );
+    // New prices: a view derived before them, or deriving now, is out of date.
     this.cached = null;
+    this.revision++;
   }
 
   // -------------------------------------------------------------------------
@@ -553,9 +573,8 @@ export class PanelSession extends EventEmitter {
   async duplicateInstance(id: string): Promise<PanelOpResult | PanelOpError> {
     const inst = this.panel.instances.find((i) => i.id === id);
     if (!inst) return { ok: false, error: `Unknown instance "${id}"` };
-    const view = await this.view();
-    const placed = view.geometry.instances.find((i) => i.id === id);
-    const width = placed ? placed.bbox.maxX - placed.bbox.minX : 10;
+    const g = (await this.resolved()).find((s) => s.key === inst.source)?.geometry;
+    const width = !g ? 10 : inst.rotation === 90 || inst.rotation === 270 ? g.height : g.width;
     return this.doc.apply({
       op: 'addInstance',
       source: inst.source,
@@ -601,24 +620,6 @@ export class PanelSession extends EventEmitter {
     const r = this.doc.apply({ op: 'transaction', ops });
     if (!r.ok) return fail(r.error);
     return { ok: true, added, removed, arranged };
-  }
-
-  private async resolvedFor(panel: Panel): Promise<ResolvedSource[]> {
-    const raw = await resolveSources(panel, this.panelDir, this.limits);
-    return raw.map((s) =>
-      s.geometry
-        ? {
-            ...s,
-            geometry: {
-              ...s.geometry,
-              parts: s.geometry.parts.map((p) => {
-                const price = this.prices.get(p.lcsc);
-                return price === undefined ? p : { ...p, unitPrice: price };
-              }),
-            },
-          }
-        : s,
-    );
   }
 
   /** Arrange every unpinned instance. The panel only changes when the result fits. */
@@ -827,11 +828,13 @@ export class PanelSession extends EventEmitter {
 
   /**
    * Notice source boards that change on disk, so that a board edited in a
-   * server of its own, or by hand, shows up here as stale without anyone
-   * telling this one. Polls file times: cheap, and works on every file system.
+   * server of its own, in this server's editor, or by hand, shows up here as
+   * stale without anyone telling this one. Polls file times: cheap, and works
+   * on every file system. Started by the constructor and stopped by close();
+   * unref'd, so it never keeps a process alive.
    */
-  watchSources(intervalMs = 1500): void {
-    if (this.watch) return;
+  private watchSources(intervalMs: number): void {
+    if (this.watch || intervalMs <= 0) return;
     let last: string | null = null;
     let busy = false;
     const tick = async (): Promise<void> => {
