@@ -26,6 +26,7 @@ import type { Point } from '@flamingo/engine';
 import { strokeText } from '@flamingo/fab';
 import type { PanelIssue } from '../check.js';
 import { boardColor, tint } from '../colors.js';
+import { FAB_COLORS, fabScene } from '../fabview.js';
 import type { PanelGeometry, PlacedInstance } from '../geometry.js';
 import type { ResolvedSources } from '../resolved.js';
 import { boxCorners } from '../transform.js';
@@ -38,6 +39,8 @@ export interface PanelRenderLimit {
   label: string;
 }
 
+export type PanelRenderView = 'layout' | 'fab';
+
 export interface PanelRenderOpts {
   widthPx?: number;
   /** Size limits to draw, anchored at the panel's bottom-left corner. */
@@ -45,6 +48,11 @@ export interface PanelRenderOpts {
   issues?: PanelIssue[];
   /** Draw instance labels (default true). */
   labels?: boolean;
+  /**
+   * `layout` (default): the schematic the panel view edits. `fab`: what the
+   * fab makes, material and drilled holes (see fabview.ts); limits are not drawn.
+   */
+  view?: PanelRenderView;
 }
 
 const INK = '#000';
@@ -63,6 +71,7 @@ export function renderPanelSVG(
   geometry: PanelGeometry,
   opts: PanelRenderOpts = {},
 ): string {
+  if (opts.view === 'fab') return renderFabSVG(panel, sources, geometry, opts);
   const frame = geometry.frame;
   const content: Box = frame
     ? { ...frame.outer }
@@ -213,14 +222,7 @@ export function renderPanelSVG(
   for (const d of geometry.dividers) poly(d, 0.15, { dash: '1 1', close: false });
 
   // --- instances -----------------------------------------------------------
-  const issues = opts.issues ?? [];
-  const worst = new Map<string, 'error' | 'warning'>();
-  for (const issue of issues) {
-    if (issue.severity === 'info') continue;
-    for (const id of issue.instances) {
-      if (worst.get(id) !== 'error') worst.set(id, issue.severity);
-    }
-  }
+  const worst = worstOf(opts.issues ?? []);
 
   const keys = panel.sources.map((s) => s.key);
   for (const inst of geometry.instances) {
@@ -308,6 +310,129 @@ export function renderPanelSVG(
   ]
     .filter((s) => s !== '')
     .join('\n');
+}
+
+/** Worst issue per instance, errors over warnings; info is not marked. */
+function worstOf(issues: PanelIssue[]): Map<string, 'error' | 'warning'> {
+  const worst = new Map<string, 'error' | 'warning'>();
+  for (const issue of issues) {
+    if (issue.severity === 'info') continue;
+    for (const id of issue.instances) {
+      if (worst.get(id) !== 'error') worst.set(id, issue.severity);
+    }
+  }
+  return worst;
+}
+
+/**
+ * The fabricated view: green laminate where material stays, the page where
+ * the router takes it away, drilled holes punched through at true size.
+ */
+function renderFabSVG(panel: Panel, sources: ResolvedSources, geometry: PanelGeometry, opts: PanelRenderOpts): string {
+  const frame = geometry.frame;
+  const view: Box = frame ? { ...frame.outer } : { minX: 0, minY: 0, maxX: 100, maxY: 60 };
+  const minX = view.minX - MARGIN_MM;
+  const minY = view.minY - MARGIN_MM;
+  const w = view.maxX - view.minX + 2 * MARGIN_MM;
+  const h = view.maxY - view.minY + 2 * MARGIN_MM;
+  const widthPx = opts.widthPx ?? DEFAULT_WIDTH_PX;
+  const heightPx = Math.max(1, Math.round((widthPx * h) / w));
+  const X = (x: number): string => f(x - minX);
+  const Y = (y: number): string => f(minY + h - y);
+  const pt = (p: Point): string => `${X(p.x)},${Y(p.y)}`;
+  const path = (pts: Point[], close: boolean): string =>
+    pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${pt(p)}`).join(' ') + (close ? ' Z' : '');
+  const out: string[] = [];
+  const text = (s: string, at: Point, height: number, colour: string, weight = 0.14): void => {
+    for (const stroke of strokeText(s, at, height, 0, false)) {
+      if (stroke.length < 2) continue;
+      out.push(
+        `<path d="${path(stroke, false)}" fill="none" stroke="${colour}" stroke-width="${f(height * weight)}" stroke-linecap="round" stroke-linejoin="round"/>`,
+      );
+    }
+  };
+  const disc = (at: Point, r: number, fill: string): void => {
+    out.push(`<circle cx="${X(at.x)}" cy="${Y(at.y)}" r="${f(r)}" fill="${fill}"/>`);
+  };
+
+  const scene = fabScene(panel.settings, geometry);
+
+  // Material: every profile ring in one path, even-odd, so openings are holes.
+  if (scene.rings.length > 0) {
+    const d = scene.rings.map((r) => path(r.points, true)).join(' ');
+    out.push(`<path d="${d}" fill="${FAB_COLORS.mask}" fill-rule="evenodd" stroke="none"/>`);
+  }
+  for (const r of scene.rails) out.push(`<path d="${path(boxCorners(r), true)}" fill="${FAB_COLORS.rail}" stroke="none"/>`);
+  for (const o of scene.outlines) {
+    out.push(`<path d="${path(o.outline, true)}" fill="none" stroke="${FAB_COLORS.edge}" stroke-width="0.08"/>`);
+  }
+  for (const d of scene.dividers) {
+    out.push(`<path d="${path(d, false)}" fill="none" stroke="${FAB_COLORS.silk}" stroke-width="0.15"/>`);
+  }
+  for (const s of scene.scores) {
+    out.push(
+      `<line x1="${X(s.start.x)}" y1="${Y(s.start.y)}" x2="${X(s.end.x)}" y2="${Y(s.end.y)}" stroke="${FAB_COLORS.score}" stroke-width="0.2"/>`,
+    );
+  }
+  for (const fid of scene.fiducials) {
+    disc(fid.at, fid.maskDiameter / 2, FAB_COLORS.substrate);
+    disc(fid.at, fid.copperDiameter / 2, FAB_COLORS.copper);
+  }
+  // Drilled last: a hole goes through everything, mask, rail and edge alike.
+  for (const d of scene.drills) disc(d.at, d.diameter / 2, PAPER);
+
+  const worst = worstOf(opts.issues ?? []);
+  if (opts.labels !== false) {
+    for (const o of scene.outlines) {
+      const src = sources.find((s) => s.key === o.source);
+      const b = o.bbox;
+      const tags = [o.id];
+      if (!o.populate) tags.push('BARE');
+      if (o.pinned) tags.push('PIN');
+      if (src?.stale) tags.push('STALE');
+      const label = tags.join(' ');
+      const w0 = b.maxX - b.minX;
+      const h0 = b.maxY - b.minY;
+      const height = Math.max(1.2, Math.min(4, h0 / 4, (w0 * 0.9) / (label.length * 0.9)));
+      const c = { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
+      text(label, c, height, FAB_COLORS.label);
+      const level = worst.get(o.id);
+      if (level) {
+        // A small badge above the label: there are issues, see the layout view.
+        const at = { x: c.x, y: c.y + height * 1.6 };
+        disc(at, height * 0.7, level === 'error' ? FAB_COLORS.error : FAB_COLORS.warning);
+        text('!', at, height * 0.9, FAB_COLORS.label, 0.18);
+      }
+    }
+  }
+
+  if (frame) {
+    const caption = `${panel.name}  ${frame.width.toFixed(1)} X ${frame.height.toFixed(1)} MM  AS FABRICATED`;
+    const capW = caption.length * 0.9 * 1.8;
+    text(caption, { x: view.minX + capW / 2, y: view.minY - 3.4 }, 1.8, INK, 0.12);
+    // Issues anywhere, the panel's own included: one marker and a count above the panel.
+    const issues = opts.issues ?? [];
+    const errors = issues.filter((i) => i.severity === 'error').length;
+    const warnings = issues.filter((i) => i.severity === 'warning').length;
+    if (errors + warnings > 0) {
+      const at = { x: view.minX + 1.3, y: view.maxY + 3 };
+      disc(at, 1.3, errors > 0 ? FAB_COLORS.error : FAB_COLORS.warning);
+      text('!', at, 1.6, FAB_COLORS.label, 0.18);
+      const count = [errors > 0 ? `${errors} ERROR${errors === 1 ? '' : 'S'}` : '', warnings > 0 ? `${warnings} WARNING${warnings === 1 ? '' : 'S'}` : '']
+        .filter((s) => s !== '')
+        .join(' ');
+      text(count, { x: at.x + 2 + (count.length * 0.9 * 1.8) / 2, y: at.y }, 1.8, INK, 0.12);
+    }
+  } else {
+    text('EMPTY PANEL', { x: (view.minX + view.maxX) / 2, y: (view.minY + view.maxY) / 2 }, 4, INK, 0.12);
+  }
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${widthPx}" height="${heightPx}" viewBox="0 0 ${f(w)} ${f(h)}">`,
+    `<rect x="0" y="0" width="${f(w)}" height="${f(h)}" fill="${PAPER}"/>`,
+    ...out,
+    '</svg>',
+  ].join('\n');
 }
 
 function bboxOf(pts: Point[]): Box {

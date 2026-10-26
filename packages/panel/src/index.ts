@@ -138,3 +138,6 @@ export { quoteOrder, layoutMatches, OBJECTIVES } from './scenarios.js';
 export type { SourceView, LimitView, OrderMinimums, PanelView, BoardLoading, PanelLoading } from './view.js';
 
 export { BOARD_COLORS, BOARD_TINT, boardColorAt, boardColor, tint } from './colors.js';
+
+export type { FabRing, FabDrill, FabFiducial, FabOutline, FabScene } from './fabview.js';
+export { FAB_COLORS, classifyRings, fabScene } from './fabview.js';
