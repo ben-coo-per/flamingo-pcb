@@ -79,6 +79,22 @@ export interface GerberExtras {
   noPaste?: (refdes: string) => boolean;
   /** Silkscreen label per component refdes, replacing the computed one. */
   labels?: Map<string, RefdesLabel>;
+  /** V-cut score lines, drawn open on the profile layer (panels separated by V-cut). */
+  scores?: ScoreExtras;
+}
+
+/**
+ * V-cut marking. JLCPCB wants score lines on the board outline layer and a
+ * "V-CUT" note on that same layer. Each line runs edge to edge across the panel.
+ */
+export interface ScoreExtras {
+  lines: Array<{ start: Point; end: Point }>;
+  /** Stroke width of a score line, mm. */
+  width: number;
+  /** Text put next to each line on the profile layer; none when absent. */
+  label?: string;
+  /** Label text height, mm (default 1.5). */
+  labelHeight?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -481,6 +497,31 @@ function buildSilk(b: Board, side: 'F' | 'B', extras: GerberExtras): string {
 }
 
 /**
+ * V-cut lines as open strokes, each labelled just outside the panel past the
+ * line's start (left or bottom edge), the text parallel to that edge. Outside,
+ * so the text never sits on material the router might take for a contour;
+ * parallel to the edge, so it adds only its height to the drawing's extent.
+ */
+function drawScores(g: GerberBuilder, s: ScoreExtras, b: Board): void {
+  if (s.lines.length === 0) return;
+  g.select(g.aperture(`C,${ap(s.width)}`));
+  for (const l of s.lines) g.drawPolyline([l.start, l.end]);
+  if (!s.label) return;
+  const h = s.labelHeight ?? 1.5;
+  const gap = 1;
+  const minX = Math.min(...b.outline.flatMap((seg) => [seg.start.x, seg.end.x]), ...s.lines.map((l) => Math.min(l.start.x, l.end.x)));
+  const minY = Math.min(...b.outline.flatMap((seg) => [seg.start.y, seg.end.y]), ...s.lines.map((l) => Math.min(l.start.y, l.end.y)));
+  g.select(g.aperture(`C,${ap(h * 0.12)}`));
+  for (const l of s.lines) {
+    const vertical = Math.abs(l.end.x - l.start.x) < Math.abs(l.end.y - l.start.y);
+    // Vertical line: label under the bottom edge, upright. Horizontal: left of
+    // the left edge, reading bottom to top.
+    const at = vertical ? { x: l.start.x, y: minY - gap - h / 2 } : { x: minX - gap - h / 2, y: l.start.y };
+    for (const poly of strokeText(s.label, at, h, vertical ? 0 : 90, false)) g.drawPolyline(poly);
+  }
+}
+
+/**
  * Board profile (.GKO): the outer outline, plus a closed contour for every
  * non-plated milled slot.
  *
@@ -509,6 +550,10 @@ function buildEdge(b: Board, extras: GerberExtras): string {
     }
   } else {
     for (const seg of b.outline) g.drawSeg(seg);
+  }
+  if (extras.scores) {
+    drawScores(g, extras.scores, b);
+    g.select(g.aperture('C,0.1')); // slots below are stroked like the profile
   }
   for (const h of allHoles(b)) {
     if (h.plated || !isSlot(h)) continue;
