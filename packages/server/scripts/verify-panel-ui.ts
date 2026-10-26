@@ -925,9 +925,12 @@ async function main(): Promise<void> {
       `<svg xmlns="http://www.w3.org/2000/svg" width="${VIEWPORT.width}" height="${VIEWPORT.height}"><image width="${VIEWPORT.width}" height="${VIEWPORT.height}" href="data:image/png;base64,${fabPng.toString('base64')}"/></svg>`,
     ).render();
     const mask = rgb(FAB_COLORS.mask);
+    // `pixels` copies the whole image on every read: take it once. Read in
+    // the loop it allocated gigabytes a second and took the machine down.
+    const fabPx = fabImg.pixels;
     let green = 0;
-    for (let i = 0; i < fabImg.pixels.length; i += 4) {
-      if (mask.every((v, k) => Math.abs(fabImg.pixels[i + k]! - v) <= 3)) green++;
+    for (let i = 0; i < fabPx.length; i += 4) {
+      if (Math.abs(fabPx[i]! - mask[0]!) <= 3 && Math.abs(fabPx[i + 1]! - mask[1]!) <= 3 && Math.abs(fabPx[i + 2]! - mask[2]!) <= 3) green++;
     }
     assert(green > 20000, `only ${green} pixels of solder-mask green in the fabricated view`);
     // Selecting still works on the fabricated plate.
