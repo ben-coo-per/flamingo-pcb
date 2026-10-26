@@ -37,6 +37,8 @@
  *   - colour means "which board" and nothing else: every instance is filled
  *     with its board's tint, and every coloured pixel and style has the hue of
  *     a board colour
+ *   - Layout / Fabricated: the fabricated view is drawn in solder-mask green,
+ *     boards can still be selected in it, and the choice survives a reload
  *
  * Screenshots go to panel-screenshots/ at the repo root. Exits 0 on success.
  *
@@ -72,7 +74,7 @@ import type { Browser, Page } from 'playwright-core';
 import { Resvg } from '@resvg/resvg-js';
 import { newBoard } from '@flamingo/engine';
 import type { PanelView } from '@flamingo/panel';
-import { BOARD_COLORS, boardColorAt, tint } from '@flamingo/panel';
+import { BOARD_COLORS, FAB_COLORS, boardColorAt, tint } from '@flamingo/panel';
 import { Doc } from '../src/document.js';
 import { startServer } from '../src/http.js';
 import type { StartedServer } from '../src/http.js';
@@ -909,6 +911,35 @@ async function main(): Promise<void> {
     const motion = await page.evaluate(`(() => [...document.querySelectorAll('*')].filter((e) => { const c = getComputedStyle(e); return c.transitionDuration.split(',').some((d) => parseFloat(d) > 0) || c.animationName !== 'none' || c.boxShadow !== 'none' || c.backgroundImage !== 'none'; }).length)()`);
     assert(motion === 0, `${motion} element(s) have a transition, animation, shadow or gradient`);
     console.log(`  ${placed.length} instances filled with their board's tint; ${coloured} coloured pixels, ${stray} stray; no transition, animation, shadow or gradient`);
+
+    // --- fabricated view ---------------------------------------------------
+    step('the Fabricated view draws the panel as the fab makes it, and is remembered');
+    const pressed = (look: string): Promise<string | null> => page.locator(`#look-toggle button[data-look="${look}"]`).getAttribute('aria-pressed');
+    assert((await pressed('layout')) === 'true', 'the panel view does not start in Layout');
+    await page.locator('#look-toggle button[data-look="fab"]').click();
+    assert((await pressed('fab')) === 'true' && (await pressed('layout')) === 'false', 'the toggle does not show Fabricated as chosen');
+    await until("s.look === 'fab'", 'the fabricated look');
+    await page.waitForTimeout(100);
+    const fabPng = await shot('16-fabricated', 'Fabricated view: green laminate where material stays, the plate where it is routed away, mouse-bite and tooling holes drilled through.');
+    const fabImg = new Resvg(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${VIEWPORT.width}" height="${VIEWPORT.height}"><image width="${VIEWPORT.width}" height="${VIEWPORT.height}" href="data:image/png;base64,${fabPng.toString('base64')}"/></svg>`,
+    ).render();
+    const mask = rgb(FAB_COLORS.mask);
+    let green = 0;
+    for (let i = 0; i < fabImg.pixels.length; i += 4) {
+      if (mask.every((v, k) => Math.abs(fabImg.pixels[i + k]! - v) <= 3)) green++;
+    }
+    assert(green > 20000, `only ${green} pixels of solder-mask green in the fabricated view`);
+    // Selecting still works on the fabricated plate.
+    const fc = await centreOf('S1');
+    await page.mouse.click(fc.x, fc.y);
+    assert((await state<string | null>('s.selection')) === 'S1', 'clicking a board in the fabricated view does not select it');
+    await page.reload();
+    await page.waitForFunction('window.flamingoPanel && window.flamingoPanel.state().view !== null');
+    assert((await pressed('fab')) === 'true', 'the fabricated view is not remembered across a reload');
+    await page.locator('#look-toggle button[data-look="layout"]').click();
+    assert((await state<string>('s.look')) === 'layout', 'Layout does not switch back');
+    console.log(`  ${green} mask-green pixels; selection works; the choice survives a reload`);
 
     assert(pageErrors.length === 0, `the page logged errors:\n${pageErrors.join('\n')}`);
 

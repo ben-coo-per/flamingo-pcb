@@ -93,6 +93,35 @@ body {
   flex: 1;
 }
 
+/* Layout / Fabricated: two buttons, the one in force filled. */
+.look {
+  display: flex;
+}
+
+.look button {
+  padding: 1px 10px;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.look button + button {
+  border-left: 0;
+}
+
+.look button[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 700;
+}
+
+.look button:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
 .bar-link {
   color: var(--ink);
   text-decoration: underline;

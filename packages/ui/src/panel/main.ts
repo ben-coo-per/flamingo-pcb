@@ -22,7 +22,7 @@ import { OWN, buildOptions, rankOf, scenarioOnPlate } from './options.js';
 import { DRAG_THRESHOLD_PX, contentBox, dropPosition, hitInstance, platePlaces, platesBox } from './hit.js';
 import { createLoading } from './loading.js';
 import { createSidebar } from './sidebar.js';
-import { PanelStore } from './store.js';
+import { PanelStore, loadLook, saveLook } from './store.js';
 import { connectPanelWs } from './ws.js';
 
 const WHEEL_ZOOM_PER_PX = 0.001;
@@ -32,6 +32,7 @@ const LINE_DELTA_PX = 16;
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
 const store = new PanelStore();
+store.set({ look: loadLook() });
 const plate = $('plate');
 const canvas = $<HTMLCanvasElement>('plate-canvas');
 const menuEl = $('context-menu');
@@ -607,6 +608,20 @@ function renderBanner(): void {
 }
 $('banner-back').addEventListener('click', leavePreview);
 
+// Layout / Fabricated. Only the drawing changes: selection, drag and menus work in both.
+const lookButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('#look-toggle button[data-look]'));
+function renderLook(): void {
+  for (const b of lookButtons) b.setAttribute('aria-pressed', String(b.dataset.look === store.get().look));
+}
+for (const b of lookButtons) {
+  b.addEventListener('click', () => {
+    const look = b.dataset.look === 'fab' ? 'fab' : 'layout';
+    saveLook(look);
+    store.set({ look });
+  });
+}
+renderLook();
+
 $('arrange-btn').addEventListener('click', () => void arrange());
 $('export-btn').addEventListener('click', () => void exportFab());
 
@@ -615,6 +630,7 @@ store.subscribe((state, previous) => {
   renderSidebar(state);
   renderLoading(state);
   if (state.menu !== previous.menu || state.view !== previous.view) renderMenu();
+  if (state.look !== previous.look) renderLook();
   if (state.preview !== previous.preview || state.quote !== previous.quote || state.view !== previous.view) renderBanner();
 });
 

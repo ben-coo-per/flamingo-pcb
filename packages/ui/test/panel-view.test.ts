@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import type { CostLine, PanelGeometry, PanelIssue, PlacedInstance, Received } from '@flamingo/panel';
+import type { CostLine, PanelGeometry, PanelIssue, PanelView, PlacedInstance, Received } from '@flamingo/panel';
+import { BOARD_TINT, FAB_COLORS, boardColorAt, tint } from '@flamingo/panel';
+import { drawPlate } from '../src/panel/draw.js';
+import { PanelStore, loadLook, saveLook } from '../src/panel/store.js';
+import type { PanelState } from '../src/panel/store.js';
 import {
   ISSUE_TITLE,
   loadsOntoPanel,
@@ -310,5 +314,130 @@ describe('panel view: a scenario on the plate', () => {
     expect(previewLine({ kind: 'split', orders: [order(true, true), order(false, false)] }, 3)).toBe(
       'Option 3, Split by layers: 2 orders: 1 panel and 1 of single boards',
     );
+  });
+});
+
+describe('panel view: fabricated look', () => {
+  /** A canvas context that records what is drawn. */
+  function recorder() {
+    const calls: Array<{ name: string; args: unknown[]; fillStyle: unknown }> = [];
+    const props: Record<string, unknown> = {};
+    const ctx = new Proxy(props, {
+      get(target, prop: string) {
+        if (prop in target) return target[prop];
+        if (prop === 'measureText') return (s: string) => ({ width: s.length * 7 });
+        return (...args: unknown[]) => calls.push({ name: prop, args, fillStyle: target.fillStyle });
+      },
+      set(target, prop: string, value) {
+        target[prop] = value;
+        return true;
+      },
+    }) as unknown as CanvasRenderingContext2D;
+    return { ctx, calls };
+  }
+
+  const rect = (x0: number, y0: number, x1: number, y1: number) => [
+    { x: x0, y: y0 },
+    { x: x1, y: y0 },
+    { x: x1, y: y1 },
+    { x: x0, y: y1 },
+  ];
+  // Two boards held by one mouse-bite tab, three holes a side, no rails.
+  const holes = [0, 1, 2].flatMap((k) => [
+    { x: 40.1, y: 20 + k * 0.8 },
+    { x: 41.9, y: 20 + k * 0.8 },
+  ]);
+  const g: PanelGeometry = {
+    ...geometry([inst('S1', 0, 7, 40, 30), inst('M1', 42, 7, 18, 30)]),
+    tabs: [
+      {
+        a: 'S1',
+        b: 'M1',
+        side: 'E',
+        center: { x: 41, y: 21 },
+        length: 2,
+        polygon: rect(40, 19.5, 42, 22.5),
+        holes,
+        normal: { x: 1, y: 0 },
+        along: { x: 0, y: 1 },
+      },
+    ],
+    // The union of both boards and the tab: one outline, no openings.
+    profile: [
+      [
+        { x: 0, y: 7 },
+        { x: 40, y: 7 },
+        { x: 40, y: 19.5 },
+        { x: 42, y: 19.5 },
+        { x: 42, y: 7 },
+        { x: 60, y: 7 },
+        { x: 60, y: 37 },
+        { x: 42, y: 37 },
+        { x: 42, y: 22.5 },
+        { x: 40, y: 22.5 },
+        { x: 40, y: 37 },
+        { x: 0, y: 37 },
+      ],
+    ],
+  };
+
+  function stateFor(look: 'layout' | 'fab', extra: Partial<PanelState> = {}): PanelState {
+    const view = {
+      panel: { name: 'p', sources: [{ key: 'S' }, { key: 'M' }], instances: [], settings: { tabs: { holeDiameter: 0.6 } } },
+      sources: [],
+      geometry: g,
+      issues: [{ code: 'overlap', severity: 'error', message: 'x', instances: ['M1'] }],
+      quote: { order: null },
+      limits: [{ label: 'max', width: 100, height: 100, verified: true, binding: true, source: '' }],
+    } as unknown as PanelView;
+    return {
+      ...new PanelStore().get(),
+      view,
+      look,
+      transform: { scale: 10, originPxX: 0, originPxY: 500, flipped: false },
+      ...extra,
+    };
+  }
+
+  it('fills the material once, even-odd, and drills each hole at true size', () => {
+    const { ctx, calls } = recorder();
+    drawPlate(ctx, stateFor('fab'), 800, 600);
+    const fills = calls.filter((c) => c.name === 'fill' && c.args[0] === 'evenodd');
+    expect(fills).toHaveLength(1);
+    expect(fills[0]!.fillStyle).toBe(FAB_COLORS.mask);
+    expect(calls.filter((c) => c.name === 'arc' && c.args[2] === 0.3 * 10)).toHaveLength(holes.length);
+    // No board colours, no limits.
+    expect(calls.some((c) => c.fillStyle === tint(boardColorAt(0), BOARD_TINT))).toBe(false);
+    expect(calls.some((c) => c.name === 'fillText' && String(c.args[0]).startsWith('max:'))).toBe(false);
+    // The instance with an error gets a badge.
+    expect(calls.some((c) => c.name === 'fill' && c.fillStyle === FAB_COLORS.error)).toBe(true);
+  });
+
+  it('draws the layout as before', () => {
+    const { ctx, calls } = recorder();
+    drawPlate(ctx, stateFor('layout'), 800, 600);
+    expect(calls.some((c) => c.name === 'fill' && c.args[0] === 'evenodd')).toBe(false);
+    expect(calls.some((c) => c.name === 'fillText' && String(c.args[0]).startsWith('max:'))).toBe(true);
+  });
+
+  it('still shows the selection and a board being dragged', () => {
+    const { ctx, calls } = recorder();
+    drawPlate(ctx, stateFor('fab', { selection: 'S1', drag: { id: 'M1', dx: 5, dy: 0 } }), 800, 600);
+    // Four corner handles for the selection; the dragged board's position.
+    expect(calls.filter((c) => c.name === 'fillRect' && c.args[2] === 8)).toHaveLength(4);
+    expect(calls.some((c) => c.name === 'fillText' && c.args[0] === '47, 7')).toBe(true);
+  });
+
+  it('remembers the choice where it can, and falls back to the layout', () => {
+    const saved = new Map<string, string>();
+    const storage = { getItem: (k: string) => saved.get(k) ?? null, setItem: (k: string, v: string) => void saved.set(k, v) };
+    expect(loadLook(storage)).toBe('layout');
+    saveLook('fab', storage);
+    expect(loadLook(storage)).toBe('fab');
+    const denied = (): never => {
+      throw new Error('denied');
+    };
+    expect(() => saveLook('fab', { setItem: denied })).not.toThrow();
+    expect(loadLook({ getItem: denied })).toBe('layout');
   });
 });

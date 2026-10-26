@@ -22,6 +22,9 @@
  *   V-cut score        thin dashed line across the whole panel, over the boards
  *   error / warning    second outline outside the board (solid / dashed), label ERROR / WARNING
  *
+ * The fabricated view (`state.look === 'fab'`, see `drawFab`) draws the same
+ * panel as the fab makes it instead: colour there means material.
+ *
  * The plate shows one of two things: the panel, which can be edited, or a
  * scenario that is not one panel (single boards, several orders), shown as one
  * plate per order, side by side, each drawn as a stack to say "several of
@@ -29,8 +32,8 @@
  */
 
 import type { Point } from '@flamingo/engine';
-import type { Box, PanelGeometry, PlacedInstance, Scenario, Side } from '@flamingo/panel';
-import { BOARD_TINT, boardColor, tint } from '@flamingo/panel';
+import type { Box, FabScene, PanelGeometry, PlacedInstance, Scenario, Side } from '@flamingo/panel';
+import { BOARD_TINT, FAB_COLORS, boardColor, fabScene, tint } from '@flamingo/panel';
 import type { ViewTransform } from '../state.js';
 import { worldToScreen } from '../view.js';
 import { mm, pieces, worstByInstance } from './format.js';
@@ -119,6 +122,7 @@ function label(
   bold = false,
   align: CanvasTextAlign = 'center',
   ground: string = PAPER,
+  ink: string = INK,
 ): void {
   ctx.font = `${bold ? '700 ' : ''}${px}px ${FONT}`;
   ctx.textAlign = align;
@@ -128,7 +132,7 @@ function label(
   const left = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
   ctx.fillStyle = ground;
   ctx.fillRect(left - 3, y - px * 0.62, w + 6, px * 1.24);
-  ctx.fillStyle = INK;
+  ctx.fillStyle = ink;
   ctx.fillText(text, x, y);
 }
 
@@ -438,7 +442,7 @@ export function drawPlate(ctx: Ctx, state: PanelState, width: number, height: nu
   }
 
   const { geometry } = view;
-  drawLimits(ctx, state, geometry, width, height);
+  if (state.look !== 'fab') drawLimits(ctx, state, geometry, width, height);
   const order = view.quote.order;
   const look: Look = {
     t: state.transform,
@@ -452,6 +456,10 @@ export function drawPlate(ctx: Ctx, state: PanelState, width: number, height: nu
         ]
       : [],
   };
+  if (state.look === 'fab') {
+    drawFab(ctx, state, look, geometry);
+    return;
+  }
   drawFrame(ctx, look, geometry);
 
   const worst = worstByInstance(view.issues);
@@ -473,5 +481,149 @@ function drawScores(ctx: Ctx, look: Look, geometry: PanelGeometry): void {
   for (const s of geometry.scores ?? []) {
     trace(ctx, look.t, [s.start, s.end], false);
     stroke(ctx, 1, [6, 3]);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fabricated view
+// ---------------------------------------------------------------------------
+
+/** The scene is worked out once per geometry: the view replaces it on every change. */
+const scenes = new WeakMap<PanelGeometry, FabScene>();
+
+function sceneOf(state: PanelState, geometry: PanelGeometry): FabScene {
+  let scene = scenes.get(geometry);
+  if (!scene) {
+    scene = fabScene(state.view!.panel.settings, geometry);
+    scenes.set(geometry, scene);
+  }
+  return scene;
+}
+
+function disc(ctx: Ctx, t: ViewTransform, at: Point, diameter: number, fill: string): void {
+  const s = worldToScreen(t, at);
+  ctx.beginPath();
+  ctx.arc(s.x, s.y, (diameter / 2) * t.scale, 0, Math.PI * 2);
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+
+/** A round badge with `!`: there are issues, the layout view says which. */
+function badge(ctx: Ctx, x: number, y: number, level: 'error' | 'warning'): void {
+  ctx.beginPath();
+  ctx.arc(x, y, 8, 0, Math.PI * 2);
+  ctx.fillStyle = level === 'error' ? FAB_COLORS.error : FAB_COLORS.warning;
+  ctx.fill();
+  ctx.font = `700 12px ${FONT}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = FAB_COLORS.label;
+  ctx.fillText('!', x, y + 0.5);
+}
+
+/**
+ * The panel as the fab makes it, from the same primitives as the SVG render
+ * (fabview.ts): laminate where material stays, the plate where the router
+ * removes it, drilled holes punched through at true size. Selection and a
+ * drag in progress are drawn over it; limits, blocked edges and error
+ * outlines are not, only a small badge where there are issues.
+ */
+function drawFab(ctx: Ctx, state: PanelState, look: Look, geometry: PanelGeometry): void {
+  const { t } = look;
+  const view = state.view!;
+  const scene = sceneOf(state, geometry);
+
+  // Every ring in one path, filled even-odd: openings come out as holes.
+  ctx.beginPath();
+  for (const ring of scene.rings) {
+    ring.points.forEach((p, i) => {
+      const s = worldToScreen(t, p);
+      if (i === 0) ctx.moveTo(s.x, s.y);
+      else ctx.lineTo(s.x, s.y);
+    });
+    ctx.closePath();
+  }
+  ctx.fillStyle = FAB_COLORS.mask;
+  ctx.fill('evenodd');
+
+  for (const r of scene.rails) {
+    trace(ctx, t, corners(r));
+    ctx.fillStyle = FAB_COLORS.rail;
+    ctx.fill();
+  }
+  for (const o of scene.outlines) {
+    trace(ctx, t, o.outline);
+    stroke(ctx, 0.75, [], FAB_COLORS.edge);
+  }
+  for (const d of scene.dividers) {
+    trace(ctx, t, d, false);
+    stroke(ctx, 1, [], FAB_COLORS.silk);
+  }
+  for (const s of scene.scores) {
+    trace(ctx, t, [s.start, s.end], false);
+    stroke(ctx, 1.25, [], FAB_COLORS.score);
+  }
+  for (const f of scene.fiducials) {
+    disc(ctx, t, f.at, f.maskDiameter, FAB_COLORS.substrate);
+    disc(ctx, t, f.at, f.copperDiameter, FAB_COLORS.copper);
+  }
+  for (const d of scene.drills) disc(ctx, t, d.at, d.diameter, PAPER);
+
+  const worst = worstByInstance(view.issues);
+  const stale = new Set(view.sources.filter((s) => s.stale).map((s) => s.key));
+  for (const inst of geometry.instances) {
+    const off = dragOffset(inst.id, look.drag);
+    const moving = off.x !== 0 || off.y !== 0;
+    const outline = shift(inst.outline, off);
+    const box = shiftBox(inst.bbox, off);
+    if (moving) {
+      // The board in hand: where it would go. The material under it updates on drop.
+      trace(ctx, t, outline);
+      ctx.fillStyle = FAB_COLORS.mask;
+      ctx.fill();
+      stroke(ctx, 1.5, [6, 4], INK);
+      const bl = worldToScreen(t, { x: box.minX, y: box.minY });
+      label(ctx, `${mm(box.minX)}, ${mm(box.minY)}`, bl.x, bl.y + 12, 11, false, 'left');
+    }
+    if (look.selection === inst.id) {
+      trace(ctx, t, outline);
+      stroke(ctx, 3, [], INK);
+      ctx.fillStyle = INK;
+      for (const c of corners(box)) {
+        const s = worldToScreen(t, c);
+        ctx.fillRect(s.x - 4, s.y - 4, 8, 8);
+      }
+    }
+
+    const c = worldToScreen(t, { x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 });
+    const wPx = (box.maxX - box.minX) * t.scale;
+    const hPx = (box.maxY - box.minY) * t.scale;
+    const big = Math.max(11, Math.min(30, hPx / 3.2, wPx / 3));
+    const small = Math.max(9, Math.min(12, big * 0.5));
+    const tags: string[] = [];
+    if (!inst.populate) tags.push('BARE');
+    if (inst.pinned) tags.push('PINNED');
+    if (stale.has(inst.source)) tags.push('STALE');
+    const showTags = tags.length > 0 && hPx > big + small + 10;
+    label(ctx, inst.id, c.x, showTags ? c.y - small * 0.7 : c.y, big, true, 'center', FAB_COLORS.mask, FAB_COLORS.label);
+    if (showTags) label(ctx, tags.join(' · '), c.x, c.y + big * 0.62, small, false, 'center', FAB_COLORS.mask, FAB_COLORS.label);
+    const level = worst.get(inst.id);
+    if (level) badge(ctx, c.x, c.y - big * (showTags ? 1.3 : 0.9) - 6, level);
+  }
+
+  const frame = geometry.frame;
+  if (!frame) return;
+  const at = worldToScreen(t, { x: frame.outer.minX, y: frame.outer.minY });
+  look.caption.forEach((line, i) => label(ctx, line, at.x, at.y + 14 + i * 17, 12, i === 0, 'left'));
+  // Issues of the panel as a whole have no board to sit on: count them all above it.
+  const errors = view.issues.filter((i) => i.severity === 'error').length;
+  const warnings = view.issues.filter((i) => i.severity === 'warning').length;
+  if (errors + warnings > 0) {
+    const top = worldToScreen(t, { x: frame.outer.minX, y: frame.outer.maxY });
+    badge(ctx, top.x + 8, top.y - 14, errors > 0 ? 'error' : 'warning');
+    const text = [errors > 0 ? `${errors} error${errors === 1 ? '' : 's'}` : '', warnings > 0 ? `${warnings} warning${warnings === 1 ? '' : 's'}` : '']
+      .filter((s) => s !== '')
+      .join(', ');
+    label(ctx, `${text}: see Checks`, top.x + 20, top.y - 14, 11, false, 'left');
   }
 }

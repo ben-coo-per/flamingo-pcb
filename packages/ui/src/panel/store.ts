@@ -31,8 +31,12 @@ export interface Message {
   link?: { href: string; name: string; label: string };
 }
 
+/** How the plate draws the panel: the editable layout, or as the fab makes it. */
+export type PanelLook = 'layout' | 'fab';
+
 export interface PanelState {
   view: PanelView | null;
+  look: PanelLook;
   /** Board checks the server is running before it can send the next view. */
   loading: PanelLoading | null;
   connected: boolean;
@@ -65,6 +69,7 @@ export interface PanelState {
 function initial(): PanelState {
   return {
     view: null,
+    look: 'layout',
     loading: null,
     connected: false,
     transform: { scale: 6, originPxX: 40, originPxY: 400, flipped: false },
@@ -83,6 +88,26 @@ function initial(): PanelState {
     menu: null,
     busy: false,
   };
+}
+
+const LOOK_KEY = 'flamingo.panel.look';
+
+/** The view last chosen in this browser. Storage can be missing or throw (private windows): then the layout. */
+export function loadLook(storage?: Pick<Storage, 'getItem'>): PanelLook {
+  try {
+    // Reading `localStorage` itself can throw, so it is looked up in here.
+    return (storage ?? globalThis.localStorage)?.getItem(LOOK_KEY) === 'fab' ? 'fab' : 'layout';
+  } catch {
+    return 'layout';
+  }
+}
+
+export function saveLook(look: PanelLook, storage?: Pick<Storage, 'setItem'>): void {
+  try {
+    (storage ?? globalThis.localStorage)?.setItem(LOOK_KEY, look);
+  } catch {
+    // Not remembered; the toggle still works for this page.
+  }
 }
 
 type Listener = (state: PanelState, previous: PanelState) => void;
