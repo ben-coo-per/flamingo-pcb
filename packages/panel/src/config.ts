@@ -79,6 +79,25 @@ export interface PanelLimits {
     lineWidth: Sourced<number>;
     minFillRatio: Sourced<number>;
   };
+  vcut: {
+    straightEdgeToEdge: Sourced<boolean>;
+    minPanelSize: Sourced<{ width: number; height: number }>;
+    maxPanelSize: Sourced<{ width: number; height: number }>;
+    /** Closest two parallel score lines may be, mm. */
+    minLineSpacing: Sourced<number>;
+    maxLinesPerAxis: Sourced<number>;
+    /** A board with a side under this, mm, costs extra to V-cut. */
+    smallBoardSide: Sourced<number>;
+    /** Copper to the score line's centre, mm. */
+    copperClearance: Sourced<number>;
+    minThickness: Sourced<number>;
+    layers: Sourced<number[]>;
+    allowNoRails: Sourced<boolean>;
+    gerberLayer: Sourced<string>;
+    label: Sourced<string>;
+    lineWidth: Sourced<number>;
+    labelHeight: Sourced<number>;
+  };
 }
 
 /** Settings for a new panel, taken from the limits config. */

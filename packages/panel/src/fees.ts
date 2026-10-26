@@ -66,6 +66,8 @@ export interface FeeTable {
       maxDesigns: Sourced<number>;
     };
     smallBoardDeburring: Sourced<Array<{ underMm: number; perPiece: number }>>;
+    /** V-cut surcharge for small boards: JLCPCB publishes no amount in text, so null. */
+    vcutSmallBoard?: Sourced<number | null>;
   };
   assembly: Record<AssemblyType, AssemblyFees> & {
     manualJoint: Sourced<number>;

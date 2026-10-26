@@ -186,6 +186,13 @@
       "verified": true,
       "date": "2026-09-28",
       "note": "'1.5cm-3cm on one side: the extra fee is $0.02/pcs'; 'smaller than 1.5cm on one side: the extra fee is $0.05/pcs'. Applied per ordered piece."
+    },
+    "vcutSmallBoard": {
+      "value": null,
+      "source": "https://jlcpcb.com/help/article/in-what-cases-will-there-be-charged-extra",
+      "verified": false,
+      "date": "2026-10-26",
+      "note": "V-cut adds no fee of its own in any help article read on 2026-10-26. The one V-cut surcharge: 'For orders where the dimensions of single boards in the panel are less than 15mm on either side ... an extra charge for V-cut will be applied.' The amount appears only in an image on that page, so it is not modelled; panel_check warns instead (limits vcut.smallBoardSide)."
     }
   },
   "assembly": {
