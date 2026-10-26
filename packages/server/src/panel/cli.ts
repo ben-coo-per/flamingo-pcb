@@ -13,7 +13,7 @@
 import { existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
-import type { Objective, PanelOp, PanelOpError, PanelOpResult, Rotation, SettingsPatch } from '@flamingo/panel';
+import type { Objective, PanelOp, PanelOpError, PanelOpResult, Rotation, Separation, SettingsPatch } from '@flamingo/panel';
 import { OBJECTIVES, PANEL_EXTENSION, newPanel, settingsFromLimits } from '@flamingo/panel';
 import { loadPanelLimits } from '@flamingo/panel/node';
 import { fetchPart } from '@flamingo/parts';
@@ -42,7 +42,7 @@ export const PANEL_USAGE = `Usage: flamingo panel <command> <file${PANEL_EXTENSI
   rotate-instance <file> <id> [--rotation R | --by DEG]
   set-populate <file> <id> <true|false>
   pin <file> <id> [--unpin]
-  set <file> [--separation mouse-bite|solid-tab|silk-divider] [--spacing MM]
+  set <file> [--separation mouse-bite|solid-tab|silk-divider|v-cut] [--spacing MM]
              [--rail-top MM] [--rail-bottom MM] [--rail-left MM] [--rail-right MM]
              [--tab-width MM] [--tab-pitch MM] [--fiducials on|off]
              [--tooling-holes on|off] [--layers auto|2|4|6] [--name NAME]
@@ -282,11 +282,11 @@ export async function runPanelCli(argv: string[], io: PanelCliIo = { out: consol
           throw new Error('--layers must be auto, 2, 4 or 6');
         }
         const separation = string(args, 'separation');
-        if (separation !== undefined && !['mouse-bite', 'solid-tab', 'silk-divider'].includes(separation)) {
-          throw new Error('--separation must be mouse-bite, solid-tab or silk-divider');
+        if (separation !== undefined && !['mouse-bite', 'solid-tab', 'silk-divider', 'v-cut'].includes(separation)) {
+          throw new Error('--separation must be mouse-bite, solid-tab, silk-divider or v-cut');
         }
         const settings: SettingsPatch = {
-          ...(separation !== undefined ? { separation: separation as 'mouse-bite' | 'solid-tab' | 'silk-divider' } : {}),
+          ...(separation !== undefined ? { separation: separation as Separation } : {}),
           ...(number(args, 'spacing') !== undefined ? { spacing: number(args, 'spacing')! } : {}),
           ...(Object.keys(rails).length > 0 ? { rails } : {}),
           ...(Object.keys(tabs).length > 0 ? { tabs } : {}),

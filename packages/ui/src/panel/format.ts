@@ -232,7 +232,7 @@ export function composition(c: PieceCount, hasParts = true): { populated: number
 export const SCENARIO_MEANING: Record<ScenarioKind, string> = {
   separate: 'Each design is ordered on its own, as single boards. Nothing is panelized.',
   'own-panels': 'Each design gets a panel of its own, and each panel is its own order.',
-  merged: 'All boards share one panel and are held in it by break-off tabs. JLCPCB charges for each extra design on a panel.',
+  merged: 'All boards share one panel, held in it by break-off tabs or scored with V-cuts to snap apart. JLCPCB charges for each extra design on a panel.',
   'silk-divider':
     'All boards sit inside one plain outline with printed lines between them, which JLCPCB counts as one design. You cut the boards apart yourself.',
   split: 'Boards are grouped by layer count, and each group is its own order.',
