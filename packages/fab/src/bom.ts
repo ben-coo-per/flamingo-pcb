@@ -21,6 +21,7 @@
  */
 
 import type { Board, ComponentInst } from '@flamingo/engine';
+import { isAssembled } from '@flamingo/engine';
 
 const CRLF = '\r\n';
 const GROUP_SEP = ' ';
@@ -78,6 +79,7 @@ export function generateBOM(b: Board): string {
   const groups = new Map<string, BomGroup>();
 
   for (const c of b.components) {
+    if (!isAssembled(c)) continue; // no LCSC number, or do not place
     const comment = commentOf(c);
     const key = c.lcsc + GROUP_SEP + comment;
     let g = groups.get(key);

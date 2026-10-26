@@ -121,3 +121,14 @@ describe('generateBOM', () => {
     expect(csv).toBe('Comment,Designator,Footprint,LCSC Part #\r\n');
   });
 });
+
+describe('do-not-place parts', () => {
+  it('are left out of the BOM', () => {
+    const dnp = comp('R2', 'C25804');
+    dnp.fields.dnp = true;
+    const csv = generateBOM(boardWith([comp('R1', 'C25804'), dnp]));
+    const lines = csv.trim().split('\r\n');
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toBe('10k,R1,0603,C25804');
+  });
+});
