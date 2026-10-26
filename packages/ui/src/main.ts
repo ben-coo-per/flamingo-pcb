@@ -295,7 +295,7 @@ store.subscribe((state) => {
   viewer3d.setShowSilk((e.target as HTMLInputElement).checked);
 });
 
-// Export modal (export-modal.ts): the 3D HUD's Export… button, or E in the 3D view.
+// Export modal (export-modal.ts): the 3D HUD's Export… button, or E in either view.
 const exportModal = createExportModal({ getBoard: () => store.get().board, download: downloadBlob });
 document.getElementById('v3d-export-btn')?.addEventListener('click', () => exportModal.open());
 
@@ -424,7 +424,7 @@ window.addEventListener('keydown', (ev) => {
     return;
   }
 
-  if (ev.code === 'KeyE' && currentView === '3d') {
+  if (ev.code === 'KeyE') {
     exportModal.open();
     return;
   }

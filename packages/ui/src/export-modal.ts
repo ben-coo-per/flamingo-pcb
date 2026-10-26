@@ -1,5 +1,5 @@
 /**
- * Export modal (3D HUD "Export…", or E in the 3D view): STEP, STEP HD, DXF
+ * Export modal (3D HUD "Export…", or E in the 2D or 3D view): STEP, STEP HD, DXF
  * and SVG from one dialog. Pick a format and a preset, toggle the board
  * elements to include, set the format's options, export.
  *
