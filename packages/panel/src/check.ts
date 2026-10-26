@@ -10,14 +10,15 @@
  */
 
 import type { Board, Point } from '@flamingo/engine';
-import { allHoles, padWorld, polyIntersects, polyPolyDistance, RULESETS } from '@flamingo/engine';
+import { allHoles, padWorld, polyIntersects, RULESETS } from '@flamingo/engine';
 import type { AssemblyType, PanelLimits, SizeRange } from './config.js';
 import type { PanelGeometry, PlacedInstance } from './geometry.js';
-import { computeGeometry, effectiveSpacing, tabCounts, usesTabs } from './geometry.js';
+import { computeGeometry, effectiveSpacing, sideToward, tabCounts, usesTabs } from './geometry.js';
+import { closestPoints, dot, edgesOf, onSegment } from './poly.js';
 import type { ResolvedSources } from './resolved.js';
 import { panelRules, tighterLimits } from './rules.js';
 import { applyTransform, boxCorners } from './transform.js';
-import type { Box, Panel, Side } from './types.js';
+import type { Box, Panel } from './types.js';
 import { SIDES } from './types.js';
 
 export type Severity = 'error' | 'warning' | 'info';
@@ -252,15 +253,13 @@ function stackupIssues(panel: Panel, sources: ResolvedSources): PanelIssue[] {
   return issues;
 }
 
-function facing(a: PlacedInstance, b: PlacedInstance): { side: Side; gap: number } | null {
-  const gapX = Math.max(b.bbox.minX - a.bbox.maxX, a.bbox.minX - b.bbox.maxX);
-  const gapY = Math.max(b.bbox.minY - a.bbox.maxY, a.bbox.minY - b.bbox.maxY);
-  if (gapX >= -EPS && gapY < -EPS) return { side: b.bbox.minX >= a.bbox.maxX - EPS ? 'E' : 'W', gap: Math.max(0, gapX) };
-  if (gapY >= -EPS && gapX < -EPS) return { side: b.bbox.minY >= a.bbox.maxY - EPS ? 'N' : 'S', gap: Math.max(0, gapY) };
-  return null;
+/** Whether the closest approach at `p` toward `dir` is along a flat edge of `poly` rather than at a corner. */
+function flatToward(poly: Point[], p: Point, dir: Point): boolean {
+  for (const e of edgesOf(poly)) {
+    if (dot(e.normal, dir) > 1 - 1e-6 && onSegment(p, e.start, e.end)) return true;
+  }
+  return false;
 }
-
-const OPPOSITE: Record<Side, Side> = { N: 'S', S: 'N', E: 'W', W: 'E' };
 
 function placementIssues(panel: Panel, geometry: PanelGeometry, limits: PanelLimits): PanelIssue[] {
   const issues: PanelIssue[] = [];
@@ -275,74 +274,59 @@ function placementIssues(panel: Panel, geometry: PanelGeometry, limits: PanelLim
         x: (centre(a.bbox).x + centre(b.bbox).x) / 2,
         y: (centre(a.bbox).y + centre(b.bbox).y) / 2,
       };
-      const f = facing(a, b);
-      if (f) {
-        // Two parts overhanging toward each other must clear each other, not
-        // just the board opposite.
-        const oa = a.edges[f.side].overhang;
-        const ob = b.edges[OPPOSITE[f.side]].overhang;
-        const both = oa > 0 && ob > 0 ? oa + ob + limits.blockedEdges.overhangMargin.value : 0;
-        const need = Math.max(a.margins[f.side], b.margins[OPPOSITE[f.side]], both);
-        if (f.gap < need - EPS) {
-          const blocked = need > spacing + EPS;
-          const why = blocked
-            ? [
-                ...a.edges[f.side].reasons.map((r) => `${a.id}: ${r}`),
-                ...b.edges[OPPOSITE[f.side]].reasons.map((r) => `${b.id}: ${r}`),
-              ].join('; ')
-            : '';
-          issues.push({
-            code: blocked ? 'blocked-edge-clearance' : 'spacing',
-            severity: 'error',
-            message: blocked
-              ? `${a.id} and ${b.id} are ${fmt(f.gap)} mm apart; the blocked edge between them needs ${fmt(need)} mm (${why})`
-              : `${a.id} and ${b.id} are ${fmt(f.gap)} mm apart; the panel spacing is ${fmt(need)} mm`,
-            instances: [a.id, b.id],
-            sources: [],
-            at: mid,
-          });
-        }
+      if (polyIntersects(a.outline, b.outline)) {
+        issues.push({
+          code: 'overlap',
+          severity: 'error',
+          message: `${a.id} and ${b.id} overlap`,
+          instances: [a.id, b.id],
+          sources: [],
+          at: mid,
+        });
         continue;
       }
-      // Bounding boxes overlap on both axes, or sit diagonally.
-      const gapX = Math.max(b.bbox.minX - a.bbox.maxX, a.bbox.minX - b.bbox.maxX);
-      const gapY = Math.max(b.bbox.minY - a.bbox.maxY, a.bbox.minY - b.bbox.maxY);
-      if (gapX < 0 && gapY < 0) {
-        if (polyIntersects(a.outline, b.outline)) {
-          issues.push({
-            code: 'overlap',
-            severity: 'error',
-            message: `${a.id} and ${b.id} overlap`,
-            instances: [a.id, b.id],
-            sources: [],
-            at: mid,
-          });
-        } else if (spacing > 0) {
-          const d = polyPolyDistance(a.outline, b.outline);
-          if (d < spacing - EPS) {
-            issues.push({
-              code: 'spacing',
-              severity: 'error',
-              message: `${a.id} and ${b.id} are ${fmt(d)} mm apart; the panel spacing is ${fmt(spacing)} mm`,
-              instances: [a.id, b.id],
-              sources: [],
-              at: mid,
-            });
-          }
-        }
-      } else if (spacing > 0) {
-        const d = Math.hypot(Math.max(0, gapX), Math.max(0, gapY));
-        if (d < spacing - EPS) {
-          issues.push({
-            code: 'spacing',
-            severity: 'error',
-            message: `${a.id} and ${b.id} are ${fmt(d)} mm apart corner to corner; the panel spacing is ${fmt(spacing)} mm`,
-            instances: [a.id, b.id],
-            sources: [],
-            at: mid,
-          });
-        }
+      // The true gap between the outlines, at any angle, and the side of each
+      // board that faces the other across it.
+      const { d, pa, pb } = closestPoints(a.outline, b.outline);
+      let dir = { x: pb.x - pa.x, y: pb.y - pa.y };
+      // Touching: no direction across the gap, so go by where the boxes sit.
+      if (d < EPS) {
+        const ca = centre(a.bbox);
+        const cb = centre(b.bbox);
+        const gapX = Math.max(b.bbox.minX - a.bbox.maxX, a.bbox.minX - b.bbox.maxX);
+        const gapY = Math.max(b.bbox.minY - a.bbox.maxY, a.bbox.minY - b.bbox.maxY);
+        dir = gapX >= gapY ? { x: Math.sign(cb.x - ca.x), y: 0 } : { x: 0, y: Math.sign(cb.y - ca.y) };
       }
+      const len = Math.hypot(dir.x, dir.y) || 1;
+      dir = { x: dir.x / len, y: dir.y / len };
+      const back = { x: -dir.x, y: -dir.y };
+      const sideA = sideToward(a, dir);
+      const sideB = sideToward(b, back);
+      // Two parts overhanging toward each other must clear each other, not
+      // just the board opposite.
+      const oa = a.edges[sideA].overhang;
+      const ob = b.edges[sideB].overhang;
+      const both = oa > 0 && ob > 0 ? oa + ob + limits.blockedEdges.overhangMargin.value : 0;
+      const need = Math.max(a.margins[sideA], b.margins[sideB], both);
+      if (d >= need - EPS) continue;
+      const blocked = need > spacing + EPS;
+      const why = blocked
+        ? [
+            ...a.edges[sideA].reasons.map((r) => `${a.id}: ${r}`),
+            ...b.edges[sideB].reasons.map((r) => `${b.id}: ${r}`),
+          ].join('; ')
+        : '';
+      const corners = d >= EPS && !flatToward(a.outline, pa, dir) && !flatToward(b.outline, pb, back);
+      issues.push({
+        code: blocked ? 'blocked-edge-clearance' : 'spacing',
+        severity: 'error',
+        message: blocked
+          ? `${a.id} and ${b.id} are ${fmt(d)} mm apart; the blocked edge between them needs ${fmt(need)} mm (${why})`
+          : `${a.id} and ${b.id} are ${fmt(d)} mm apart${corners ? ' corner to corner' : ''}; the panel spacing is ${fmt(need)} mm`,
+        instances: [a.id, b.id],
+        sources: [],
+        at: mid,
+      });
     }
   }
 
@@ -402,7 +386,7 @@ function edgeAndTabIssues(panel: Panel, geometry: PanelGeometry, limits: PanelLi
     const b = geometry.instances.find((i) => i.id === t.b);
     const bad: string[] = [];
     if (a?.edges[t.side].blocked) bad.push(a.id);
-    if (b?.edges[OPPOSITE[t.side]].blocked) bad.push(b.id);
+    if (b?.edges[sideToward(b, { x: -t.normal.x, y: -t.normal.y })].blocked) bad.push(b.id);
     if (bad.length > 0) {
       issues.push({
         code: 'blocked-edge-tab',

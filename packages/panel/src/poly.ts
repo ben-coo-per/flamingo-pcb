@@ -182,3 +182,35 @@ export function closestPoints(a: Point[], b: Point[]): { d: number; pa: Point; p
   }
   return best;
 }
+
+/**
+ * The edges of a ring with consecutive collinear edges merged into one
+ * straight run, so a side split by extra vertices still reads as one edge.
+ * Arcs tessellated into short chords stay as they are.
+ */
+export function straightRuns(poly: Point[]): Edge[] {
+  const es = edgesOf(poly);
+  const n = es.length;
+  if (n < 2) return es;
+  const same = (p: Edge, q: Edge): boolean => dot(p.dir, q.dir) > 1 - 1e-9;
+  // Start at a real corner so a run is never split across the ring's seam.
+  const k = es.findIndex((e, i) => !same(es[(i - 1 + n) % n]!, e));
+  if (k < 0) return es;
+  const out: Edge[] = [];
+  for (let m = 0; m < n; m++) {
+    const e = es[(k + m) % n]!;
+    const last = out[out.length - 1];
+    if (last && same(last, e)) {
+      const length = Math.hypot(e.end.x - last.start.x, e.end.y - last.start.y);
+      out[out.length - 1] = { ...last, end: e.end, length };
+    } else {
+      out.push(e);
+    }
+  }
+  return out;
+}
+
+/** Whether `p` lies on segment a-b, within `tol`. */
+export function onSegment(p: Point, a: Point, b: Point, tol = 1e-6): boolean {
+  return closestSegmentPoints(p, p, a, b).d <= tol;
+}

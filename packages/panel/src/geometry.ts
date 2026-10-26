@@ -15,7 +15,8 @@
 
 import polygonClipping from 'polygon-clipping';
 import type { Point } from '@flamingo/engine';
-import { sideNormals } from './poly.js';
+import { polyIntersects } from '@flamingo/engine';
+import { ccw, dot, edgesOf, sideFacing, sideNormals, straightRuns, type Edge } from './poly.js';
 import type { ResolvedSources } from './resolved.js';
 import type { EdgeInfo } from './source.js';
 import {
@@ -97,7 +98,10 @@ export interface Tab {
   /** Instance id, or `rail:<side>`, at each end. `a` is always an instance. */
   a: string;
   b: string;
-  /** Panel side of instance `a` the tab leaves from. */
+  /**
+   * Side of instance `a` the tab leaves from, as a key of its `edges` (the
+   * panel side that board side faces most nearly).
+   */
   side: Side;
   /** Tab centre along the edge, and the gap it bridges. */
   center: Point;
@@ -105,6 +109,10 @@ export interface Tab {
   polygon: Point[];
   /** Mouse-bite hole centres (empty for solid tabs). */
   holes: Point[];
+  /** Unit vector across the gap, from `a` toward `b`. */
+  normal: Point;
+  /** Unit vector along the edge the tab sits on. */
+  along: Point;
 }
 
 export interface Fiducial {
@@ -307,18 +315,6 @@ function mergeIntervals(list: Interval[]): Interval[] {
   return out;
 }
 
-function intersectIntervals(a: Interval[], b: Interval[]): Interval[] {
-  const out: Interval[] = [];
-  for (const p of a) {
-    for (const q of b) {
-      const lo = Math.max(p[0], q[0]);
-      const hi = Math.min(p[1], q[1]);
-      if (hi - lo > EPS) out.push([lo, hi]);
-    }
-  }
-  return out;
-}
-
 function subtractIntervals(a: Interval[], b: Interval[]): Interval[] {
   let cur = a;
   for (const q of b) {
@@ -353,111 +349,208 @@ export function tabCentres(lo: number, hi: number, width: number, pitch: number)
   return out;
 }
 
-interface Facing {
-  /** Instance id or `rail:<side>`. */
+const RAIL_ID = (r: Rail): string => `rail:${r.side}`;
+
+/** Normals within this many degrees of opposite count as facing edges a tab can join. */
+const TAB_ANGLE_TOL = 2;
+const FACING_COS = Math.cos((TAB_ANGLE_TOL * Math.PI) / 180);
+
+/**
+ * The key of `inst.edges` / `inst.margins` for the board side that faces
+ * `dir`: the side whose outward normal points most nearly along it, named by
+ * the panel side it is nearest.
+ */
+export function sideToward(inst: PlacedInstance, dir: Point): Side {
+  return rotateSide(sideFacing(dir, inst.sideNormals), inst.transform.rotation);
+}
+
+/** Something a tab can join or must not cross: a board, or a rail. */
+interface Solid {
   id: string;
-  gap: number;
-  spans: Interval[];
-  /** The facing solid is a board, so its end of the tab gets holes too. */
-  board: boolean;
+  poly: Point[];
+  box: Box;
+  inst?: PlacedInstance;
+  /** Straight runs of the outline, outward normals. */
+  runs: Edge[];
 }
 
-const RAIL_FOR: Record<Side, RailSide> = { N: 'top', S: 'bottom', E: 'right', W: 'left' };
-const OPPOSITE: Record<Side, Side> = { N: 'S', S: 'N', E: 'W', W: 'E' };
-
-function sideLevel(bbox: Box, side: Side): number {
-  return side === 'N' ? bbox.maxY : side === 'S' ? bbox.minY : side === 'E' ? bbox.maxX : bbox.minX;
+/** `d` or its reverse, whichever points right (or up, when vertical). */
+function canonicalDir(d: Point): Point {
+  return d.x > 1e-9 || (Math.abs(d.x) <= 1e-9 && d.y > 0) ? d : { x: -d.x, y: -d.y };
 }
 
+/** Each pair of boards is tabbed once, from the board whose edge faces up (or right). */
+function facesUpOrRight(n: Point): boolean {
+  return n.y > 1e-9 || (Math.abs(n.y) <= 1e-9 && n.x > 0);
+}
+
+function boxGap(a: Box, b: Box): number {
+  return Math.max(b.minX - a.maxX, a.minX - b.maxX, b.minY - a.maxY, a.minY - b.maxY);
+}
+
+/**
+ * The stretch, along `t`, of `poly` that lies strictly between level `vMin`
+ * and `vMax` measured along `n` (offset by `level`): what of it stands in the
+ * gap a tab would cross. Its hull, so a solid that dips in twice hides the
+ * whole stretch between.
+ */
+function shadowOf(poly: Point[], t: Point, n: Point, level: number, vMin: number, vMax: number): Interval | null {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const p0 = poly[i]!;
+    const p1 = poly[(i + 1) % poly.length]!;
+    const v0 = dot(p0, n) - level;
+    const v1 = dot(p1, n) - level;
+    const u0 = dot(p0, t);
+    const u1 = dot(p1, t);
+    let s0 = 0;
+    let s1 = 1;
+    if (Math.abs(v1 - v0) < 1e-12) {
+      if (v0 <= vMin || v0 >= vMax) continue;
+    } else {
+      const sa = (vMin - v0) / (v1 - v0);
+      const sb = (vMax - v0) / (v1 - v0);
+      s0 = Math.max(0, Math.min(sa, sb));
+      s1 = Math.min(1, Math.max(sa, sb));
+      if (s0 > s1) continue;
+    }
+    for (const s of [s0, s1]) {
+      const u = u0 + (u1 - u0) * s;
+      if (u < lo) lo = u;
+      if (u > hi) hi = u;
+    }
+  }
+  return lo <= hi ? [lo, hi] : null;
+}
+
+/**
+ * Tabs from edge `e` of board `a` across the gap to edge `f` of `b`, which
+ * faces it. Works in the frame of `e`: `u` along the edge, `v` outward from it.
+ */
+function tabsAcross(
+  settings: PanelSettings,
+  a: PlacedInstance,
+  e: Edge,
+  b: Solid,
+  f: Edge,
+  solids: Solid[],
+): Tab[] {
+  const ts = settings.tabs;
+  const n = e.normal;
+  const t = canonicalDir(e.dir);
+  const level = dot(e.start, n);
+  const ue = [dot(e.start, t), dot(e.end, t)];
+  const uf = [dot(f.start, t), dot(f.end, t)] as const;
+  const vf = [dot(f.start, n) - level, dot(f.end, n) - level] as const;
+  const lo = Math.max(Math.min(...ue), Math.min(...uf));
+  const hi = Math.min(Math.max(...ue), Math.max(...uf));
+  if (hi - lo < ts.width - EPS) return [];
+
+  // Exactly parallel edges give one gap; a slight tilt is followed along the edge.
+  const gapAt = (u: number): number =>
+    Math.abs(uf[1] - uf[0]) < 1e-12 ? (vf[0] + vf[1]) / 2 : vf[0] + ((u - uf[0]) * (vf[1] - vf[0])) / (uf[1] - uf[0]);
+  const gMin = Math.min(gapAt(lo), gapAt(hi));
+  const gMax = Math.max(gapAt(lo), gapAt(hi));
+  if (gMin < EPS) return []; // touching (or behind): nothing to bridge
+  if (gMax > ts.maxLength + EPS) return [];
+
+  // `blocked` promises no tabs on that side, at either end.
+  const side = sideToward(a, n);
+  if (a.edges[side].blocked) return [];
+  if (b.inst) {
+    const back = { x: -n.x, y: -n.y };
+    if (b.inst.edges[sideToward(b.inst, f.normal)].blocked || b.inst.edges[sideToward(b.inst, back)].blocked) return [];
+  }
+
+  // Whatever stands in the gap (another board, a rail, or a notch of either
+  // end's own outline) hides the stretch of edge behind it.
+  const shadows: Interval[] = [];
+  for (const s of solids) {
+    const sh = shadowOf(s.poly, t, n, level, EPS, gMin - EPS);
+    if (sh) shadows.push(sh);
+  }
+  const free = subtractIntervals([[lo, hi]], shadows);
+
+  const at = (u: number, v: number): Point => ({ x: t.x * u + n.x * (level + v), y: t.y * u + n.y * (level + v) });
+  const withHoles = settings.separation === 'mouse-bite';
+  const others = solids.filter((s) => s.id !== a.id && s.id !== b.id);
+  const out: Tab[] = [];
+  for (const [flo, fhi] of free) {
+    for (const c of tabCentres(flo, fhi, ts.width, ts.pitch)) {
+      const u0 = c - ts.width / 2;
+      const u1 = c + ts.width / 2;
+      const near = -WELD;
+      const far = Math.max(gapAt(u0), gapAt(u1)) + WELD;
+      const polygon = ccw([at(u0, near), at(u1, near), at(u1, far), at(u0, far)]);
+      // Last line of defence: a tab never cuts into a third solid.
+      if (others.some((s) => boxGap(s.box, boxOf(polygon)) < 0 && polyIntersects(polygon, s.poly))) continue;
+      const gap = gapAt(c);
+      const holes: Point[] = [];
+      if (withHoles) {
+        const d = ts.holeDiameter;
+        // Capped: a zero or tiny holePitch must not ask for endless holes.
+        const count = Math.min(MAX_TAB_HOLES, Math.max(1, Math.floor((ts.width - d) / ts.holePitch + 1e-9) + 1));
+        const off = d * (0.5 - ts.holeOverlap);
+        const rows: Array<(u: number) => number> = [() => off];
+        if (b.inst) rows.push((u) => gapAt(u) - off);
+        for (const row of rows) {
+          for (let j = 0; j < count; j++) {
+            const u = c + (j - (count - 1) / 2) * ts.holePitch;
+            holes.push(at(u, row(u)));
+          }
+        }
+      }
+      out.push({ a: a.id, b: b.id, side, center: at(c, gap / 2), length: gap, polygon, holes, normal: n, along: t });
+    }
+  }
+  return out;
+}
+
+/**
+ * Tabs between every pair of facing, (anti)parallel straight edges less than
+ * `tabs.maxLength` apart: board to board, and board to rail. Boards at any
+ * angle, any shape; a board turned by a multiple of 90 degrees gets the tabs
+ * it always had.
+ */
 function computeTabs(settings: PanelSettings, instances: PlacedInstance[], rails: Rail[]): Tab[] {
   if (!usesTabs(settings)) return [];
-  const { tabs: ts } = settings;
-  const withHoles = settings.separation === 'mouse-bite';
-  const out: Tab[] = [];
-
-  for (const a of instances) {
-    for (const side of SIDES) {
-      if (a.edges[side].blocked) continue;
-      const horizontal = side === 'N' || side === 'S';
-      const outward = side === 'N' || side === 'E' ? 1 : -1;
-      const level = sideLevel(a.bbox, side);
-      const spans = edgeSpans(a.outline, a.bbox, side);
-      if (spans.length === 0) continue;
-
-      const facing: Facing[] = [];
-      for (const b of instances) {
-        if (b === a) continue;
-        const gap = (sideLevel(b.bbox, OPPOSITE[side]) - level) * outward;
-        if (gap < -EPS || gap > ts.maxLength + EPS) continue;
-        if (b.edges[OPPOSITE[side]].blocked) {
-          // Still an obstacle: nothing farther away may be tabbed through it.
-          facing.push({ id: b.id, gap, spans: [horizontal ? [b.bbox.minX, b.bbox.maxX] : [b.bbox.minY, b.bbox.maxY]], board: false });
-          continue;
-        }
-        facing.push({ id: b.id, gap, spans: edgeSpans(b.outline, b.bbox, OPPOSITE[side]), board: true });
-      }
-      const rail = rails.find((r) => r.side === RAIL_FOR[side]);
-      if (rail) {
-        const railLevel = sideLevel(rail.box, OPPOSITE[side]);
-        const gap = (railLevel - level) * outward;
-        if (gap >= -EPS && gap <= ts.maxLength + EPS) {
-          facing.push({
-            id: `rail:${rail.side}`,
-            gap,
-            spans: [horizontal ? [rail.box.minX, rail.box.maxX] : [rail.box.minY, rail.box.maxY]],
-            board: false,
-          });
-        }
-      }
-      facing.sort((p, q) => p.gap - q.gap);
-
-      // Nearest first; what a nearer solid covers is hidden from farther ones.
-      let free = spans;
-      for (const f of facing) {
-        const shared = intersectIntervals(free, f.spans);
-        free = subtractIntervals(free, f.spans);
-        const other = instances.find((i) => i.id === f.id);
-        if (other && other.edges[OPPOSITE[side]].blocked) continue;
-        // Each pair of boards is tabbed once, from the side that faces N or E.
-        if (f.board && (side === 'S' || side === 'W')) continue;
-        if (f.gap < EPS) continue; // touching: nothing to bridge
-        for (const [lo, hi] of shared) {
-          for (const c of tabCentres(lo, hi, ts.width, ts.pitch)) {
-            const near = level - outward * WELD;
-            const far = level + outward * (f.gap + WELD);
-            const box: Box = horizontal
-              ? { minX: c - ts.width / 2, maxX: c + ts.width / 2, minY: Math.min(near, far), maxY: Math.max(near, far) }
-              : { minY: c - ts.width / 2, maxY: c + ts.width / 2, minX: Math.min(near, far), maxX: Math.max(near, far) };
-            const holes: Point[] = [];
-            if (withHoles) {
-              const d = ts.holeDiameter;
-              // Capped: a zero or tiny holePitch must not ask for endless holes.
-              const n = Math.min(MAX_TAB_HOLES, Math.max(1, Math.floor((ts.width - d) / ts.holePitch + 1e-9) + 1));
-              const off = d * (0.5 - ts.holeOverlap);
-              const rows = [level + outward * off];
-              if (f.board) rows.push(level + outward * (f.gap - off));
-              for (const row of rows) {
-                for (let j = 0; j < n; j++) {
-                  const along = c + (j - (n - 1) / 2) * ts.holePitch;
-                  holes.push(horizontal ? { x: along, y: row } : { x: row, y: along });
-                }
-              }
-            }
-            out.push({
-              a: a.id,
-              b: f.id,
-              side,
-              center: horizontal ? { x: c, y: level + (outward * f.gap) / 2 } : { x: level + (outward * f.gap) / 2, y: c },
-              length: f.gap,
-              polygon: boxCorners(box),
-              holes,
-            });
-          }
+  const solids: Solid[] = [
+    ...instances.map((i) => ({ id: i.id, poly: i.outline, box: i.bbox, inst: i, runs: straightRuns(i.outline) })),
+    ...rails.map((r) => {
+      const poly = boxCorners(r.box);
+      return { id: RAIL_ID(r), poly, box: r.box, runs: edgesOf(poly) };
+    }),
+  ];
+  const found: Tab[] = [];
+  for (let i = 0; i < instances.length; i++) {
+    const p = solids[i]!;
+    for (let j = i + 1; j < solids.length; j++) {
+      const q = solids[j]!;
+      if (boxGap(p.box, q.box) > settings.tabs.maxLength + EPS) continue;
+      for (const e of p.runs) {
+        if (e.length < settings.tabs.width - EPS) continue;
+        for (const f of q.runs) {
+          if (f.length < settings.tabs.width - EPS) continue;
+          if (dot(e.normal, f.normal) > -FACING_COS) continue;
+          // A rail is always the far end; between boards, the one facing up or right is `a`.
+          const fromP = !q.inst || facesUpOrRight(e.normal);
+          const tabs = fromP ? tabsAcross(settings, p.inst!, e, q, f, solids) : tabsAcross(settings, q.inst!, f, p, e, solids);
+          found.push(...tabs);
         }
       }
     }
   }
-  return out;
+  // In board order, then by side, nearest first, along the edge.
+  const index = new Map(instances.map((inst, k) => [inst.id, k]));
+  const along = (tab: Tab): number => dot(tab.center, tab.along);
+  return found.sort(
+    (x, y) =>
+      index.get(x.a)! - index.get(y.a)! ||
+      SIDES.indexOf(x.side) - SIDES.indexOf(y.side) ||
+      x.length - y.length ||
+      along(x) - along(y),
+  );
 }
 
 // ---------------------------------------------------------------------------
