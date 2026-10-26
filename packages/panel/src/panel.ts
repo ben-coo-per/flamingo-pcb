@@ -6,7 +6,8 @@
  * settings added after a file was written.
  */
 
-import type { Panel, PanelInstance, PanelSettings, PanelSource, Rotation } from './types.js';
+import { normalizeRotation } from './poly.js';
+import type { Panel, PanelInstance, PanelSettings, PanelSource } from './types.js';
 
 export const PANEL_EXTENSION = '.plamingo';
 
@@ -23,6 +24,7 @@ export const DEFAULT_SETTINGS: PanelSettings = {
   fiducials: { enabled: true, copperDiameter: 1, maskDiameter: 2, edgeDistance: 3.85, cornerOffset: 10 },
   toolingHoles: { enabled: true, diameter: 2, cornerOffset: 5 },
   copperLayers: 'auto',
+  rotationStep: 90,
 };
 
 export function newPanel(name: string, settings: PanelSettings = DEFAULT_SETTINGS): Panel {
@@ -48,8 +50,6 @@ function isCount(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v >= 0;
 }
 
-const ROTATIONS: readonly number[] = [0, 90, 180, 270];
-
 /** Overlay `patch` on `base`, one level deep into nested settings groups. */
 export function mergeSettings(base: PanelSettings, patch: unknown): PanelSettings {
   const out = structuredClone(base) as unknown as Record<string, unknown>;
@@ -68,6 +68,13 @@ export function mergeSettings(base: PanelSettings, patch: unknown): PanelSetting
   return out as unknown as PanelSettings;
 }
 
+/** A packer step: a divisor of 360 between 1 and 180 degrees. */
+export function isRotationStep(v: unknown): v is number {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 1 || v > 180) return false;
+  const n = 360 / v;
+  return Math.abs(n - Math.round(n)) < 1e-9;
+}
+
 /**
  * What is wrong with `s`, or null. Shared by the ops and the file parser, so a
  * hand-edited file cannot carry a value an op would refuse: a zero or
@@ -84,6 +91,7 @@ export function validateSettings(s: PanelSettings): string | null {
   if (s.copperLayers !== 'auto' && ![2, 4, 6].includes(s.copperLayers)) {
     return 'copperLayers must be "auto", 2, 4 or 6';
   }
+  if (!isRotationStep(s.rotationStep)) return 'rotationStep must divide 360 evenly and be at least 1 degree';
   if (typeof s.fiducials.enabled !== 'boolean') return 'fiducials.enabled must be a boolean';
   if (typeof s.toolingHoles.enabled !== 'boolean') return 'toolingHoles.enabled must be a boolean';
   if (!(s.tabs.holeOverlap >= 0 && s.tabs.holeOverlap <= 0.5)) return 'tabs.holeOverlap must be between 0 and 0.5';
@@ -162,14 +170,14 @@ export function parsePanel(json: string): Panel {
     if (!isObject(at) || typeof at.x !== 'number' || typeof at.y !== 'number') {
       throw new Error(`instances[${i}] ("${id}").at must be {x, y}`);
     }
-    if (typeof rotation !== 'number' || !ROTATIONS.includes(rotation)) {
-      throw new Error(`instances[${i}] ("${id}").rotation must be 0, 90, 180 or 270`);
+    if (typeof rotation !== 'number' || !Number.isFinite(rotation)) {
+      throw new Error(`instances[${i}] ("${id}").rotation must be a number of degrees`);
     }
     return {
       id,
       source,
       at: { x: at.x, y: at.y },
-      rotation: rotation as Rotation,
+      rotation: normalizeRotation(rotation),
       pinned: pinned === true,
       populate: populate !== false,
     };

@@ -22,7 +22,7 @@ export type {
 } from './types.js';
 export { SIDES } from './types.js';
 
-export { PANEL_EXTENSION, DEFAULT_SETTINGS, newPanel, serializePanel, parsePanel, mergeSettings } from './panel.js';
+export { PANEL_EXTENSION, DEFAULT_SETTINGS, newPanel, serializePanel, parsePanel, mergeSettings , isRotationStep } from './panel.js';
 
 export type { PanelOp, PanelOpResult, PanelOpError, SettingsPatch, InstancePlacement } from './ops.js';
 export { applyPanelOp, suggestSourceKey, nextInstanceId } from './ops.js';
@@ -40,6 +40,7 @@ export {
   boxWidth,
   boxHeight,
   unionBox,
+  rotatedBox,
   rotatedSize,
   instanceTransform,
   applyTransform,
@@ -49,6 +50,9 @@ export {
   oppositeSide,
   atForRotationAboutCentre,
 } from './transform.js';
+
+export type { Edge } from './poly.js';
+export { normalizeRotation, rotatePoint, sideNormals, sideFacing, edgesOf, ccw, closestPoints, closestSegmentPoints } from './poly.js';
 
 export type { EdgeInfo, Overhang, EdgeKeepout, PartLine, SourceGeometry } from './source.js';
 export { resolveSourceGeometry } from './source.js';

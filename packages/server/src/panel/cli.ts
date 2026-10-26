@@ -45,7 +45,8 @@ export const PANEL_USAGE = `Usage: flamingo panel <command> <file${PANEL_EXTENSI
   set <file> [--separation mouse-bite|solid-tab|silk-divider|v-cut] [--spacing MM]
              [--rail-top MM] [--rail-bottom MM] [--rail-left MM] [--rail-right MM]
              [--tab-width MM] [--tab-pitch MM] [--fiducials on|off]
-             [--tooling-holes on|off] [--layers auto|2|4|6] [--name NAME]
+             [--tooling-holes on|off] [--layers auto|2|4|6] [--rotation-step DEG]
+             [--name NAME]
   arrange <file> [--no-rotate]
   check <file>                                    exit status 1 when there are errors
   screenshot <file> [--out panel.png] [--width PX]
@@ -110,8 +111,8 @@ function onOff(args: Args, name: string): boolean | undefined {
 
 function rotation(v: number | undefined): Rotation | undefined {
   if (v === undefined) return undefined;
-  if (![0, 90, 180, 270].includes(v)) throw new Error('rotation must be 0, 90, 180 or 270');
-  return v as Rotation;
+  if (!Number.isFinite(v)) throw new Error('rotation must be a number of degrees');
+  return v;
 }
 
 function need(value: string | undefined, what: string): string {
@@ -293,6 +294,7 @@ export async function runPanelCli(argv: string[], io: PanelCliIo = { out: consol
           ...(onOff(args, 'fiducials') !== undefined ? { fiducials: { enabled: onOff(args, 'fiducials')! } } : {}),
           ...(onOff(args, 'tooling-holes') !== undefined ? { toolingHoles: { enabled: onOff(args, 'tooling-holes')! } } : {}),
           ...(layers !== undefined ? { copperLayers: layers as 'auto' | 2 | 4 | 6 } : {}),
+          ...(number(args, 'rotation-step') !== undefined ? { rotationStep: number(args, 'rotation-step')! } : {}),
         };
         const ops: PanelOp[] = [];
         if (Object.keys(settings).length > 0) ops.push({ op: 'setSettings', settings });

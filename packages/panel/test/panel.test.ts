@@ -106,8 +106,10 @@ describe('panel format', () => {
     a.instances[0].source = 'Z';
     expect(() => parsePanel(JSON.stringify(a))).toThrow('unknown source');
     const b = structuredClone(base);
-    b.instances[0].rotation = 45;
+    b.instances[0].rotation = 'up';
     expect(() => parsePanel(JSON.stringify(b))).toThrow('rotation');
+    b.instances[0].rotation = 45;
+    expect(parsePanel(JSON.stringify(b)).instances[0]!.rotation).toBe(45);
     const c = structuredClone(base);
     c.instances[1].id = c.instances[0].id;
     expect(() => parsePanel(JSON.stringify(c))).toThrow('Duplicate instance id');

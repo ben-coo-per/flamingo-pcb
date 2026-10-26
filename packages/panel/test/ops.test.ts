@@ -121,7 +121,11 @@ describe('applyPanelOp', () => {
     expect(p.instances[0]!.rotation).toBe(270);
     p = apply(p, { op: 'rotateInstance', id: 'S1', rotation: 180 });
     expect(p.instances[0]!.rotation).toBe(180);
-    expect(errorOf(p, { op: 'rotateInstance', id: 'S1', by: 45 })).toContain('multiple of 90');
+    p = apply(p, { op: 'rotateInstance', id: 'S1', by: 45 });
+    expect(p.instances[0]!.rotation).toBe(225);
+    p = apply(p, { op: 'rotateInstance', id: 'S1', rotation: -36 });
+    expect(p.instances[0]!.rotation).toBe(324);
+    expect(errorOf(p, { op: 'rotateInstance', id: 'S1', by: Number.NaN })).toContain('degrees');
   });
 
   it('setPopulate and setPinned flip their flags', () => {

@@ -171,10 +171,10 @@ function optionsFor(
   rotate: boolean,
 ): Option[] {
   const g = sources.find((s) => s.key === inst.source)!.geometry!;
-  const rotations: Rotation[] = rotate ? [inst.rotation, ((inst.rotation + 90) % 360) as Rotation] : [inst.rotation];
+  const rotations: Rotation[] = rotate ? [inst.rotation, (inst.rotation + 90) % 360] : [inst.rotation];
   const out: Option[] = [];
   for (const rotation of rotations) {
-    const size = rotatedSize(g.bbox, rotation);
+    const size = rotatedSize(g.outline, rotation);
     const grow = growth(turnedEdges(g.edges, rotation), spacing, overhangMargin);
     const o: Option = {
       rotation,
@@ -434,7 +434,7 @@ export function arrange(
     const turned = computeFrame(
       panel.settings,
       placeInstances(
-        { ...panel, instances: [{ ...inst, at: { x: 0, y: 0 }, rotation: ((inst.rotation + 90) % 360) as Rotation }] },
+        { ...panel, instances: [{ ...inst, at: { x: 0, y: 0 }, rotation: (inst.rotation + 90) % 360 }] },
         sources,
       ).instances,
     )!;
@@ -509,7 +509,7 @@ function improveSupport(
     const inst = usable.find((i) => i.id === pl.id)!;
     const g = sources.find((s) => s.key === inst.source)!.geometry!;
     const rotation = pl.rotation ?? inst.rotation;
-    const flipped = ((rotation + 180) % 360) as Rotation;
+    const flipped = (rotation + 180) % 360;
     const growAt = (r: Rotation): Record<Side, number> =>
       growth(turnedEdges(g.edges, r), spacing, limits.blockedEdges.overhangMargin.value);
     const before = growAt(rotation);

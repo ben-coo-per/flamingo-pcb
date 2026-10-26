@@ -33,7 +33,7 @@ function applied(r: PanelOpResult | PanelOpError, onOk: (r: PanelOpResult) => st
   return r.ok ? text(onOk(r)) : error(r.error);
 }
 
-const rotationSchema = z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]);
+const rotationSchema = z.number().finite();
 
 export const PANEL_TOOL_NAMES = [
   'panel_new',
@@ -193,7 +193,7 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
         board: z.string().describe('Board key, e.g. "S"'),
         x: z.number().optional().describe('X of the bottom-left corner of the instance bounding box, panel mm'),
         y: z.number().optional().describe('Y of the bottom-left corner of the instance bounding box, panel mm (y-up)'),
-        rotation: rotationSchema.optional().describe('Rotation in degrees CCW: 0, 90, 180 or 270 (default 0)'),
+        rotation: rotationSchema.optional().describe('Rotation in degrees CCW, any angle (default 0)'),
         populate: z.boolean().optional().describe('true = assemble it, false = ship it bare (default true)'),
         pinned: z.boolean().optional().describe('Pin it so arrange leaves it alone (default: true when a position is given)'),
       },
@@ -247,11 +247,11 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
     'panel_rotate_instance',
     {
       description:
-        'Rotate an instance in steps of 90 degrees about the centre of its bounding box. Give either an absolute rotation or an amount to turn by (default: 90 CCW).',
+        'Rotate an instance about the centre of its bounding box, by any angle. Give either an absolute rotation or an amount to turn by (default: 90 CCW).',
       inputSchema: {
         id: z.string().describe('Instance id, e.g. "M3"'),
-        rotation: rotationSchema.optional().describe('Absolute rotation in degrees CCW: 0, 90, 180 or 270'),
-        by: z.number().optional().describe('Degrees to turn by, a multiple of 90, CCW positive (default 90)'),
+        rotation: rotationSchema.optional().describe('Absolute rotation in degrees CCW, any angle'),
+        by: z.number().finite().optional().describe('Degrees to turn by, CCW positive, any angle (default 90)'),
       },
     },
     async ({ id, rotation, by }) =>
@@ -311,6 +311,10 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
           .union([z.literal('auto'), z.literal(2), z.literal(4), z.literal(6)])
           .optional()
           .describe('"auto" (all boards must agree) or the layer count to fabricate the panel at'),
+        rotationStep: z
+          .number()
+          .optional()
+          .describe('Angle step panel_arrange may turn boards by, in degrees; must divide 360. 90 (default) tries each board as it is and a quarter turn from it; 36 lets pentagons nest, 60 hexagons, 45 or 30 for a finer search. Any angle can still be set on an instance by hand'),
         name: z.string().optional().describe('Rename the panel'),
       },
     },
@@ -333,6 +337,7 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
         ...(a.fiducials !== undefined ? { fiducials: { enabled: a.fiducials } } : {}),
         ...(a.toolingHoles !== undefined ? { toolingHoles: { enabled: a.toolingHoles } } : {}),
         ...(a.copperLayers !== undefined ? { copperLayers: a.copperLayers } : {}),
+        ...(a.rotationStep !== undefined ? { rotationStep: a.rotationStep } : {}),
       };
       const ops: PanelOp[] = [];
       if (Object.keys(settings).length > 0) ops.push({ op: 'setSettings', settings });

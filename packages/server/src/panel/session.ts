@@ -46,6 +46,8 @@ import {
   applyPanelOp,
   arrange,
   atForRotationAboutCentre,
+  normalizeRotation,
+  rotatedSize,
   checkPanel,
   computeGeometry,
   hasErrors,
@@ -565,10 +567,10 @@ export class PanelSession extends EventEmitter {
     const inst = this.panel.instances.find((i) => i.id === id);
     if (!inst) return { ok: false, error: `Unknown instance "${id}"` };
     const by = to.by ?? 90;
-    if (to.rotation === undefined && Math.abs(by % 90) > 1e-9) return { ok: false, error: 'by must be a multiple of 90' };
-    const next = (to.rotation ?? ((((inst.rotation + by) % 360) + 360) % 360)) as Rotation;
+    if (!Number.isFinite(by)) return { ok: false, error: 'by must be a number of degrees' };
+    const next = normalizeRotation(to.rotation ?? inst.rotation + by);
     const g = (await this.resolved()).find((s) => s.key === inst.source)?.geometry;
-    const center = g ? atForRotationAboutCentre(g.bbox, inst.at, inst.rotation, next) : inst.at;
+    const center = g ? atForRotationAboutCentre(g.outline, inst.at, inst.rotation, next) : inst.at;
     return this.doc.apply({ op: 'rotateInstance', id, rotation: next, center });
   }
 
@@ -577,7 +579,7 @@ export class PanelSession extends EventEmitter {
     const inst = this.panel.instances.find((i) => i.id === id);
     if (!inst) return { ok: false, error: `Unknown instance "${id}"` };
     const g = (await this.resolved()).find((s) => s.key === inst.source)?.geometry;
-    const width = !g ? 10 : inst.rotation === 90 || inst.rotation === 270 ? g.height : g.width;
+    const width = g ? rotatedSize(g.outline, inst.rotation).width : 10;
     return this.doc.apply({
       op: 'addInstance',
       source: inst.source,

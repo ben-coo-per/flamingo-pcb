@@ -9,6 +9,7 @@
 
 import type { Point } from '@flamingo/engine';
 import { mergeSettings, validateSettings } from './panel.js';
+import { normalizeRotation } from './poly.js';
 import type { Panel, PanelInstance, PanelSettings, PanelSource, Rotation } from './types.js';
 
 /** Recursive partial of the settings: patch one number without restating its group. */
@@ -61,10 +62,8 @@ function err(error: string): PanelOpError {
   return { ok: false, error };
 }
 
-const ROTATIONS: readonly number[] = [0, 90, 180, 270];
-
 function isRotation(r: unknown): r is Rotation {
-  return typeof r === 'number' && ROTATIONS.includes(r);
+  return typeof r === 'number' && Number.isFinite(r);
 }
 
 function isFinitePoint(p: unknown): p is Point {
@@ -109,8 +108,7 @@ export function nextInstanceId(panel: Panel, key: string): string {
 }
 
 function normRotation(deg: number): Rotation {
-  const r = ((Math.round(deg / 90) * 90) % 360 + 360) % 360;
-  return r as Rotation;
+  return normalizeRotation(deg);
 }
 
 function validateInstance(panel: Panel, inst: PanelInstance, seen: Set<string>): string | null {
@@ -118,7 +116,7 @@ function validateInstance(panel: Panel, inst: PanelInstance, seen: Set<string>):
   if (seen.has(inst.id)) return `Duplicate instance id "${inst.id}"`;
   if (!panel.sources.some((s) => s.key === inst.source)) return `Unknown source "${inst.source}" (instance "${inst.id}")`;
   if (!isFinitePoint(inst.at)) return `Instance "${inst.id}": at must be {x, y}`;
-  if (!isRotation(inst.rotation)) return `Instance "${inst.id}": rotation must be 0, 90, 180 or 270`;
+  if (!isRotation(inst.rotation)) return `Instance "${inst.id}": rotation must be a number of degrees`;
   return null;
 }
 
@@ -189,7 +187,7 @@ export function applyPanelOp(p: Panel, op: PanelOp): PanelOpResult | PanelOpErro
       if (!panel.sources.some((s) => s.key === op.source)) return err(`Unknown source "${op.source}"`);
       if (op.at !== undefined && !isFinitePoint(op.at)) return err('at must be {x, y}');
       if (op.rotation !== undefined && !isRotation(op.rotation)) {
-        return err('rotation must be 0, 90, 180 or 270');
+        return err('rotation must be a number of degrees');
       }
       const id = nextInstanceId(panel, op.source);
       panel.instances.push({
@@ -224,11 +222,11 @@ export function applyPanelOp(p: Panel, op: PanelOp): PanelOpResult | PanelOpErro
       const inst = panel.instances.find((i) => i.id === op.id);
       if (!inst) return err(`Unknown instance "${op.id}"`);
       if (op.rotation !== undefined) {
-        if (!isRotation(op.rotation)) return err('rotation must be 0, 90, 180 or 270');
-        inst.rotation = op.rotation;
+        if (!isRotation(op.rotation)) return err('rotation must be a number of degrees');
+        inst.rotation = normRotation(op.rotation);
       } else {
         const by = op.by ?? 90;
-        if (!Number.isFinite(by) || Math.abs(by % 90) > 1e-9) return err('by must be a multiple of 90');
+        if (!Number.isFinite(by)) return err('by must be a number of degrees');
         inst.rotation = normRotation(inst.rotation + by);
       }
       // `at` is the bounding-box corner, so a caller that wants the instance
@@ -259,7 +257,7 @@ export function applyPanelOp(p: Panel, op: PanelOp): PanelOpResult | PanelOpErro
         if (!panel.instances.some((i) => i.id === pl.id)) return err(`Unknown instance "${pl.id}"`);
         if (!isFinitePoint(pl.at)) return err(`Instance "${pl.id}": at must be {x, y}`);
         if (pl.rotation !== undefined && !isRotation(pl.rotation)) {
-          return err(`Instance "${pl.id}": rotation must be 0, 90, 180 or 270`);
+          return err(`Instance "${pl.id}": rotation must be a number of degrees`);
         }
       }
       for (const pl of op.placements) {

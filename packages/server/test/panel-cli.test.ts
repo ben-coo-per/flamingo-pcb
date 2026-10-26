@@ -101,7 +101,7 @@ describe('flamingo panel CLI', () => {
   it('reports bad arguments', async () => {
     await build();
     expect((await run('move-instance', file, 'M1', '--x', 'left', '--y', '7')).err).toContain('--x must be a number');
-    expect((await run('rotate-instance', file, 'M1', '--rotation', '45')).err).toContain('rotation must be 0, 90, 180 or 270');
+    expect((await run('rotate-instance', file, 'M1', '--rotation', 'up')).err).toContain('rotation');
     expect((await run('set', file, '--layers', '3')).err).toContain('--layers must be auto, 2, 4 or 6');
     expect((await run('remove-instance', file, 'Z9')).err).toBe('Unknown instance "Z9"');
     expect((await run('show', join(dir, 'missing.plamingo'))).err).toContain('does not exist');

@@ -83,7 +83,8 @@ Conventions:
 
 - **Instance ids** are `<board key><n>`: `S1`, `M3`. Merged BOM/CPL designators
   are `<instance>_<refdes>`: `S1_U2`. Positions are the bottom-left corner of
-  the instance's bounding box, mm, y-up; rotations are 0/90/180/270.
+  the instance's bounding box, mm, y-up; rotations are degrees CCW, any angle
+  (`panel_arrange` turns boards in steps of `settings.rotationStep`, 90 by default).
 - **Every amount marked `~` is an estimate.** Say so when you quote it. Fees
   and limits live in `packages/panel/config/*.json` with a source URL and a
   `verified` flag each; bare-board prices are always estimates.

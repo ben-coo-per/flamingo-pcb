@@ -185,7 +185,7 @@ boards + quantities → quote_order → panel_apply_scenario → panel_check →
 | **Instances** | `panel_add_instance` | Put one more copy of a board on the panel. |
 | | `panel_remove_instance` | Remove one instance. |
 | | `panel_move_instance` | Move an instance; pins it unless `pin:false`. |
-| | `panel_rotate_instance` | Rotate in steps of 90° about the instance's centre. |
+| | `panel_rotate_instance` | Rotate by any angle about the instance's centre (default: 90° steps). |
 | | `panel_set_populate` | `true` = assemble; `false` = ship bare (all its parts become do-not-place). |
 | | `panel_pin` | Pin or unpin. Pinned instances are never moved by arrange. |
 | **Layout** | `panel_set_settings` | Separation, spacing, rails, tabs, fiducials, tooling holes, layer count (promotion). |

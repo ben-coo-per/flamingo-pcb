@@ -15,6 +15,7 @@
 
 import polygonClipping from 'polygon-clipping';
 import type { Point } from '@flamingo/engine';
+import { sideNormals } from './poly.js';
 import type { ResolvedSources } from './resolved.js';
 import type { EdgeInfo } from './source.js';
 import {
@@ -59,6 +60,12 @@ export interface PlacedInstance {
   edges: Record<Side, EdgeInfo>;
   /** Clearance each side needs from whatever faces it: the spacing, or more on a blocked edge. */
   margins: Record<Side, number>;
+  /**
+   * Outward unit normal of each board side in panel space. `edges` and
+   * `margins` are keyed by the nearest panel side; this says where each side
+   * really points once the board is turned by an angle off the axes.
+   */
+  sideNormals: Record<Side, Point>;
   overhangs: PlacedOverhang[];
   /** Board-edge keepouts, panel mm. */
   keepouts: Point[][];
@@ -181,7 +188,7 @@ export function placeInstances(
       continue;
     }
     const g = src.geometry;
-    const transform = instanceTransform(g.bbox, inst.at, inst.rotation);
+    const transform = instanceTransform(g.outline, inst.at, inst.rotation);
     const outline = applyTransformAll(transform, g.outline);
 
     const edges = {} as Record<Side, EdgeInfo>;
@@ -203,6 +210,7 @@ export function placeInstances(
       outline,
       edges,
       margins,
+      sideNormals: sideNormals(inst.rotation),
       overhangs: g.overhangs.map((o) => ({
         refdes: o.refdes,
         side: rotateSide(o.side, inst.rotation),

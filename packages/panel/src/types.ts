@@ -11,7 +11,8 @@
 import type { Point } from '@flamingo/engine';
 
 /** Instances sit on the panel at right angles only. */
-export type Rotation = 0 | 90 | 180 | 270;
+/** Degrees CCW, any angle; stored in [0, 360). Multiples of 90 stay exact. */
+export type Rotation = number;
 
 /** A side of an axis-aligned box: N = +y, E = +x, S = -y, W = -x. */
 export type Side = 'N' | 'E' | 'S' | 'W';
@@ -128,6 +129,12 @@ export interface PanelSettings {
    * to share one layer count; a number promotes boards with fewer layers.
    */
   copperLayers: 'auto' | 2 | 4 | 6;
+  /**
+   * Angle step the packer may turn boards by, degrees: 90 tries each board as
+   * it is and a quarter turn from it; 36 lets pentagons nest; it must divide
+   * 360. Any angle can still be set on an instance by hand.
+   */
+  rotationStep: number;
 }
 
 export interface Panel {

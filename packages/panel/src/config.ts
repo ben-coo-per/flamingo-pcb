@@ -127,6 +127,7 @@ export function settingsFromLimits(limits: PanelLimits): PanelSettings {
       cornerOffset: limits.rails.toolingHoleCornerOffset.value,
     },
     copperLayers: 'auto',
+    rotationStep: 90,
   };
 }
 

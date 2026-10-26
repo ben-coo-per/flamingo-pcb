@@ -162,3 +162,31 @@ export function panelOf(sources: ResolvedSource[], instances: InstanceSpec[], se
   }
   return applyAll(p, ...settings);
 }
+
+/** A closed outline through `pts`, in order. */
+export function polygonOutline(pts: Array<{ x: number; y: number }>): PathSeg[] {
+  return pts.map((start, i) => ({ type: 'line' as const, start, end: pts[(i + 1) % pts.length]! }));
+}
+
+/** A regular pentagon, flat side down, `side` mm along each edge, bottom-left of its box at (0, 0). */
+export function pentagonPoints(side: number): Array<{ x: number; y: number }> {
+  const r = side / (2 * Math.sin(Math.PI / 5));
+  const pts = Array.from({ length: 5 }, (_, i) => {
+    const a = Math.PI / 2 + (i * 2 * Math.PI) / 5 + Math.PI / 5; // first vertex is bottom-right of the flat side
+    return { x: r * Math.cos(a), y: r * Math.sin(a) };
+  });
+  const minX = Math.min(...pts.map((p) => p.x));
+  const minY = Math.min(...pts.map((p) => p.y));
+  return pts.map((p) => ({ x: Math.round((p.x - minX) * 1e6) / 1e6, y: Math.round((p.y - minY) * 1e6) / 1e6 }));
+}
+
+/** A pentagonal board with one resistor in the middle. */
+export function pentagonBoard(name: string, side: number, layers: 2 | 4 | 6 = 2): Board {
+  const b = newBoard(name, layers);
+  const pts = pentagonPoints(side);
+  b.outline = polygonOutline(pts);
+  const cx = pts.reduce((s, p) => s + p.x, 0) / 5;
+  const cy = pts.reduce((s, p) => s + p.y, 0) / 5;
+  b.components.push(comp('R1', R0603, cx, cy));
+  return b;
+}
