@@ -6,7 +6,8 @@
  *
  *   separate      every design as its own single-board order
  *   own-panels    every design on a panel of its own
- *   merged        all designs on one mouse-bite panel (different-designs fee)
+ *   merged        all designs on one mouse-bite panel (different-designs fee),
+ *                 or a V-cut panel when the panel is set to V-cut
  *   silk-divider  all designs inside one rectangular outline, divided by
  *                 silkscreen lines (one design as far as JLCPCB is concerned)
  *   split         one panel per layer count, when the boards differ in layers
@@ -220,8 +221,8 @@ function settingsFor(
       copperLayers: plan.layers,
     };
   }
-  // A mouse-bite panel needs something to hold its boards: give it top and
-  // bottom rails of the recommended width if the panel's settings have none.
+  // A mouse-bite or V-cut panel needs something to hold its boards: give it
+  // top and bottom rails of the recommended width if the panel's settings have none.
   const noRails = base.rails.top + base.rails.bottom + base.rails.left + base.rails.right === 0;
   return {
     separation: plan.separation,
@@ -629,6 +630,9 @@ export function quoteOrder(req: QuoteRequest): QuoteResult {
     };
   }
 
+  // V-cut is never proposed, only kept: a panel set to V-cut gets V-cut
+  // panels in every scenario, everything else gets mouse bites.
+  const panelized: Separation = req.settings.separation === 'v-cut' ? 'v-cut' : 'mouse-bite';
   const layerOf = (s: PanelSource): number => req.resolved.find((r) => r.key === s.key)?.geometry?.copperLayers ?? 2;
   const layerCounts = [...new Set(wanted.map(layerOf))].sort((a, b) => a - b);
   const mixed = layerCounts.length > 1;
@@ -670,7 +674,7 @@ export function quoteOrder(req: QuoteRequest): QuoteResult {
     for (const s of wanted) {
       const options: ScenarioOrder[] = [];
       let why = '';
-      for (const plan of panelPlans(ctx, [s], 'mouse-bite', 'auto')) {
+      for (const plan of panelPlans(ctx, [s], panelized, 'auto')) {
         if (plan.tag.startsWith('wish') || plan.tag.startsWith('bare')) continue;
         if (plan.counts.every((c) => c.total <= 1)) continue; // that is a single board, not a panel
         const o = planPanel(ctx, { ...plan, label: `${s.key} (${s.name}), ${plan.label}` });
@@ -701,9 +705,14 @@ export function quoteOrder(req: QuoteRequest): QuoteResult {
 
   // --- merged and silk-divider: all designs on one panel --------------------
   if (wanted.length > 1 || wanted.some((s) => s.niceToHave > s.needed)) {
-    for (const separation of ['mouse-bite', 'silk-divider'] as const) {
-      const kind: ScenarioKind = separation === 'mouse-bite' ? 'merged' : 'silk-divider';
-      const base = separation === 'mouse-bite' ? 'One panel, mouse bites' : 'One board, silkscreen dividers';
+    for (const separation of [panelized, 'silk-divider'] as const) {
+      const kind: ScenarioKind = separation === 'silk-divider' ? 'silk-divider' : 'merged';
+      const base =
+        separation === 'silk-divider'
+          ? 'One board, silkscreen dividers'
+          : separation === 'v-cut'
+            ? 'One panel, V-cut'
+            : 'One panel, mouse bites';
       const promoted = mixed ? `, promoted to ${top} layers` : '';
 
       if (separation === 'silk-divider') {
@@ -757,7 +766,7 @@ export function quoteOrder(req: QuoteRequest): QuoteResult {
         if (typeof single === 'string') why = single;
         else options.push(single);
       }
-      for (const plan of panelPlans(ctx, group, 'mouse-bite', 'auto')) {
+      for (const plan of panelPlans(ctx, group, panelized, 'auto')) {
         if (plan.tag.startsWith('wish') || plan.tag.startsWith('bare')) continue;
         if (group.length === 1 && plan.counts.every((c) => c.total <= 1)) continue;
         const o = planPanel(ctx, { ...plan, label: `${layers}-layer: ${plan.label}` });

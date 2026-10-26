@@ -18,6 +18,7 @@
  *   overhanging part   thin dashed polygon
  *   board-edge keepout cross hatch
  *   tab                filled bar; mouse-bite holes as small open circles
+ *   V-cut score        thin dashed line across the whole panel, over the boards
  *   error / warning    second outline just outside the board, label `ERR` / `WARN`
  */
 
@@ -225,6 +226,9 @@ export function renderPanelSVG(
   for (const inst of geometry.instances) {
     drawInstance(inst);
   }
+
+  // --- V-cut scores: after the boards, so a line through a board shows ------
+  for (const s of geometry.scores) line(s.start, s.end, 0.15, '1.2 0.6');
 
   function drawInstance(inst: PlacedInstance): void {
     const src = sources.find((s) => s.key === inst.source);

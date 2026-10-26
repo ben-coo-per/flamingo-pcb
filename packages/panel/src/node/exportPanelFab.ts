@@ -65,6 +65,16 @@ export function buildPanelFab(
     fiducials: merged.fiducials,
     labels: merged.labels,
     noPaste: (refdes) => merged.bare.has(refdes),
+    ...(merged.scores.length > 0
+      ? {
+          scores: {
+            lines: merged.scores,
+            width: limits.vcut.lineWidth.value,
+            label: limits.vcut.label.value,
+            labelHeight: limits.vcut.labelHeight.value,
+          },
+        }
+      : {}),
   });
   const assembled = assemblyBoard(merged);
   return {

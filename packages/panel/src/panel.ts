@@ -78,8 +78,8 @@ export function validateSettings(s: PanelSettings): string | null {
     Number.isFinite(v) && v >= 0 ? null : `${name} must be a number >= 0`;
   const pos = (v: number, name: string): string | null =>
     Number.isFinite(v) && v > 0 ? null : `${name} must be a number > 0`;
-  if (!['mouse-bite', 'solid-tab', 'silk-divider'].includes(s.separation)) {
-    return 'separation must be "mouse-bite", "solid-tab" or "silk-divider"';
+  if (!['mouse-bite', 'solid-tab', 'silk-divider', 'v-cut'].includes(s.separation)) {
+    return 'separation must be "mouse-bite", "solid-tab", "silk-divider" or "v-cut"';
   }
   if (s.copperLayers !== 'auto' && ![2, 4, 6].includes(s.copperLayers)) {
     return 'copperLayers must be "auto", 2, 4 or 6';

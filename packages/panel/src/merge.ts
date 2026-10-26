@@ -55,6 +55,8 @@ export interface MergedPanel {
   board: Board;
   /** Contours to route: the panel outline and every opening. */
   profile: Point[][];
+  /** V-cut score lines, edge to edge (empty unless the panel is V-cut). */
+  scores: Array<{ start: Point; end: Point }>;
   fiducials: Fiducial[];
   /** Silkscreen label for each merged refdes, as the source board would draw it. */
   labels: Map<string, MergedLabel>;
@@ -293,7 +295,16 @@ export function mergePanel(
     rules: rules.id,
   };
 
-  return { board, profile: geometry.profile, fiducials: geometry.fiducials, labels, bare, origin, notes };
+  return {
+    board,
+    profile: geometry.profile,
+    scores: geometry.scores.map((s) => ({ start: s.start, end: s.end })),
+    fiducials: geometry.fiducials,
+    labels,
+    bare,
+    origin,
+    notes,
+  };
 }
 
 /** The part of the merged board that gets assembled: bare instances' components removed. */

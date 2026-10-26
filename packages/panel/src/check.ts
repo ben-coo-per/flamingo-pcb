@@ -9,11 +9,11 @@
  *  - info:    a consequence worth knowing (an edge is blocked, a board is promoted).
  */
 
-import type { Point } from '@flamingo/engine';
+import type { Board, Point } from '@flamingo/engine';
 import { allHoles, padWorld, polyIntersects, polyPolyDistance, RULESETS } from '@flamingo/engine';
 import type { AssemblyType, PanelLimits, SizeRange } from './config.js';
 import type { PanelGeometry, PlacedInstance } from './geometry.js';
-import { computeGeometry, effectiveSpacing, tabCounts } from './geometry.js';
+import { computeGeometry, effectiveSpacing, tabCounts, usesTabs } from './geometry.js';
 import type { ResolvedSources } from './resolved.js';
 import { panelRules, tighterLimits } from './rules.js';
 import { applyTransform, boxCorners } from './transform.js';
@@ -48,6 +48,13 @@ export type IssueCode =
   | 'no-instances'
   | 'silk-divider-designs'
   | 'silk-divider-shape'
+  | 'v-cut-shape'
+  | 'v-cut-misaligned'
+  | 'v-cut-size'
+  | 'v-cut-lines'
+  | 'v-cut-rails'
+  | 'v-cut-small-board'
+  | 'v-cut-near-copper'
   | 'assembly-sides'
   | 'empty';
 
@@ -387,7 +394,7 @@ function edgeAndTabIssues(panel: Panel, geometry: PanelGeometry, limits: PanelLi
       });
     }
   }
-  if (panel.settings.separation === 'silk-divider') return issues;
+  if (!usesTabs(panel.settings)) return issues;
 
   // Tabs are generated clear of blocked edges; this guards that promise.
   for (const t of geometry.tabs) {
@@ -429,6 +436,33 @@ function edgeAndTabIssues(panel: Panel, geometry: PanelGeometry, limits: PanelLi
   return issues;
 }
 
+type Disc = { at: Point; r: number; what: string };
+
+/** A board's copper and drills as discs in panel space: cheap, and conservative enough for a warning. */
+function copperDiscs(board: Board, inst: PlacedInstance): Disc[] {
+  const discs: Disc[] = [];
+  const toPanel = (p: Point): Point => applyTransform(inst.transform, p);
+  for (const v of board.vias) discs.push({ at: toPanel(v.at), r: v.diameter / 2, what: 'a via' });
+  for (const h of allHoles(board)) {
+    discs.push({ at: toPanel(h.at), r: Math.max(h.drill, h.padDiameter) / 2, what: 'a hole' });
+  }
+  for (const t of board.tracks) {
+    for (const p of [t.seg.start, t.seg.end]) {
+      discs.push({ at: toPanel(p), r: t.width / 2, what: `a track on ${t.net}` });
+    }
+  }
+  for (const c of board.components) {
+    for (const pad of c.footprint.pads) {
+      discs.push({
+        at: toPanel(padWorld(c, pad).at),
+        r: Math.hypot(pad.size.w, pad.size.h) / 2,
+        what: `${c.refdes}.${pad.number}`,
+      });
+    }
+  }
+  return discs;
+}
+
 /** Copper and drills of a board near its edge would be damaged by a mouse-bite hole: warn. */
 function tabCopperIssues(panel: Panel, sources: ResolvedSources, geometry: PanelGeometry, limits: PanelLimits): PanelIssue[] {
   if (panel.settings.separation !== 'mouse-bite') return [];
@@ -446,27 +480,7 @@ function tabCopperIssues(panel: Panel, sources: ResolvedSources, geometry: Panel
       .filter((h) => h.x >= inst.bbox.minX - r - EPS && h.x <= inst.bbox.maxX + r + EPS && h.y >= inst.bbox.minY - r - EPS && h.y <= inst.bbox.maxY + r + EPS);
     if (holes.length === 0) continue;
 
-    // Obstacles as discs in panel space: cheap, and conservative enough for a warning.
-    const discs: Array<{ at: Point; r: number; what: string }> = [];
-    const toPanel = (p: Point): Point => applyTransform(inst.transform, p);
-    for (const v of board.vias) discs.push({ at: toPanel(v.at), r: v.diameter / 2, what: 'a via' });
-    for (const h of allHoles(board)) {
-      discs.push({ at: toPanel(h.at), r: Math.max(h.drill, h.padDiameter) / 2, what: 'a hole' });
-    }
-    for (const t of board.tracks) {
-      for (const p of [t.seg.start, t.seg.end]) {
-        discs.push({ at: toPanel(p), r: t.width / 2, what: `a track on ${t.net}` });
-      }
-    }
-    for (const c of board.components) {
-      for (const pad of c.footprint.pads) {
-        discs.push({
-          at: toPanel(padWorld(c, pad).at),
-          r: Math.hypot(pad.size.w, pad.size.h) / 2,
-          what: `${c.refdes}.${pad.number}`,
-        });
-      }
-    }
+    const discs = copperDiscs(board, inst);
     for (const h of holes) {
       const hit = discs.find((d) => Math.hypot(d.at.x - h.x, d.at.y - h.y) < d.r + r + clearance);
       if (!hit) continue;
@@ -552,7 +566,8 @@ function sizeIssues(panel: Panel, sources: ResolvedSources, geometry: PanelGeome
 function settingIssues(panel: Panel, sources: ResolvedSources, geometry: PanelGeometry, limits: PanelLimits): PanelIssue[] {
   const issues: PanelIssue[] = [];
   const s = panel.settings;
-  if (s.separation !== 'silk-divider') {
+  // Only a routed gap has a spacing to check; silk-divider and V-cut boards abut.
+  if (usesTabs(s)) {
     if (s.spacing < limits.fab.minSpacing.value - 1e-9) {
       issues.push({
         code: 'spacing-setting',
@@ -644,6 +659,173 @@ function settingIssues(panel: Panel, sources: ResolvedSources, geometry: PanelGe
   return issues;
 }
 
+/** True when `outline` is exactly its axis-aligned bounding box: every edge lies on one of its sides. */
+function isAxisRect(outline: Point[], b: Box): boolean {
+  const onSide = (p: Point, q: Point): boolean =>
+    (Math.abs(p.x - q.x) <= EPS && (Math.abs(p.x - b.minX) <= EPS || Math.abs(p.x - b.maxX) <= EPS)) ||
+    (Math.abs(p.y - q.y) <= EPS && (Math.abs(p.y - b.minY) <= EPS || Math.abs(p.y - b.maxY) <= EPS));
+  return outline.length >= 4 && outline.every((p, i) => onSide(p, outline[(i + 1) % outline.length]!));
+}
+
+/**
+ * V-cut rules. A score is a straight groove across the whole panel, so every
+ * board must be a rectangle and every line must pass between boards, never
+ * through one.
+ */
+function vcutIssues(panel: Panel, sources: ResolvedSources, geometry: PanelGeometry, limits: PanelLimits): PanelIssue[] {
+  if (panel.settings.separation !== 'v-cut') return [];
+  const issues: PanelIssue[] = [];
+  const v = limits.vcut;
+  const list = geometry.instances;
+
+  const odd = list.filter((i) => !isAxisRect(i.outline, i.bbox));
+  for (const key of [...new Set(odd.map((i) => i.source))]) {
+    const ids = odd.filter((i) => i.source === key).map((i) => i.id);
+    issues.push({
+      code: 'v-cut-shape',
+      severity: 'error',
+      message: `${key} is not a plain rectangle (rounded corners, arcs or notches): a V-cut scores only straight lines across the whole panel, so it cannot free ${ids.join(', ')}. Use mouse bites for this board.`,
+      instances: ids,
+      sources: [key],
+    });
+  }
+
+  for (const line of geometry.scores) {
+    const crossed = list.filter((i) => {
+      const [lo, hi] = line.axis === 'h' ? [i.bbox.minY, i.bbox.maxY] : [i.bbox.minX, i.bbox.maxX];
+      return line.level > lo + EPS && line.level < hi - EPS;
+    });
+    if (crossed.length === 0) continue;
+    const where = `${line.axis === 'h' ? 'y' : 'x'} = ${fmt(line.level)} mm`;
+    const c = centre(crossed[0]!.bbox);
+    issues.push({
+      code: 'v-cut-misaligned',
+      severity: 'error',
+      message:
+        `The ${line.axis === 'h' ? 'horizontal' : 'vertical'} V-cut along the edge of ${line.instances.join(', ')} (${where}) runs through ${crossed.map((i) => i.id).join(', ')}. ` +
+        'A V-cut crosses the whole panel: boards in a row must share their top and bottom edges, and boards in a column their left and right edges.',
+      instances: [...line.instances, ...crossed.map((i) => i.id)],
+      sources: [],
+      at: line.axis === 'h' ? { x: c.x, y: line.level } : { x: line.level, y: c.y },
+      data: { axis: line.axis, level: line.level },
+    });
+  }
+
+  const frame = geometry.frame;
+  if (frame) {
+    const min = v.minPanelSize.value;
+    const max = v.maxPanelSize.value;
+    if (!atLeastEitherWay(frame.width, frame.height, min.width, min.height)) {
+      issues.push({
+        code: 'v-cut-size',
+        severity: 'error',
+        message: `The panel is ${fmt(frame.width)} x ${fmt(frame.height)} mm; JLCPCB V-cuts panels of ${min.width} x ${min.height} mm or more. Add boards or rails, or use mouse bites.`,
+        instances: [],
+        sources: [],
+        data: { width: frame.width, height: frame.height, min },
+      });
+    } else if (!fitsEitherWay(frame.width, frame.height, max.width, max.height)) {
+      issues.push({
+        code: 'v-cut-size',
+        severity: 'error',
+        message: `The panel is ${fmt(frame.width)} x ${fmt(frame.height)} mm; JLCPCB V-cuts panels up to ${max.width} x ${max.height} mm`,
+        instances: [],
+        sources: [],
+        data: { width: frame.width, height: frame.height, max },
+      });
+    }
+  }
+
+  for (const axis of ['h', 'v'] as const) {
+    const lines = geometry.scores.filter((l) => l.axis === axis);
+    const name = axis === 'h' ? 'horizontal' : 'vertical';
+    if (lines.length > v.maxLinesPerAxis.value) {
+      issues.push({
+        code: 'v-cut-lines',
+        severity: 'error',
+        message: `${lines.length} ${name} V-cuts; JLCPCB scores at most ${v.maxLinesPerAxis.value} in each direction`,
+        instances: [],
+        sources: [],
+      });
+    }
+    for (let k = 1; k < lines.length; k++) {
+      const a = lines[k - 1]!;
+      const b = lines[k]!;
+      const gap = b.level - a.level;
+      if (gap >= v.minLineSpacing.value - EPS) continue;
+      const ids = [...new Set([...a.instances, ...b.instances])];
+      const mid = (a.level + b.level) / 2;
+      issues.push({
+        code: 'v-cut-lines',
+        severity: 'error',
+        message: `Two ${name} V-cuts are ${fmt(gap)} mm apart (along ${ids.join(', ')}); JLCPCB needs ${fmt(v.minLineSpacing.value)} mm between parallel V-cuts. Make the boards abut, or move them further apart.`,
+        instances: ids,
+        sources: [],
+        at: axis === 'h' ? { x: (a.start.x + a.end.x) / 2, y: mid } : { x: mid, y: (a.start.y + a.end.y) / 2 },
+      });
+    }
+    // A groove through a tooling hole or a fiducial on the rail spoils it.
+    for (const line of lines) {
+      const dist = (p: Point): number => Math.abs((axis === 'h' ? p.y : p.x) - line.level);
+      const hole = geometry.toolingHoles.find((h) => dist(h.at) < h.diameter / 2);
+      const fid = geometry.fiducials.find((f) => dist(f.at) < f.maskDiameter / 2);
+      const what = hole ? { at: hole.at, name: 'a tooling hole' } : fid ? { at: fid.at, name: 'a fiducial' } : null;
+      if (!what) continue;
+      issues.push({
+        code: 'v-cut-lines',
+        severity: 'warning',
+        message: `The ${name} V-cut along ${line.instances.join(', ')} runs through ${what.name} on the rail`,
+        instances: line.instances,
+        sources: [],
+        at: what.at,
+      });
+    }
+  }
+
+  if (geometry.frame && geometry.rails.length === 0 && !v.allowNoRails.value) {
+    issues.push({
+      code: 'v-cut-rails',
+      severity: 'error',
+      message: 'A V-cut panel needs rails',
+      instances: [],
+      sources: [],
+    });
+  }
+
+  const small = list.filter((i) => Math.min(i.bbox.maxX - i.bbox.minX, i.bbox.maxY - i.bbox.minY) < v.smallBoardSide.value - EPS);
+  if (small.length > 0) {
+    issues.push({
+      code: 'v-cut-small-board',
+      severity: 'warning',
+      message: `${small.map((i) => i.id).join(', ')} ${small.length === 1 ? 'has' : 'have'} a side under ${fmt(v.smallBoardSide.value)} mm: JLCPCB charges extra to V-cut boards that small. The amount is not published as text, so the quote leaves it out.`,
+      instances: small.map((i) => i.id),
+      sources: [...new Set(small.map((i) => i.source))],
+    });
+  }
+
+  // Copper too near a score is cut into or cracked when the board is snapped off.
+  const clearance = v.copperClearance.value;
+  for (const inst of list) {
+    const board = sources.find((s) => s.key === inst.source)?.board;
+    const lines = geometry.scores.filter((l) => l.instances.includes(inst.id));
+    if (!board || lines.length === 0) continue;
+    const discs = copperDiscs(board, inst);
+    for (const line of lines) {
+      const hit = discs.find((d) => Math.abs((line.axis === 'h' ? d.at.y : d.at.x) - line.level) - d.r < clearance - 1e-9);
+      if (!hit) continue;
+      issues.push({
+        code: 'v-cut-near-copper',
+        severity: 'warning',
+        message: `${inst.id}: ${hit.what} comes within ${fmt(clearance)} mm of a V-cut`,
+        instances: [inst.id],
+        sources: [inst.source],
+        at: hit.at,
+      });
+    }
+  }
+  return issues;
+}
+
 const ORDER: Record<Severity, number> = { error: 0, warning: 1, info: 2 };
 
 /**
@@ -675,6 +857,7 @@ export function checkPanel(
     ...tabCopperIssues(panel, sources, geometry, limits),
     ...sizeIssues(panel, sources, geometry, limits),
     ...settingIssues(panel, sources, geometry, limits),
+    ...vcutIssues(panel, sources, geometry, limits),
   );
   // Stable: severity first, original order within a severity.
   return issues

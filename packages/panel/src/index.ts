@@ -66,10 +66,12 @@ export type {
   Tab,
   Fiducial,
   ToolingHole,
+  ScoreLine,
   PanelGeometry,
 } from './geometry.js';
 export {
   effectiveSpacing,
+  usesTabs,
   placeInstances,
   computeFrame,
   edgeSpans,

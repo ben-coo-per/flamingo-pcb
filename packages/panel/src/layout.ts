@@ -20,6 +20,7 @@ import {
   effectiveSpacing,
   placeInstances,
   tabCounts,
+  usesTabs,
   type PlacedInstance,
 } from './geometry.js';
 import type { InstancePlacement } from './ops.js';
@@ -407,7 +408,7 @@ export function arrange(
 
   if (bestFit) {
     const supported =
-      rotate && panel.settings.separation !== 'silk-divider'
+      rotate && usesTabs(panel.settings)
         ? improveSupport(panel, usable, sources, limits, bestFit, limit, pinned.length === 0)
         : bestFit;
     // Keep the panel's order of instances in the result.

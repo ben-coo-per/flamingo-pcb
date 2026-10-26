@@ -29,7 +29,13 @@ export type Separation =
    * as silkscreen lines. JLCPCB treats that as a single design; you cut the
    * boards apart yourself.
    */
-  | 'silk-divider';
+  | 'silk-divider'
+  /**
+   * No routing between boards: they abut, and a straight V-groove is scored
+   * along every shared edge, from one side of the panel to the other. Snapped
+   * apart by hand. Boards must be rectangles on a grid.
+   */
+  | 'v-cut';
 
 export interface PanelSource {
   /**
@@ -112,7 +118,7 @@ export interface ToolingHoleSettings {
 export interface PanelSettings {
   separation: Separation;
   rails: RailSettings;
-  /** Routed gap between boards, and between boards and rails, mm. Ignored for silk-divider. */
+  /** Routed gap between boards, and between boards and rails, mm. Ignored for silk-divider and v-cut. */
   spacing: number;
   tabs: TabSettings;
   fiducials: FiducialSettings;

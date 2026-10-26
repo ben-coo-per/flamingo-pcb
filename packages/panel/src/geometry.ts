@@ -3,8 +3,9 @@
  *
  * `computeGeometry` turns a panel plus its resolved sources into everything
  * that has a shape: each instance in panel space, the frame and rails around
- * them, the tabs and mouse-bite holes between them, fiducials, tooling holes,
- * and the profile that gets routed. The canvas, the checks, the SVG render and
+ * them, the tabs and mouse-bite holes between them (or the V-cut score lines
+ * along their shared edges), fiducials, tooling holes, and the profile that
+ * gets routed. The canvas, the checks, the SVG render and
  * the fab merge all read this one structure.
  *
  * The frame is derived, never stored: it wraps the instances wherever they
@@ -111,6 +112,20 @@ export interface ToolingHole {
   diameter: number;
 }
 
+/**
+ * One V-cut score line. JLCPCB scores straight through the whole panel, so a
+ * line always runs from one edge of the frame to the other.
+ */
+export interface ScoreLine {
+  /** `h` runs along x at y = level; `v` runs along y at x = level. */
+  axis: 'h' | 'v';
+  level: number;
+  start: Point;
+  end: Point;
+  /** Instances with an edge on this line. */
+  instances: string[];
+}
+
 export interface PanelGeometry {
   instances: PlacedInstance[];
   unplaced: UnplacedInstance[];
@@ -129,15 +144,22 @@ export interface PanelGeometry {
   profile: Point[][];
   /** Silkscreen divider lines (silk-divider panels only), as polylines. */
   dividers: Point[][];
+  /** V-cut score lines (v-cut panels only). */
+  scores: ScoreLine[];
 }
 
 // ---------------------------------------------------------------------------
 // Instances
 // ---------------------------------------------------------------------------
 
-/** Spacing that applies between boards: none at all on a silk-divider panel. */
+/** Spacing that applies between boards: none on a silk-divider or V-cut panel, where boards abut. */
 export function effectiveSpacing(settings: PanelSettings): number {
-  return settings.separation === 'silk-divider' ? 0 : settings.spacing;
+  return settings.separation === 'silk-divider' || settings.separation === 'v-cut' ? 0 : settings.spacing;
+}
+
+/** Whether boards are held by tabs across a routed gap. */
+export function usesTabs(settings: PanelSettings): boolean {
+  return settings.separation === 'mouse-bite' || settings.separation === 'solid-tab';
 }
 
 export function placeInstances(
@@ -340,7 +362,7 @@ function sideLevel(bbox: Box, side: Side): number {
 }
 
 function computeTabs(settings: PanelSettings, instances: PlacedInstance[], rails: Rail[]): Tab[] {
-  if (settings.separation === 'silk-divider') return [];
+  if (!usesTabs(settings)) return [];
   const { tabs: ts } = settings;
   const withHoles = settings.separation === 'mouse-bite';
   const out: Tab[] = [];
@@ -564,7 +586,8 @@ function computeProfile(
   rails: Rail[],
   tabs: Tab[],
 ): Point[][] {
-  if (settings.separation === 'silk-divider') return [boxCorners(frame.outer)];
+  // Nothing is routed inside a silk-divider or V-cut panel: one outer ring.
+  if (settings.separation === 'silk-divider' || settings.separation === 'v-cut') return [boxCorners(frame.outer)];
   const polys: Ring[][] = [];
   for (const i of instances) polys.push([toRing(i.outline)]);
   for (const t of tabs) polys.push([toRing(t.polygon)]);
@@ -588,6 +611,45 @@ function computeProfile(
 }
 
 // ---------------------------------------------------------------------------
+// V-cut score lines
+// ---------------------------------------------------------------------------
+
+/**
+ * One score line at every level where a board edge lies inside the panel:
+ * board against board, or board against rail. Levels on the panel's own edge
+ * need no score. Every line spans the whole frame, as JLCPCB requires; the
+ * checks report a line that would cut through a board.
+ */
+function computeScores(frame: Frame, instances: PlacedInstance[]): ScoreLine[] {
+  const { outer } = frame;
+  const out: ScoreLine[] = [];
+  for (const axis of ['h', 'v'] as const) {
+    const levels: Array<{ level: number; instances: string[] }> = [];
+    const [lo, hi] = axis === 'h' ? [outer.minY, outer.maxY] : [outer.minX, outer.maxX];
+    for (const i of instances) {
+      const ends = axis === 'h' ? [i.bbox.minY, i.bbox.maxY] : [i.bbox.minX, i.bbox.maxX];
+      for (const v of ends) {
+        if (v <= lo + EPS || v >= hi - EPS) continue;
+        const hit = levels.find((l) => Math.abs(l.level - v) <= EPS);
+        if (!hit) levels.push({ level: v, instances: [i.id] });
+        else if (!hit.instances.includes(i.id)) hit.instances.push(i.id);
+      }
+    }
+    levels.sort((a, b) => a.level - b.level);
+    for (const l of levels) {
+      out.push({
+        axis,
+        level: l.level,
+        start: axis === 'h' ? { x: outer.minX, y: l.level } : { x: l.level, y: outer.minY },
+        end: axis === 'h' ? { x: outer.maxX, y: l.level } : { x: l.level, y: outer.maxY },
+        instances: l.instances,
+      });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -606,6 +668,7 @@ export function computeGeometry(panel: Panel, sources: ResolvedSources): PanelGe
       featureNotes: [],
       profile: [],
       dividers: [],
+      scores: [],
     };
   }
   const rails = computeRails(panel.settings, frame);
@@ -634,6 +697,7 @@ export function computeGeometry(panel: Panel, sources: ResolvedSources): PanelGe
     featureNotes: features.notes,
     profile: computeProfile(panel.settings, frame, instances, rails, tabs),
     dividers,
+    scores: panel.settings.separation === 'v-cut' ? computeScores(frame, instances) : [],
   };
 }
 
