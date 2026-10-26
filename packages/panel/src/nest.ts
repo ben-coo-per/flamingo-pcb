@@ -268,7 +268,7 @@ export interface Nested {
 }
 
 /** Grid step for the drop search, from the shapes' size. */
-function gridStep(items: NestItem[]): number {
+function gridStep(items: Array<{ options: NestOption[] }>): number {
   let smallest = Infinity;
   for (const it of items) for (const o of it.options) smallest = Math.min(smallest, o.w, o.h);
   if (!Number.isFinite(smallest)) return 1;
@@ -329,50 +329,104 @@ function clear(shape: Shape, placed: Shape[]): boolean {
  * around `obstacles`. Each item takes the lowest, then leftmost, spot any of
  * its options fits; the hit is refined off the grid so shapes end up touching.
  */
+/** Where one option could rest, from the lowest top up. */
+export interface Drop {
+  x: number;
+  y: number;
+  option: NestOption;
+}
+
+/**
+ * Every settled resting place of `option` in the strip, one per grid column,
+ * lowest top first. The first is where `packNest` would drop it; the rest are
+ * what a repair tries when the first leaves a board without tabs.
+ */
+export function drops(
+  options: NestOption[],
+  placed: Shape[],
+  x0: number,
+  y0: number,
+  width: number,
+  step: number,
+): Drop[] {
+  const out: Drop[] = [];
+  const ceiling = Math.max(y0, ...placed.map((p) => p.bbox.maxY));
+  for (const option of options) {
+    if (option.w > width + EPS) continue;
+    const xMax = x0 + width - option.w;
+    for (let x = x0; x <= xMax + EPS; x += step) {
+      const cx = Math.min(x, xMax);
+      let hit = -1;
+      for (let y = y0; y <= ceiling + EPS; y += step) {
+        if (clear(shapeAt(option, cx, y), placed)) {
+          hit = y;
+          break;
+        }
+      }
+      if (hit < 0) hit = ceiling;
+      if (!clear(shapeAt(option, cx, hit), placed)) {
+        if (cx >= xMax) break;
+        continue;
+      }
+      const settled = settle(option, cx, hit, x0, y0, step, placed);
+      out.push({ x: settled.x, y: settled.y, option });
+      if (cx >= xMax) break;
+    }
+  }
+  return out.sort((a, b) => a.y + a.option.h - (b.y + b.option.h) || a.y - b.y || a.x - b.x);
+}
+
+/**
+ * Bottom-left drop of `items` into a strip `width` wide starting at (x0, y0),
+ * around `obstacles`. Each item takes the spot with the lowest top, then the
+ * lowest, then the leftmost, that any of its options fits; the hit is refined
+ * off the grid so shapes end up touching.
+ */
 export function packNest(items: NestItem[], obstacles: Shape[], x0: number, y0: number, width: number): Nested[] | null {
   const placed: Shape[] = [...obstacles];
   const out: Nested[] = [];
   const step = gridStep(items);
-  const top = (): number => Math.max(y0, ...placed.map((p) => p.bbox.maxY));
-
   for (const item of items) {
-    let best: { x: number; y: number; option: NestOption } | null = null;
-    const ceiling = top();
-    for (const option of item.options) {
-      if (option.w > width + EPS) continue;
-      const xMax = x0 + width - option.w;
-      for (let x = x0; x <= xMax + EPS; x += step) {
-        const cx = Math.min(x, xMax);
-        // Nothing can be found above the current pile, so stop there.
-        let y = y0;
-        let hit = -1;
-        for (; y <= ceiling + EPS; y += step) {
-          // Nothing above the best top so far can beat it.
-          if (best && y + option.h > best.y + best.option.h + EPS) break;
-          if (clear(shapeAt(option, cx, y), placed)) {
-            hit = y;
-            break;
-          }
-        }
-        if (hit < 0) {
-          if (best && ceiling + option.h + EPS > best.y + best.option.h) continue;
-          hit = ceiling;
-          if (!clear(shapeAt(option, cx, hit), placed)) continue;
-        }
-        // The grid overshot by up to one step: let the shape settle.
-        const settled = settle(option, cx, hit, x0, y0, step, placed);
-        if (best === null || lower(settled.x, settled.y, option, best)) {
-          best = { x: settled.x, y: settled.y, option };
-        }
-        if (cx >= xMax) break;
-      }
-    }
+    const best = firstDrop(item.options, placed, x0, y0, width, step);
     if (best === null) return null;
     placed.push(shapeAt(best.option, best.x, best.y));
     out.push({ id: item.id, option: best.option, x: best.x, y: best.y });
   }
   return out;
 }
+
+/** The drop `packNest` takes: as `drops()[0]`, but without settling every column. */
+function firstDrop(options: NestOption[], placed: Shape[], x0: number, y0: number, width: number, step: number): Drop | null {
+  let best: Drop | null = null;
+  const ceiling = Math.max(y0, ...placed.map((p) => p.bbox.maxY));
+  for (const option of options) {
+    if (option.w > width + EPS) continue;
+    const xMax = x0 + width - option.w;
+    for (let x = x0; x <= xMax + EPS; x += step) {
+      const cx = Math.min(x, xMax);
+      let hit = -1;
+      for (let y = y0; y <= ceiling + EPS; y += step) {
+        // Nothing above the best top so far can beat it.
+        if (best && y + option.h > best.y + best.option.h + EPS) break;
+        if (clear(shapeAt(option, cx, y), placed)) {
+          hit = y;
+          break;
+        }
+      }
+      if (hit < 0) {
+        if (best && ceiling + option.h + EPS > best.y + best.option.h) continue;
+        hit = ceiling;
+        if (!clear(shapeAt(option, cx, hit), placed)) continue;
+      }
+      const settled = settle(option, cx, hit, x0, y0, step, placed);
+      if (best === null || lower(settled.x, settled.y, option, best)) best = { x: settled.x, y: settled.y, option };
+      if (cx >= xMax) break;
+    }
+  }
+  return best;
+}
+
+export { gridStep };
 
 /** The grown shape of an instance already on the panel, as an obstacle. */
 export function obstacleShape(outline: Point[], edges: Record<Side, EdgeInfo>, rotation: number, at: Point, spacing: number, overhangMargin: number): Shape {

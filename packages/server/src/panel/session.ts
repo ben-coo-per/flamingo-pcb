@@ -46,6 +46,7 @@ import {
   applyPanelOp,
   arrange,
   atForRotationAboutCentre,
+  isRotationStep,
   normalizeRotation,
   rotatedSize,
   checkPanel,
@@ -628,7 +629,10 @@ export class PanelSession extends EventEmitter {
   }
 
   /** Arrange every unpinned instance. The panel only changes when the result fits. */
-  async arrange(opts: { rotate?: boolean } = {}): Promise<ArrangeResult> {
+  async arrange(opts: { rotate?: boolean; rotationStep?: number } = {}): Promise<ArrangeResult> {
+    if (opts.rotationStep !== undefined && !isRotationStep(opts.rotationStep)) {
+      return { ok: false, reason: 'rotationStep must divide 360 evenly and be at least 1 degree', limit: sizeLimit(this.panel, await this.resolved(), this.limits), skipped: [] };
+    }
     const sources = await this.resolved();
     const result = arrange(this.panel, sources, this.limits, opts);
     if (result.ok && result.placements.length > 0) {

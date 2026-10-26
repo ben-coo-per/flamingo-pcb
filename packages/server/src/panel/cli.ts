@@ -47,7 +47,7 @@ export const PANEL_USAGE = `Usage: flamingo panel <command> <file${PANEL_EXTENSI
              [--tab-width MM] [--tab-pitch MM] [--fiducials on|off]
              [--tooling-holes on|off] [--layers auto|2|4|6] [--rotation-step DEG]
              [--name NAME]
-  arrange <file> [--no-rotate]
+  arrange <file> [--no-rotate] [--rotation-step DEG]
   check <file>                                    exit status 1 when there are errors
   screenshot <file> [--out panel.png] [--width PX]
   quote <file> [--objective total|per-board|overage] [--brief] [--json] [--offline]
@@ -304,7 +304,10 @@ export async function runPanelCli(argv: string[], io: PanelCliIo = { out: consol
         break;
       }
       case 'arrange': {
-        const r = await s.arrange({ rotate: !args.flags.has('no-rotate') });
+        const r = await s.arrange({
+          rotate: !args.flags.has('no-rotate'),
+          ...(number(args, 'rotation-step') !== undefined ? { rotationStep: number(args, 'rotation-step')! } : {}),
+        });
         io.out(formatArrange(r));
         if (!r.ok) status = 1;
         break;

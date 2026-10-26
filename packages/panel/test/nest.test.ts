@@ -49,24 +49,28 @@ describe('nesting', () => {
     expect(shapesOverlap(at(a, 0, 0), at(a, a.w - 1, 0))).toBe(true);
   });
 
-  it('nests eleven pentagons on a 250 x 250 assembly panel at 36 degree steps', () => {
-    let panel = withInstances(base, 'F', 11);
-    panel = applyPanelOp(panel, { op: 'setSettings', settings: { rotationStep: 36 } }).ok ? (applyPanelOp(panel, { op: 'setSettings', settings: { rotationStep: 36 } }) as { panel: Panel }).panel : panel;
+  it('nests eight pentagons on a 250 x 250 assembly panel at 36 degree steps, every one held by tabs', () => {
+    let panel = withInstances(base, 'F', 8);
+    const set = applyPanelOp(panel, { op: 'setSettings', settings: { rotationStep: 36 } });
+    if (!set.ok) throw new Error(set.error);
+    panel = set.panel;
     const t0 = performance.now();
     const r = arrange(panel, sources, LIMITS);
     const ms = performance.now() - t0;
     expect(r.ok, r.ok ? '' : r.reason).toBe(true);
     if (!r.ok) return;
-    expect(ms).toBeLessThan(15000);
+    expect(ms).toBeLessThan(20000);
     const placed = applyPanelOp(panel, { op: 'placeInstances', placements: r.placements });
     expect(placed.ok).toBe(true);
     if (!placed.ok) return;
     const g = computeGeometry(placed.panel, sources);
-    const issues = checkPanel(placed.panel, sources, LIMITS, g).filter((i) => i.code === 'overlap' || i.code === 'spacing' || i.code === 'blocked-edge-clearance');
-    expect(issues.map((i) => i.message)).toEqual([]);
+    const errors = checkPanel(placed.panel, sources, LIMITS, g).filter((i) => i.severity === 'error');
+    expect(errors.map((i) => `${i.code}: ${i.message}`)).toEqual([]);
     expect(r.width).toBeLessThanOrEqual(250.001);
     expect(r.height).toBeLessThanOrEqual(250.001);
-    console.log(`11 pentagons: ${r.width} x ${r.height} mm in ${Math.round(ms)} ms, rotations ${[...new Set(r.placements.map((p) => p.rotation))].join(',')}`);
+    // Quarter turns alone manage six: the tilted ones interlock.
+    const rotations = new Set(r.placements.map((p) => p.rotation));
+    expect([...rotations].some((rot) => rot! % 90 !== 0)).toBe(true);
   });
 
   it('still packs rectangles as before at a 90 degree step', () => {

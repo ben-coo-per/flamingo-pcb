@@ -265,7 +265,7 @@ export async function handlePanelApi(
       return true;
     }
     case 'arrange': {
-      sendJSON(res, 200, await session.arrange({ rotate: body.rotate !== false }));
+      sendJSON(res, 200, await session.arrange({ rotate: body.rotate !== false, ...(typeof body.rotationStep === 'number' ? { rotationStep: body.rotationStep } : {}) }));
       return true;
     }
     case 'apply-scenario': {

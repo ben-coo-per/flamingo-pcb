@@ -358,12 +358,17 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
     'panel_arrange',
     {
       description:
-        'Auto-layout: pack every unpinned instance into the smallest panel that respects spacing, blocked-edge clearances and the size limit, trying each board as it is and turned 90 degrees. Pinned instances stay put. If the instances do not fit, the panel is left unchanged and the reason and the smallest panel that would fit are reported (as data, not as a tool error).',
+        'Auto-layout: pack every unpinned instance into the smallest panel that respects spacing, blocked-edge clearances and the size limit. Rectangular boards are tried as they are and turned 90 degrees; boards that are not rectangles, or any board when rotationStep is not 90, are nested by their real outline at every multiple of the step (plus the quarter turns), so pentagons interlock. Pinned instances stay put. If the instances do not fit, the panel is left unchanged and the reason and the smallest panel that would fit are reported (as data, not as a tool error).',
       inputSchema: {
-        rotate: z.boolean().optional().describe('Allow turning instances by 90 degrees (default true)'),
+        rotate: z.boolean().optional().describe('Allow turning instances (default true)'),
+        rotationStep: z
+          .number()
+          .optional()
+          .describe('Angle step to try for this run, degrees, dividing 360 (e.g. 36 for pentagons, 60 for hexagons, 30 or 15 for a finer search); default settings.rotationStep (90)'),
       },
     },
-    async ({ rotate }) => text(formatArrange(await session.arrange({ rotate }))),
+    async ({ rotate, rotationStep }) =>
+      text(formatArrange(await session.arrange({ rotate, ...(rotationStep !== undefined ? { rotationStep } : {}) }))),
   );
 
   server.registerTool(

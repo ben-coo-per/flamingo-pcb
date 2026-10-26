@@ -28,7 +28,7 @@ import {
   usesTabs,
   type PlacedInstance,
 } from './geometry.js';
-import { dedupeOptions, growth, nestOption, obstacleShape, packNest, type NestItem, type Shape } from './nest.js';
+import { dedupeOptions, drops, gridStep, growth, nestOption, obstacleShape, packNest, type NestItem, type Shape } from './nest.js';
 import type { InstancePlacement } from './ops.js';
 import type { ResolvedSources } from './resolved.js';
 import type { EdgeInfo } from './source.js';
@@ -450,10 +450,11 @@ export function arrange(
   }
 
   if (bestFit) {
-    const supported =
-      rotate && usesTabs(panel.settings)
-        ? improveSupport(panel, usable, sources, limits, bestFit, limit, pinned.length === 0)
-        : bestFit;
+    let supported = bestFit;
+    if (usesTabs(panel.settings)) {
+      if (nesting) supported = repairNestSupport(panel, usable, sources, limits, bestFit, nestItems, nestObstacles, x0, y0, limit, pinned.length === 0);
+      if (rotate) supported = improveSupport(panel, usable, sources, limits, supported, limit, pinned.length === 0);
+    }
     // Keep the panel's order of instances in the result.
     const placements = [...supported.placements].sort(
       (a, b) => panel.instances.indexOf(byId.get(a.id)!) - panel.instances.indexOf(byId.get(b.id)!),
@@ -576,6 +577,91 @@ function improveSupport(
     for (const pl of placements) {
       pl.at = { x: round(pl.at.x - frame.outer.minX), y: round(pl.at.y - frame.outer.minY) };
     }
+  } else {
+    for (const pl of placements) pl.at = { x: round(pl.at.x), y: round(pl.at.y) };
+  }
+  return { ...start, placements, width: frame.width, height: frame.height };
+}
+
+/**
+ * A nested board may come to rest where no edge of it faces anything within a
+ * tab's reach, and then nothing holds it. Each such board is dropped again
+ * with every other board in place, at the lowest resting place that does give
+ * it enough tabs without making anything else worse.
+ */
+function repairNestSupport(
+  panel: Panel,
+  usable: PanelInstance[],
+  sources: ResolvedSources,
+  limits: PanelLimits,
+  start: Candidate,
+  items: NestItem[],
+  obstacles: Shape[],
+  x0: number,
+  y0: number,
+  limit: SizeLimit,
+  anchorAtOrigin: boolean,
+): Candidate {
+  const min = limits.tabs.minPerInstance.value;
+  const spacing = effectiveSpacing(panel.settings);
+  const overhangMargin = limits.blockedEdges.overhangMargin.value;
+  const apply = (placements: InstancePlacement[]): Panel => ({
+    ...panel,
+    instances: usable.map((inst) => {
+      const pl = placements.find((q) => q.id === inst.id);
+      return pl ? { ...inst, at: pl.at, rotation: pl.rotation ?? inst.rotation } : inst;
+    }),
+  });
+  const score = (p: Panel): { missing: number; tabs: Map<string, number>; errors: number } => {
+    const g = computeGeometry(p, sources);
+    const tabs = tabCounts(g);
+    return {
+      missing: [...tabs.values()].reduce((n, t) => n + Math.max(0, min - t), 0),
+      tabs,
+      errors: checkPanel(p, sources, limits, g).filter((i) => i.severity === 'error').length,
+    };
+  };
+
+  // With nothing pinned the packer anchored the panel at the origin, which
+  // puts the first board where the strip started anyway; with pinned boards
+  // nothing was moved. Either way the strip's frame still holds.
+  let placements = start.placements.map((p) => ({ ...p, at: { ...p.at } }));
+  let current = score(apply(placements));
+  if (current.missing === 0) return start;
+
+  const step = gridStep(items);
+  const grown = (q: InstancePlacement): Shape => {
+    const inst = usable.find((i) => i.id === q.id)!;
+    const gq = sources.find((s) => s.key === inst.source)!.geometry!;
+    return obstacleShape(gq.outline, gq.edges, q.rotation ?? inst.rotation, q.at, spacing, overhangMargin);
+  };
+  const MAX_TRIES = 40;
+  for (const pl of placements) {
+    if ((current.tabs.get(pl.id) ?? 0) >= min) continue;
+    const item = items.find((it) => it.id === pl.id);
+    if (!item) continue;
+    // Everything else, grown, is in the way; the strip is as wide as they reach.
+    const others: Shape[] = [...obstacles, ...placements.filter((q) => q.id !== pl.id).map(grown)];
+    const width = Math.max(...[...others, grown(pl)].map((o) => o.bbox.maxX)) - x0;
+    const candidates = drops(item.options, others, x0, y0, width, step).slice(0, MAX_TRIES);
+    for (const c of candidates) {
+      const trial = placements.map((q) =>
+        q.id === pl.id ? { id: q.id, rotation: c.option.rotation, at: { x: c.x + c.option.dx, y: c.y + c.option.dy } } : q,
+      );
+      const next = score(apply(trial));
+      if ((next.tabs.get(pl.id) ?? 0) >= min && next.missing < current.missing && next.errors <= current.errors) {
+        placements = trial;
+        current = next;
+        break;
+      }
+    }
+  }
+  if (current.missing === score(apply(start.placements)).missing) return start;
+
+  const frame = computeFrame(panel.settings, placeInstances(apply(placements), sources).instances);
+  if (!frame || !fits(frame.width, frame.height, limit)) return start;
+  if (anchorAtOrigin) {
+    for (const pl of placements) pl.at = { x: round(pl.at.x - frame.outer.minX), y: round(pl.at.y - frame.outer.minY) };
   } else {
     for (const pl of placements) pl.at = { x: round(pl.at.x), y: round(pl.at.y) };
   }

@@ -189,7 +189,7 @@ boards + quantities → quote_order → panel_apply_scenario → panel_check →
 | | `panel_set_populate` | `true` = assemble; `false` = ship bare (all its parts become do-not-place). |
 | | `panel_pin` | Pin or unpin. Pinned instances are never moved by arrange. |
 | **Layout** | `panel_set_settings` | Separation, spacing, rails, tabs, fiducials, tooling holes, layer count (promotion). |
-| | `panel_arrange` | Pack every unpinned instance into the smallest panel that fits the limits. |
+| | `panel_arrange` | Pack every unpinned instance into the smallest panel that fits the limits; nests non-rectangular boards at any angle step. |
 | | `panel_check` | Report everything wrong with the panel, as data. |
 | | `panel_screenshot` | Render the panel to a PNG. |
 | **History** | `panel_undo`, `panel_redo` | Walk the panel's op log. |
@@ -222,6 +222,21 @@ the instance's bounding box, in mm, y-up, like everything else in Flamingo.
   profile (`.GKO`) layer, each labelled `V-CUT`. Run `panel_arrange` after you
   switch, so the boards close up. Flamingo never proposes V-cut in `quote_order`.
   On a panel set to V-cut, its panel scenarios keep V-cut.
+
+### Arranging boards of any shape
+
+`panel_arrange` packs rectangular boards as rectangles, trying each as it is
+and turned a quarter turn. A board that is not a rectangle, or a panel whose
+`rotationStep` setting is not 90, is nested by its real outline instead: each
+board is tried at every multiple of the step (plus the quarter turns) and
+dropped where its grown outline overlaps nothing, so pentagons interlock and
+an L-shaped board tucks into a corner. Set the step to match the shape:
+`panel_set_settings rotationStep=36` for pentagons, 60 for hexagons, 30 or 15
+for a finer search (slower). Tabs follow the outline edges, so two boards whose
+slanted edges face each other within the tab length are joined there, and a
+nested board that would be left without tabs is dropped again where it has
+them. Any instance can also be turned by hand to any angle with
+`panel_rotate_instance`.
 
 ### What the check looks for
 
@@ -300,7 +315,7 @@ flamingo panel export combo.plamingo --out fab/combo
 | `set-populate <file> <id> <true\|false>` | `panel_set_populate` |
 | `pin <file> <id> [--unpin]` | `panel_pin` |
 | `set <file> [--separation S] [--spacing MM] [--rail-top MM] ... [--layers auto\|2\|4\|6]` | `panel_set_settings` |
-| `arrange <file> [--no-rotate]` | `panel_arrange` |
+| `arrange <file> [--no-rotate] [--rotation-step DEG]` | `panel_arrange` |
 | `check <file>` | `panel_check` |
 | `screenshot <file> [--out F] [--width PX]` | `panel_screenshot` |
 | `quote <file> [--objective O] [--brief] [--json] [--offline]` | `quote_order` |
