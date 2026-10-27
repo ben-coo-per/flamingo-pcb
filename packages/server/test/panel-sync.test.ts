@@ -325,7 +325,7 @@ describe('panel sync: MCP, HTTP and WebSocket act on one panel', () => {
       panels: Array<{ name: string }>;
       boards: Array<{ name: string; onPanel: boolean }>;
     };
-    expect(files.current).toBe(join(dir, 'combo.plamingo'));
+    expect(files.current).toBe(join(dir, 'combo.flamboyance'));
     expect(files.panels.map((p) => p.name)).toEqual(['combo']);
     expect(files.boards.map((b) => [b.name, b.onPanel]).sort()).toEqual([
       ['mini', true],
@@ -352,6 +352,6 @@ describe('panel sync: MCP, HTTP and WebSocket act on one panel', () => {
   it('an unsaved panel gets a file as soon as it gains a board', async () => {
     expect(started.panel!.doc.filePath).toBeUndefined();
     await post('/api/panel/add-board', { path: 'mini.flamingo' });
-    expect(started.panel!.doc.filePath).toBe(join(dir, 'panel.plamingo'));
+    expect(started.panel!.doc.filePath).toBe(join(dir, 'panel.flamboyance'));
   });
 });

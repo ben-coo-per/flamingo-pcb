@@ -53,15 +53,15 @@ node packages/server/dist/cli.js serve board.flamingo   # prints "Flamingo v0.1.
 
 ## Panels (several boards fabricated as one piece)
 
-A **panel** is a `.plamingo` file next to the boards that places copies
+A **panel** is a `.flamboyance` file next to the boards that places copies
 ("instances") of one or more board files on one fabrication panel. See "Panels
 and order cost" in `README.md` for every tool and the matching `flamingo panel`
 CLI commands. It is served in one of two ways:
 
-- `flamingo serve combo.plamingo`: like a board file, on its own. The panel
+- `flamingo serve combo.flamboyance`: like a board file, on its own. The panel
   view is at `http://localhost:4242`, and `/mcp` has the 24 panel tools and
   **no board tools**. The file is created if it is missing.
-- `flamingo serve board.flamingo --panel combo.plamingo`: the board's server
+- `flamingo serve board.flamingo --panel combo.flamboyance`: the board's server
   with the panel added. All 61 tools at one `/mcp`; the panel view is at
   `/panel`. Use this when one session designs boards and panelizes them.
 

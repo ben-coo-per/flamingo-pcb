@@ -629,7 +629,7 @@ async function main(): Promise<void> {
     assert((await page.locator('#curve-price').count()) === 0, 'a quantity priced before is offered for pricing again');
     assert((await page.locator('#cost-curve svg .pt.entered[data-q="7"]').count()) === 2, 'the entered quantity left the curve when the need moved on');
     await page.waitForTimeout(1200); // the debounced save
-    const onDisk = JSON.parse(await readFile(join(projectDir, 'combo.plamingo'), 'utf8')) as { curve?: { entered: number[]; points: Array<{ quantity: number }> } };
+    const onDisk = JSON.parse(await readFile(join(projectDir, 'combo.flamboyance'), 'utf8')) as { curve?: { entered: number[]; points: Array<{ quantity: number }> } };
     assert(onDisk.curve !== undefined && onDisk.curve.entered.includes(7), 'the entered quantity is not in the panel file');
     assert(onDisk.curve.points.some((pt) => pt.quantity === 7), 'the priced point is not in the panel file');
     console.log(`  7 entered and priced on request: a filled point on the curve, kept in the file with ${onDisk.curve.points.length} priced points; clicking 12 set both boards to 12`);
@@ -1070,7 +1070,7 @@ async function main(): Promise<void> {
       await solo.waitForFunction('window.flamingoPanel && window.flamingoPanel.state().view !== null');
       await solo.waitForFunction("document.getElementById('status-conn').textContent === 'connected'");
       assert((await solo.title()) === 'Flamingo — Panel', `the page at the root is titled "${await solo.title()}"`);
-      assert(((await solo.locator('#panel-file').textContent()) ?? '').endsWith('alone.plamingo'), `the panel file reads "${await solo.locator('#panel-file').textContent()}"`);
+      assert(((await solo.locator('#panel-file').textContent()) ?? '').endsWith('alone.flamboyance'), `the panel file reads "${await solo.locator('#panel-file').textContent()}"`);
       assert(!(await solo.locator('a.bar-link').isVisible()), 'there is a link to an editor this server does not have');
       await solo.locator('#board-add button.add-board', { hasText: 'esp32-breakout' }).click();
       await solo.waitForFunction('window.flamingoPanel.state().view.panel.sources.length === 1');
@@ -1080,7 +1080,7 @@ async function main(): Promise<void> {
       assert(soloErrors.length === 0, `the page logged errors:\n${soloErrors.join('\n')}`);
       const png = await solo.screenshot({ path: join(SHOTS_DIR, '15-served-on-its-own.png') });
       assert(png.length > 0, 'no screenshot');
-      shots.push(['15-served-on-its-own.png', 'A panel file served on its own (`flamingo serve alone.plamingo`): the same view, at the root of its own port, with no link to a board editor.']);
+      shots.push(['15-served-on-its-own.png', 'A panel file served on its own (`flamingo serve alone.flamboyance`): the same view, at the root of its own port, with no link to a board editor.']);
       console.log('  screenshot 15-served-on-its-own.png');
       await solo.close();
     } finally {

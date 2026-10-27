@@ -46,7 +46,7 @@ describe('PanelDoc', () => {
   });
 
   it('save writes the panel atomically and load reads it back', async () => {
-    const file = join(dir, 'p.plamingo');
+    const file = join(dir, 'p.flamboyance');
     const doc = new PanelDoc(newPanel('p'), file, 10_000);
     doc.apply(ADD);
     doc.apply({ op: 'addInstance', source: 'A', at: { x: 3, y: 4 } });
@@ -62,7 +62,7 @@ describe('PanelDoc', () => {
   });
 
   it('autosaves after the debounce', async () => {
-    const file = join(dir, 'p.plamingo');
+    const file = join(dir, 'p.flamboyance');
     const doc = new PanelDoc(newPanel('p'), file, 20);
     doc.apply(ADD);
     await new Promise((r) => setTimeout(r, 80));
@@ -70,7 +70,7 @@ describe('PanelDoc', () => {
   });
 
   it('close flushes a pending save', async () => {
-    const file = join(dir, 'p.plamingo');
+    const file = join(dir, 'p.flamboyance');
     const doc = new PanelDoc(newPanel('p'), file, 10_000);
     doc.apply(ADD);
     await doc.close();
@@ -85,7 +85,7 @@ describe('PanelDoc', () => {
   });
 
   it('reset with persist=false does not rewrite the file it just read', async () => {
-    const file = join(dir, 'p.plamingo');
+    const file = join(dir, 'p.flamboyance');
     const original = JSON.stringify(JSON.parse(serializePanel(newPanel('compact'))));
     await writeFile(file, original);
     const doc = new PanelDoc(newPanel('other'), undefined, 10);
@@ -99,7 +99,7 @@ describe('PanelDoc', () => {
   });
 
   it('saves in flight together land in call order', async () => {
-    const file = join(dir, 'p.plamingo');
+    const file = join(dir, 'p.flamboyance');
     const one = new PanelDoc(newPanel('p'));
     one.apply(ADD);
     one.apply({ op: 'addInstance', source: 'A' });
@@ -116,7 +116,7 @@ describe('PanelDoc', () => {
   });
 
   it('an edit made while a save is writing is still saved by close', async () => {
-    const file = join(dir, 'p.plamingo');
+    const file = join(dir, 'p.flamboyance');
     const doc = new PanelDoc(newPanel('p'), file, 10_000);
     doc.apply(ADD);
     const saving = doc.save();
@@ -127,7 +127,7 @@ describe('PanelDoc', () => {
   });
 
   it('a failed save does not stop later ones', async () => {
-    const file = join(dir, 'missing-dir', 'p.plamingo');
+    const file = join(dir, 'missing-dir', 'p.flamboyance');
     const doc = new PanelDoc(newPanel('p'), file, 10_000);
     doc.apply(ADD);
     await expect(doc.save()).rejects.toThrow();
@@ -163,7 +163,7 @@ describe('PanelDoc stored curve', () => {
   });
 
   it('is saved with the file, kept out of the ops, and not undone', async () => {
-    const file = join(dir, 'p.plamingo');
+    const file = join(dir, 'p.flamboyance');
     const doc = new PanelDoc(newPanel('p'), file, 10_000);
     doc.apply(ADD);
     let changes = 0;
@@ -185,7 +185,7 @@ describe('PanelDoc stored curve', () => {
   });
 
   it('the same curve again schedules no save', async () => {
-    const file = join(dir, 'p.plamingo');
+    const file = join(dir, 'p.flamboyance');
     const doc = new PanelDoc(newPanel('p'), file, 10_000);
     await doc.save();
     const before = await readFile(file, 'utf8');

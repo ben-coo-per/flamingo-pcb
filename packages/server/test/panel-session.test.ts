@@ -133,7 +133,7 @@ describe('PanelSession cost curve', () => {
     await session.save();
     const other = testSession(dir, { watchMs: 0 });
     try {
-      expect((await other.open(join(dir, 'p.plamingo'))).ok).toBe(true);
+      expect((await other.open(join(dir, 'p.flamboyance'))).ok).toBe(true);
       const third = await other.costCurve();
       expect(third.priced).toBe(0);
       expect(third.points).toEqual(second.points);

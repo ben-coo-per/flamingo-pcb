@@ -12,8 +12,8 @@ import { PanelSession } from './panel/session.js';
 import { fetchPart } from '@flamingo/parts';
 
 const VERSION = createRequire(import.meta.url)('../package.json').version as string;
-/** What panel files were called before they were `.plamingo`. */
-const OLD_PANEL_EXTENSION = '.flamingo-panel';
+/** What panel files were called before they were `.flamboyance`. */
+const OLD_PANEL_EXTENSIONS = ['.flamingo-panel', '.plamingo'];
 
 function priceLookup(lcsc: string): Promise<number | undefined> {
   return fetchPart(lcsc).then((part) => part.info.price);
@@ -145,7 +145,7 @@ async function main(): Promise<void> {
   }
   const file = rest[0] ?? './board.flamingo';
   for (const f of [file, panelArg]) {
-    if (f?.endsWith(OLD_PANEL_EXTENSION)) {
+    if (f && OLD_PANEL_EXTENSIONS.some((ext) => f.endsWith(ext))) {
       throw new Error(`${f}: panel files end in ${PANEL_EXTENSION} now. Rename the file; its contents are unchanged.`);
     }
   }

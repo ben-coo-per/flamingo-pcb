@@ -142,7 +142,7 @@ JLCPCB's limits, estimates what it costs against the alternatives, and exports
 one fileset for the whole panel.
 
 ```bash
-node packages/server/dist/cli.js serve combo.plamingo    # prints "Flamingo v0.1.0 serving …"
+node packages/server/dist/cli.js serve combo.flamboyance    # prints "Flamingo v0.1.0 serving …"
 ```
 
 A panel file is served the way a board file is: one file, one server, its view
@@ -155,10 +155,10 @@ To have the board tools and the panel tools at one MCP endpoint, serve a board
 and name the panel. The panel view is then at `/panel`:
 
 ```bash
-node packages/server/dist/cli.js serve board.flamingo --panel combo.plamingo
+node packages/server/dist/cli.js serve board.flamingo --panel combo.flamboyance
 ```
 
-A panel is a `.plamingo` file stored next to the boards. It refers to each
+A panel is a `.flamboyance` file stored next to the boards. It refers to each
 source board by relative path plus a content hash and never copies it, so a
 board edited after it was added marks the panel **stale** until
 `panel_refresh_boards` accepts the change. Every edit is an operation with
@@ -177,7 +177,7 @@ boards + quantities → quote_order → panel_apply_scenario → panel_check →
 
 | Group | Tool | What it does |
 | --- | --- | --- |
-| **File** | `panel_new` | Create an empty panel and save it as `<name>.plamingo`. |
+| **File** | `panel_new` | Create an empty panel and save it as `<name>.flamboyance`. |
 | | `panel_open` | Open a panel file. |
 | | `panel_save` | Save now (edits also autosave). |
 | | `panel_get_state` | Text summary: size, settings, boards and quantities, every instance, check and cost totals. |
@@ -293,14 +293,14 @@ and `FLAMINGO_PANEL_PRICES=off` to skip part price lookups.
 Every tool has a command that works on a panel file directly, no server needed:
 
 ```bash
-flamingo panel new combo.plamingo --name combo
-flamingo panel add-board combo.plamingo esp32.flamingo --key S --needed 1
-flamingo panel add-board combo.plamingo breakout.flamingo --key M --needed 5
-flamingo panel quote combo.plamingo
-flamingo panel apply-scenario combo.plamingo merged-needed-x2
-flamingo panel check combo.plamingo        # exit status 1 on errors
-flamingo panel screenshot combo.plamingo --out combo.png
-flamingo panel export combo.plamingo --out fab/combo
+flamingo panel new combo.flamboyance --name combo
+flamingo panel add-board combo.flamboyance esp32.flamingo --key S --needed 1
+flamingo panel add-board combo.flamboyance breakout.flamingo --key M --needed 5
+flamingo panel quote combo.flamboyance
+flamingo panel apply-scenario combo.flamboyance merged-needed-x2
+flamingo panel check combo.flamboyance        # exit status 1 on errors
+flamingo panel screenshot combo.flamboyance --out combo.png
+flamingo panel export combo.flamboyance --out fab/combo
 ```
 
 | Command | MCP tool |

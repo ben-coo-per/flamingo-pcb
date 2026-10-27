@@ -141,7 +141,7 @@ describe('a panel notices its boards changing on disk', () => {
   });
 });
 
-describe('flamingo serve <file.plamingo>', () => {
+describe('flamingo serve <file.flamboyance>', () => {
   const cli = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'cli.js');
   let dir: string;
   let child: ChildProcess | undefined;
@@ -176,23 +176,25 @@ describe('flamingo serve <file.plamingo>', () => {
   }
 
   it.skipIf(!existsSync(cli))('creates the file if it is missing and serves its view at the root', async () => {
-    expect(PANEL_EXTENSION).toBe('.plamingo');
-    const { out } = await run(['serve', 'combo.plamingo'], /serving combo\.plamingo at http:\/\/localhost:(\d+)/);
+    expect(PANEL_EXTENSION).toBe('.flamboyance');
+    const { out } = await run(['serve', 'combo.flamboyance'], /serving combo\.flamboyance at http:\/\/localhost:(\d+)/);
     const port = /http:\/\/localhost:(\d+)/.exec(out)?.[1];
     expect(port, out).toBeTruthy();
     expect(out).not.toContain('/panel');
 
-    const panel = parsePanel(await readFile(join(dir, 'combo.plamingo'), 'utf8'));
+    const panel = parsePanel(await readFile(join(dir, 'combo.flamboyance'), 'utf8'));
     expect(panel.name).toBe('combo');
     const view = (await (await fetch(`http://localhost:${port}/api/panel`)).json()) as PanelView;
-    expect(view.filePath).toBe(join(dir, 'combo.plamingo'));
+    expect(view.filePath).toBe(join(dir, 'combo.flamboyance'));
     expect((await fetch(`http://localhost:${port}/`)).status).toBe(200);
   });
 
-  it.skipIf(!existsSync(cli))('says what to do with a file that has the old extension', async () => {
-    const { out, code } = await run(['serve', 'combo.flamingo-panel'], /\n$^/);
-    expect(code).toBe(1);
-    expect(out).toContain('panel files end in .plamingo now');
-    expect(existsSync(join(dir, 'combo.flamingo-panel'))).toBe(false);
-  });
+  for (const old of ['combo.flamingo-panel', 'combo.plamingo']) {
+    it.skipIf(!existsSync(cli))(`says what to do with a file that has the old extension (${old})`, async () => {
+      const { out, code } = await run(['serve', old], /\n$^/);
+      expect(code).toBe(1);
+      expect(out).toContain('panel files end in .flamboyance now');
+      expect(existsSync(join(dir, old))).toBe(false);
+    });
+  }
 });

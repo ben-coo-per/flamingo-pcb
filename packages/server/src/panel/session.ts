@@ -427,7 +427,7 @@ export class PanelSession extends EventEmitter {
     return resolve(isAbsolute(path) ? path : join(this.projectDir, path));
   }
 
-  /** Create an empty panel and save it as `<projectDir>/<name>.plamingo` (or at `path`). */
+  /** Create an empty panel and save it as `<projectDir>/<name>.flamboyance` (or at `path`). */
   async create(name: string, path?: string): Promise<Outcome<{ filePath: string }>> {
     const filePath = path
       ? this.resolvePath(path.endsWith(PANEL_EXTENSION) ? path : `${path}${PANEL_EXTENSION}`)

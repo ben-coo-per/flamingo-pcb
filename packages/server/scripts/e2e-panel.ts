@@ -299,9 +299,9 @@ async function main(): Promise<void> {
     console.log(`  tracespace parsed ${gerbers} gerbers + ${drills} drill files clean`);
     summary.push(['Gerbers parsed', `${gerbers} gerber + ${drills} drill`]);
 
-    const panel = parsePanel(await readFile(join(projectDir, 'combo.plamingo'), 'utf8').catch(async () => {
+    const panel = parsePanel(await readFile(join(projectDir, 'combo.flamboyance'), 'utf8').catch(async () => {
       await call('panel_save');
-      return readFile(join(projectDir, 'combo.plamingo'), 'utf8');
+      return readFile(join(projectDir, 'combo.flamboyance'), 'utf8');
     }));
     const npth = entries.find((e) => e.entryName === 'combo-NPTH.DRL')!.getData().toString('utf8');
     assert(/T\d+C0\.600/.test(npth), 'no 0.6 mm mouse-bite tool in the non-plated drill file');
@@ -406,7 +406,7 @@ async function main(): Promise<void> {
     // --- keep the artifacts ------------------------------------------------
     step(`save + copy artifacts to ${OUT_DIR}`);
     await call('panel_save');
-    for (const f of [`${ESP32.name}.flamingo`, `${BREAKOUT.name}.flamingo`, 'combo.plamingo']) {
+    for (const f of [`${ESP32.name}.flamingo`, `${BREAKOUT.name}.flamingo`, 'combo.flamboyance']) {
       await copyFile(join(projectDir, f), join(OUT_DIR, f));
     }
     await mkdir(join(OUT_DIR, 'fab'), { recursive: true });

@@ -10,7 +10,7 @@ import { parsePanelCurve } from './curve.js';
 import { normalizeRotation } from './poly.js';
 import type { Panel, PanelInstance, PanelSettings, PanelSource } from './types.js';
 
-export const PANEL_EXTENSION = '.plamingo';
+export const PANEL_EXTENSION = '.flamboyance';
 
 /**
  * Settings a new panel starts with. The numbers mirror
