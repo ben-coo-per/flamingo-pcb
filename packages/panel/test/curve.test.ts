@@ -7,7 +7,7 @@ describe('costCurve', () => {
   const r = resolved('M', plainBoard('mini', 30, 20));
   const req = {
     name: 'p',
-    sources: [{ key: 'M', path: 'mini.flamingo', hash: 'h', name: 'mini', needed: 1, niceToHave: 0 }],
+    sources: [{ key: 'M', path: 'mini.flamingo', hash: 'h', name: 'mini', needed: 1 }],
     resolved: [r],
     settings: DEFAULT_SETTINGS,
     limits: LIMITS,

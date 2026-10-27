@@ -49,7 +49,7 @@ export function costCurve(req: QuoteRequest, quantities: readonly number[] = CUR
     if (!Number.isInteger(quantity) || quantity < 1) continue;
     const q = quoteOrder({
       ...req,
-      sources: designs.map((s) => ({ ...s, needed: quantity, niceToHave: 0 })),
+      sources: designs.map((s) => ({ ...s, needed: quantity })),
     });
     const best = q.scenarios[0];
     if (!best) {
