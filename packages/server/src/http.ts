@@ -75,10 +75,32 @@ function isAllowedOrigin(origin: string | undefined): boolean {
   if (!origin) return true;
   try {
     const { hostname } = new URL(origin);
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'; // WHATWG URL keeps IPv6 brackets
+    return (
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname === '[::1]' || // WHATWG URL keeps IPv6 brackets
+      extraAllowedHosts().has(hostname.toLowerCase())
+    );
   } catch {
     return false;
   }
+}
+
+/**
+ * Hostnames to trust besides loopback, from FLAMINGO_ALLOWED_HOSTS
+ * (comma-separated, e.g. `FLAMINGO_ALLOWED_HOSTS=bennet`): for a server bound to
+ * a LAN or tailnet address and opened by that name from another machine, whose
+ * page would otherwise be refused its WebSocket and every edit. Empty by default,
+ * so the guard stays loopback-only unless the person serving opts in. Read on each
+ * call, so a test or a long-lived process sees the current value.
+ */
+function extraAllowedHosts(): Set<string> {
+  return new Set(
+    (process.env.FLAMINGO_ALLOWED_HOSTS ?? '')
+      .split(',')
+      .map((h) => h.trim().toLowerCase())
+      .filter(Boolean),
+  );
 }
 
 function sendJSON(res: ServerResponse, status: number, body: unknown): void {
