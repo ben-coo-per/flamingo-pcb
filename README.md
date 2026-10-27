@@ -147,7 +147,7 @@ node packages/server/dist/cli.js serve combo.plamingo    # prints "Flamingo v0.1
 
 A panel file is served the way a board file is: one file, one server, its view
 at `http://localhost:4242` (`FLAMINGO_PORT` to change the port), the file
-created if it is missing. The server has the 23 panel tools at `/mcp` and no
+created if it is missing. The server has the 24 panel tools at `/mcp` and no
 board tools; boards are edited in servers of their own, and the panel notices
 when one of its boards changes on disk.
 
@@ -170,7 +170,7 @@ boards + quantities → quote_order → panel_apply_scenario → panel_check →
 
 ### Panel MCP tools
 
-23 tools, served at the same `/mcp` endpoint as the 37 board tools:
+24 tools, served at the same `/mcp` endpoint as the 37 board tools:
 
 | Group | Tool | What it does |
 | --- | --- | --- |
