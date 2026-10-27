@@ -577,7 +577,12 @@ async function main(): Promise<void> {
     await until("v.panel.sources.find((s) => s.key === 'M').needed === 5", 'needed 5 for M');
 
     // --- scenarios ---------------------------------------------------------
-    step('the cost-by-quantity chart is priced on request, fills in as it goes, and a point sets the quantity');
+    step('the cost-by-quantity chart is for one design, priced on request, fills in as it goes, and a point sets the quantity');
+    // Two designs: no chart (a quantity would be one number per design).
+    assert(await page.locator('#cost-curve').isHidden(), 'the chart is shown for a panel of two designs');
+    assert(await page.locator('#cost-curve').evaluate((el) => (el.closest('.sub') as HTMLElement).hidden), 'the chart section (with its heading) is not hidden for two designs');
+    await post('/api/panel/op', { op: 'removeSource', key: 'S' });
+    await until('v.panel.sources.length === 1', 'one design on the panel');
     // Nothing is priced until asked: the section offers to, and no points are drawn.
     await page.locator('#curve-price').waitFor({ timeout: 10000 });
     assert((await page.locator('#cost-curve svg .pt').count()) === 0, 'the chart was priced without being asked');
@@ -594,13 +599,14 @@ async function main(): Promise<void> {
     const points = await page.locator('#cost-curve svg .pt').count();
     assert(points >= 20, `the chart has ${points} points (two charts of at least ten)`);
     assert((await page.locator('#curve-price').count()) === 0, 'the chart still offers to price when nothing is missing');
+    assert((await page.locator('#cost-curve svg .now').count()) === 1, 'the needed quantity is not marked on the chart');
     const chart = page.locator('#cost-curve svg');
     await chart.scrollIntoViewIfNeeded();
     const cb = (await chart.boundingBox())!;
     await chart.hover({ position: { x: cb.width * 0.6, y: cb.height * 0.3 } });
     await page.locator('#cost-curve .chart-note.chart-tip').waitFor({ timeout: 5000 });
     const tipText = await text('#cost-curve .chart-note');
-    assert(/\d+ boards?( of each)?: \$[\d.]+ each, \$[\d.]+ in all/.test(tipText), `the chart tooltip reads "${tipText}"`);
+    assert(/\d+ boards?: \$[\d.]+ each, \$[\d.]+ in all/.test(tipText), `the chart tooltip reads "${tipText}"`);
     console.log(`  ${midway.replace(/\s+/g, ' ')} while it ran; ${points / 2} quantities priced; hover: ${tipText.replace(/\s+/g, ' ')}`);
     // A quantity entered in step 1 goes on the curve once priced (on request again), stays there, and is kept in the panel file.
     await needed.fill('7');
@@ -613,18 +619,15 @@ async function main(): Promise<void> {
     await page.locator('#cost-curve svg .pt.entered[data-q="7"]').first().waitFor({ timeout: 60000 });
     await page.waitForFunction('window.flamingoPanel.state().curvePricing === null', undefined, { timeout: 60000 });
     assert((await page.locator('#cost-curve svg .pt.entered[data-q="7"]').count()) === 2, 'the entered quantity is not a filled point on both charts');
-    // A click on a point makes it the quantity of every design.
+    // A click on a point makes it the quantity.
     const pick = page.locator('#cost-curve svg .pt[data-q="12"]').first();
     await pick.scrollIntoViewIfNeeded();
     await pick.click({ force: true });
-    await until("v.panel.sources.every((s) => s.needed === 12)", 'needed 12 for both boards after clicking the point');
+    await until("v.panel.sources[0].needed === 12", 'needed 12 after clicking the point');
     assert((await needed.inputValue()) === '12', `the needed field shows ${await needed.inputValue()} after the click`);
     await needed.fill('5');
     await needed.press('Enter');
     await until("v.panel.sources.find((s) => s.key === 'M').needed === 5", 'needed 5 for M');
-    await page.locator('#board-list .board[data-key="S"] input[data-field="needed"]').fill('1');
-    await page.locator('#board-list .board[data-key="S"] input[data-field="needed"]').press('Enter');
-    await until("v.panel.sources.find((s) => s.key === 'S').needed === 1", 'needed 1 for S');
     await page.waitForFunction("window.flamingoPanel.state().curve && window.flamingoPanel.state().curve.missing.length === 0 && window.flamingoPanel.state().curve.points.some((p) => p.quantity === 7)", undefined, { timeout: 60000 });
     assert((await page.locator('#curve-price').count()) === 0, 'a quantity priced before is offered for pricing again');
     assert((await page.locator('#cost-curve svg .pt.entered[data-q="7"]').count()) === 2, 'the entered quantity left the curve when the need moved on');
@@ -632,10 +635,14 @@ async function main(): Promise<void> {
     const onDisk = JSON.parse(await readFile(join(projectDir, 'combo.flamboyance'), 'utf8')) as { curve?: { entered: number[]; points: Array<{ quantity: number }> } };
     assert(onDisk.curve !== undefined && onDisk.curve.entered.includes(7), 'the entered quantity is not in the panel file');
     assert(onDisk.curve.points.some((pt) => pt.quantity === 7), 'the priced point is not in the panel file');
-    console.log(`  7 entered and priced on request: a filled point on the curve, kept in the file with ${onDisk.curve.points.length} priced points; clicking 12 set both boards to 12`);
+    console.log(`  7 entered and priced on request: a filled point on the curve, kept in the file with ${onDisk.curve.points.length} priced points; clicking 12 set the quantity to 12`);
     await page.locator('#cost-curve').screenshot({ path: join(SHOTS_DIR, '17b-cost-curve-chart.png') });
-    shots.push(['17b-cost-curve-chart.png', 'The cost-by-quantity chart alone, for a panel of two designs: each quantity is that many of each design, per board is the average over all of them.']);
-    await shot('17-cost-curve', 'Cost by quantity, priced on request: per-board and total cost of the cheapest way at each quantity. Filled points are quantities that were entered; they stay on the curve and are kept in the panel file. Clicking a point orders that many.');
+    shots.push(['17b-cost-curve-chart.png', 'The cost-by-quantity chart alone: the cheapest way to order each number of boards, the needed quantity a dashed rule, entered quantities filled.']);
+    await shot('17-cost-curve', 'Cost by quantity for a panel of one design, priced on request: per-board and total cost of the cheapest way at each quantity. Filled points are quantities that were entered; they stay on the curve and are kept in the panel file. Clicking a point orders that many.');
+    // Back to the panel of the brief: the four ops of this step undone (remove S, 7, 12, 5).
+    for (let i = 0; i < 4; i++) await post('/api/panel/undo');
+    await until("v.panel.sources.length === 2 && v.panel.sources.find((s) => s.key === 'M').needed === 5", 'both boards back, M needed 5');
+    assert(await page.locator('#cost-curve').isHidden(), 'the chart stayed once the second design was back');
 
     step('picking a way to order puts its panel on the plate, with its cost');
     await page.waitForFunction("document.querySelectorAll('#option-list [data-option]').length >= 5");

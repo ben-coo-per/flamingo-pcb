@@ -173,6 +173,11 @@ function refreshCurve(view: PanelView, force = false): void {
   curveFor = key;
   const seq = ++curveSeq;
   if (store.get().curvePricing) store.set({ curvePricing: null });
+  // The chart is for a panel of one design; with several there is nothing to fetch.
+  if (view.panel.sources.length !== 1) {
+    if (store.get().curve || store.get().curveError) store.set({ curve: null, curveError: null, curveRev: store.get().curveRev + 1 });
+    return;
+  }
   void (async () => {
     const r = await api.costCurve({ price: false });
     if (seq !== curveSeq) return;

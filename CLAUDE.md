@@ -81,7 +81,8 @@ at 4242.
 5. `panel_cost_curve` for the cost at each quantity. Every `needed` a board
    has been set to joins the curve; the points live in the panel file under
    `curve` (a cache, dropped when a board, setting or fee changes) so a
-   quantity priced once is free to come back to.
+   quantity priced once is free to come back to. The panel view charts it
+   only for a panel of one design, and only when asked (a button).
 
 Conventions:
 

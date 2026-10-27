@@ -483,11 +483,15 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
 
   function curve(state: PanelState): void {
     const view = state.view!;
+    // One design only: with several, a quantity is one number per design and
+    // the cost is a surface over all of them, which this chart cannot show.
     const needed = view.panel.sources.length === 1 ? view.panel.sources[0]!.needed : null;
     const pricing = state.curvePricing;
     const missing = state.curve?.missing.length ?? 0;
     once('curve', `${state.curveRev}/${state.curveError}/${needed}/${view.sources.length}/${pricing ? `${pricing.done}/${pricing.total}` : ''}/${missing}`, () => {
-      if (view.sources.length === 0) {
+      const section = els.costCurve.closest<HTMLElement>('.sub') ?? els.costCurve;
+      section.hidden = needed === null;
+      if (needed === null) {
         els.costCurve.innerHTML = '';
         return;
       }
