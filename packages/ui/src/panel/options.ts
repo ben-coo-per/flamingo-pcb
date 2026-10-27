@@ -69,12 +69,9 @@ function cents(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-/** Boards delivered that were asked for: needed ones, and wished-for ones that come along. */
+/** Needed boards the order delivers. */
 export function boardsAskedFor(received: Received[]): number {
-  return received.reduce((n, r) => {
-    const wished = Math.max(r.needed, r.niceToHave);
-    return n + Math.min(r.assembled + (r.niceToHave > r.needed ? r.bare : 0), wished);
-  }, 0);
+  return received.reduce((n, r) => n + Math.min(r.assembled, r.needed), 0);
 }
 
 /**
@@ -90,7 +87,7 @@ export function minimumsReached(
   let toMake = 0;
   for (const c of order.counts) {
     const r = received.find((x) => x.key === c.key);
-    const want = r ? Math.max(r.needed, r.niceToHave) : 0;
+    const want = r ? r.needed : 0;
     if (want === 0) continue;
     const parts = (view.sources.find((s) => s.key === c.key)?.geometry?.partLines ?? 1) > 0;
     if (parts && c.populated > 0) toAssemble = Math.max(toAssemble, Math.ceil(want / c.populated));

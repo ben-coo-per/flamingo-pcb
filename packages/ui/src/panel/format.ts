@@ -39,9 +39,8 @@ export function receivedShort(received: Received[]): string {
 export function receivedLong(r: Received): string {
   const bits = [`${r.assembled} assembled`];
   if (r.bare > 0) bits.push(`${r.bare} bare`);
-  const need = r.niceToHave > r.needed ? `need ${r.needed}, nice to have ${r.niceToHave}` : `need ${r.needed}`;
   const verdict = r.shortfall > 0 ? `short by ${r.shortfall}` : r.overage > 0 ? `${r.overage} over` : 'exact';
-  return `${r.key}  ${bits.join(' + ')}  (${need}; ${verdict})`;
+  return `${r.key}  ${bits.join(' + ')}  (need ${r.needed}; ${verdict})`;
 }
 
 export function issueCounts(issues: PanelIssue[]): string {
@@ -88,11 +87,11 @@ export function curveKey(view: {
 }
 
 export function quoteKey(view: {
-  panel: { sources: Array<{ key: string; hash: string; needed: number; niceToHave: number }>; settings: unknown };
+  panel: { sources: Array<{ key: string; hash: string; needed: number }>; settings: unknown };
   sources: Array<{ key: string; stale: boolean; error?: string }>;
 }): string {
   return JSON.stringify([
-    view.panel.sources.map((s) => [s.key, s.hash, s.needed, s.niceToHave]),
+    view.panel.sources.map((s) => [s.key, s.hash, s.needed]),
     view.sources.map((s) => [s.key, s.stale, s.error ?? '']),
     view.panel.settings,
   ]);
@@ -179,8 +178,6 @@ export const SCENARIO_LABEL: Record<ScenarioKind, string> = {
 /** What sets a scenario apart from others of its kind, in a word or two each. */
 export function scenarioTags(s: Pick<Scenario, 'id' | 'promotedTo'>): string[] {
   const tags: string[] = [];
-  if (s.id.includes('-wish-')) tags.push('extras populated');
-  if (s.id.includes('-bare-')) tags.push('extras bare');
   if (s.promotedTo !== undefined) tags.push(`as ${s.promotedTo}-layer`);
   return tags;
 }

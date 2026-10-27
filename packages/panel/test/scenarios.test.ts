@@ -12,8 +12,8 @@ function priced(src: ResolvedSource, price: number): ResolvedSource {
   return { ...src, geometry: { ...src.geometry!, parts: src.geometry!.parts.map((p) => ({ ...p, unitPrice: price })) } };
 }
 
-function source(r: ResolvedSource, needed: number, niceToHave = 0): PanelSource {
-  return { key: r.key, path: r.path, hash: 'h', name: r.name, needed, niceToHave };
+function source(r: ResolvedSource, needed: number): PanelSource {
+  return { key: r.key, path: r.path, hash: 'h', name: r.name, needed };
 }
 
 /** A sensor board with an expensive extended part, and a cheap mini board. */
@@ -160,8 +160,8 @@ describe('quoteOrder: 1 sensor + 5 minis', () => {
 
   it('ranks by least overage when asked', () => {
     const r = quoteOrder(request([source(s, 1), source(m, 5)], [s, m], { objective: 'overage' }));
-    const unwanted = r.scenarios.map((x) => x.received.reduce((n, y) => n + y.unwanted, 0));
-    expect(unwanted).toEqual([...unwanted].sort((a, b) => a - b));
+    const overage = r.scenarios.map((x) => x.received.reduce((n, y) => n + y.overage, 0));
+    expect(overage).toEqual([...overage].sort((a, b) => a - b));
     expect(r.scenarios[0]!.id).not.toBe('merged-needed-x5'); // 4 sensors too many
     expect(new Set(r.scenarios.map((x) => x.id))).toEqual(new Set(result.scenarios.map((x) => x.id)));
   });
@@ -224,44 +224,16 @@ describe('layoutMatches', () => {
   });
 });
 
-describe('quoteOrder: nice-to-have and partial population', () => {
+describe('quoteOrder: quantities', () => {
   const { s, m } = boards();
 
-  it('adds variants that reach the nice-to-have quantity populated or bare', () => {
-    const r = quoteOrder(request([source(s, 2, 12), source(m, 5)], [s, m]));
-    const ids = r.scenarios.map((x) => x.id);
-    expect(ids.some((id) => id.startsWith('merged-wish-'))).toBe(true);
-    expect(ids.some((id) => id.startsWith('merged-bare-'))).toBe(true);
-
-    const bare = byId(r, 'merged-bare-x2');
-    expect(bare.partial).toBe(true);
-    // 2 sensors populated across 2 assembled panels, 12 wished for across 5 fabricated.
-    expect(bare.orders[0]!.counts.find((c) => c.key === 'S')).toEqual({ key: 'S', total: 3, populated: 1 });
-    expect(bare.received.find((x) => x.key === 'S')).toMatchObject({ assembled: 2, bare: 13, unwanted: 0 });
-    expect(bare.layout!.instances.filter((i) => i.source === 'S').map((i) => i.populate)).toEqual([true, false, false]);
-
-    const populated = byId(r, 'merged-wish-x2');
-    expect(populated.partial).toBe(false);
-    expect(populated.received.find((x) => x.key === 'S')).toMatchObject({ assembled: 12, unwanted: 0 });
-    // Bare spares cost board area; populated ones cost parts as well.
-    expect(bare.total).toBeLessThan(populated.total);
-  });
-
-  it('counts delivered nice-to-have boards in the cost per board', () => {
-    const r = quoteOrder(request([source(s, 2, 12), source(m, 5)], [s, m]));
+  it('counts only needed boards in the cost per board', () => {
+    const r = quoteOrder(request([source(s, 2), source(m, 5)], [s, m]));
     const needed = byId(r, 'merged-needed-x2');
-    const wish = byId(r, 'merged-wish-x2');
-    // Needed only: 2 S assembled + 3 bare spares, 6 of 5 M -> 2 + 3 + 5 boards asked for.
-    expect(needed.costPerNeededBoard).toBeCloseTo(needed.total / 10, 2);
-    expect(wish.costPerNeededBoard).toBeCloseTo(wish.total / 17, 2);
-  });
-
-  it('a design wanted only as a nice-to-have ships bare', () => {
-    const r = quoteOrder(request([source(s, 2), source(m, 0, 10)], [s, m]));
-    const bare = r.scenarios.find((x) => x.id.startsWith('merged-bare-'))!;
-    expect(bare.orders[0]!.counts.find((c) => c.key === 'M')).toMatchObject({ populated: 0 });
-    expect(bare.received.find((x) => x.key === 'M')!.assembled).toBe(0);
-    expect(bare.received.find((x) => x.key === 'M')!.bare).toBeGreaterThanOrEqual(10);
+    // 2 S assembled (3 more fabricated bare), 6 M for 5 needed -> 2 + 5 boards asked for.
+    expect(needed.received.find((x) => x.key === 'S')).toMatchObject({ assembled: 2, bare: 3 });
+    expect(needed.received.find((x) => x.key === 'M')).toMatchObject({ assembled: 6, overage: 1 });
+    expect(needed.costPerNeededBoard).toBeCloseTo(needed.total / 7, 2);
   });
 
   it('ignores designs nobody asked for', () => {

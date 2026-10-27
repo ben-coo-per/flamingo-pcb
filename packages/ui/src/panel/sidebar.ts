@@ -69,7 +69,7 @@ export interface SidebarEls {
 
 export interface SidebarActions {
   setCount(board: string, count: number): void;
-  setQuantity(board: string, field: 'needed' | 'niceToHave', value: number): void;
+  setQuantity(board: string, needed: number): void;
   /** Stop waiting for a new quote: quantities back, previous ways shown. */
   cancelQuote(): void;
   selectOption(id: string): void;
@@ -244,7 +244,7 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
     if (!input.matches('input.qty')) return;
     const value = Math.max(0, Math.floor(Number(input.value) || 0));
     input.value = String(value);
-    actions.setQuantity(input.dataset.board!, input.dataset.field as 'needed' | 'niceToHave', value);
+    actions.setQuantity(input.dataset.board!, value);
   });
   els.boardList.addEventListener('click', (ev) => {
     const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-refresh]');
@@ -292,7 +292,7 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
   // --- 1: boards you need ----------------------------------------------------
 
   function boards(view: PanelView): void {
-    const key = JSON.stringify(view.sources.map((s) => [s.key, s.name, s.stale, s.error, s.needed, s.niceToHave, s.geometry?.width, s.geometry?.height, s.geometry?.copperLayers]));
+    const key = JSON.stringify(view.sources.map((s) => [s.key, s.name, s.stale, s.error, s.needed, s.geometry?.width, s.geometry?.height, s.geometry?.copperLayers]));
     once('boards', key, () => {
       const keys = view.sources.map((s) => s.key);
       els.boardList.innerHTML = view.sources
@@ -312,7 +312,6 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
             `<div class="board-head"><span class="swatch">${k}</span><span class="board-name" title="${escapeHtml(s.path)}">${escapeHtml(s.name)}</span>${tags}<span class="board-meta">${size}</span></div>` +
             `<div class="board-controls">` +
             `<label title="Assembled boards of this design that you must end up with">needed <input class="qty" type="number" min="0" step="1" value="${s.needed}" data-board="${k}" data-field="needed" /></label>` +
-            `<label title="Boards of this design you would welcome if they come cheap, assembled or bare. 0 = no wish beyond needed">nice to have <input class="qty" type="number" min="0" step="1" value="${s.niceToHave}" data-board="${k}" data-field="niceToHave" /></label>` +
             `</div></div>`
           );
         })

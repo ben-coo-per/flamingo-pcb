@@ -140,7 +140,8 @@ export function parsePanel(json: string): Panel {
 
   const sources: PanelSource[] = parsed.sources.map((raw, i) => {
     if (!isObject(raw)) throw new Error(`sources[${i}] must be an object`);
-    const { key, path, hash, name, needed, niceToHave } = raw;
+    // An old file may carry a `niceToHave` quantity; it is ignored and not written back.
+    const { key, path, hash, name, needed } = raw;
     if (typeof key !== 'string' || key === '') throw new Error(`sources[${i}].key must be a non-empty string`);
     if (typeof path !== 'string' || path === '') throw new Error(`sources[${i}].path must be a non-empty string`);
     if (typeof hash !== 'string') throw new Error(`sources[${i}].hash must be a string`);
@@ -151,7 +152,6 @@ export function parsePanel(json: string): Panel {
       hash,
       name: typeof name === 'string' ? name : key,
       needed,
-      niceToHave: isCount(niceToHave) ? niceToHave : 0,
     };
   });
   const keys = new Set<string>();

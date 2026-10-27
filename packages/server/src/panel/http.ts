@@ -234,7 +234,7 @@ export async function handlePanelApi(
         sendJSON(res, 400, { ok: false, error: 'body must be {"path": "<board.flamingo>"}' });
         return true;
       }
-      const r = await session.addBoard(path, { key: str('key'), needed: num('needed'), niceToHave: num('niceToHave') });
+      const r = await session.addBoard(path, { key: str('key'), needed: num('needed') });
       sendJSON(res, r.ok ? 200 : 400, r);
       return true;
     }

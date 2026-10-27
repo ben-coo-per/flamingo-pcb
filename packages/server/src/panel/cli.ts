@@ -32,10 +32,10 @@ export const PANEL_USAGE = `Usage: flamingo panel <command> <file${PANEL_EXTENSI
 
   new <file> [--name NAME]                        create an empty panel
   show <file>                                     summary of the panel
-  add-board <file> <board.flamingo> [--key K] [--needed N] [--nice N]
+  add-board <file> <board.flamingo> [--key K] [--needed N]
   remove-board <file> <key>
   refresh <file> [key ...]                        accept source boards as they are on disk
-  set-quantity <file> <key> [--needed N] [--nice N]
+  set-quantity <file> <key> --needed N
   add-instance <file> <key> [--x X --y Y] [--rotation 0|90|180|270] [--bare] [--count N]
   remove-instance <file> <id>
   move-instance <file> <id> --x X --y Y [--no-pin]
@@ -186,7 +186,6 @@ export async function runPanelCli(argv: string[], io: PanelCliIo = { out: consol
         const r = await s.addBoard(resolve(process.cwd(), need(rest[0], 'board file')), {
           key: string(args, 'key'),
           needed: number(args, 'needed'),
-          niceToHave: number(args, 'nice'),
         });
         if (!r.ok) throw new Error(r.error);
         io.out(`Added board ${r.key} = "${r.name}" (${fmt(r.width)} x ${fmt(r.height)} mm, ${r.layers}-layer)`);
@@ -205,10 +204,10 @@ export async function runPanelCli(argv: string[], io: PanelCliIo = { out: consol
       }
       case 'set-quantity': {
         const key = need(rest[0], 'board key');
-        const r = s.apply({ op: 'setQuantity', key, needed: number(args, 'needed'), niceToHave: number(args, 'nice') });
+        const r = s.apply({ op: 'setQuantity', key, needed: number(args, 'needed') });
         if (!r.ok) throw new Error(r.error);
         const src = r.panel.sources.find((x) => x.key === key)!;
-        io.out(`${key}: need ${src.needed}, nice to have ${src.niceToHave}`);
+        io.out(`${key}: need ${src.needed}`);
         break;
       }
       case 'add-instance': {

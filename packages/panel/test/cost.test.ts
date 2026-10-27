@@ -279,15 +279,15 @@ describe('orders from panels', () => {
   it('counts what each design yields', () => {
     const panel = panelOf([s, m], [], [
       { op: 'setQuantity', key: 'S', needed: 1 },
-      { op: 'setQuantity', key: 'M', needed: 5, niceToHave: 6 },
+      { op: 'setQuantity', key: 'M', needed: 5 },
     ]);
     const counts = [
       { key: 'S', total: 1, populated: 1 },
       { key: 'M', total: 3, populated: 3 },
     ];
     expect(receivedFor(panel, counts, 5, 2, () => true)).toEqual([
-      { key: 'S', name: 'sensor', needed: 1, niceToHave: 0, assembled: 2, bare: 3, overage: 1, unwanted: 1, shortfall: 0 },
-      { key: 'M', name: 'mini', needed: 5, niceToHave: 6, assembled: 6, bare: 9, overage: 1, unwanted: 0, shortfall: 0 },
+      { key: 'S', name: 'sensor', needed: 1, assembled: 2, bare: 3, overage: 1, shortfall: 0 },
+      { key: 'M', name: 'mini', needed: 5, assembled: 6, bare: 9, overage: 1, shortfall: 0 },
     ]);
   });
 

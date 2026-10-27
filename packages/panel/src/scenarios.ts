@@ -13,11 +13,9 @@
  *   split         one panel per layer count, when the boards differ in layers
  *
  * Merged and silk-divider scenarios come in one variant per useful panel
- * count (2 panels of 3 boards, 5 panels of 1, ...), and, when a design has a
- * nice-to-have quantity, in variants that reach it with populated boards or
- * with bare ones (partial population). Boards with different layer counts can
- * only share a panel promoted to the highest count; `split` is the
- * alternative.
+ * count (2 panels of 3 boards, 5 panels of 1, ...). Boards with different
+ * layer counts can only share a panel promoted to the highest count; `split`
+ * is the alternative.
  *
  * Nothing here talks to JLCPCB. Every price comes from the fee table.
  */
@@ -83,17 +81,12 @@ export interface Scenario {
   summary: string;
   orders: ScenarioOrder[];
   total: number;
-  /**
-   * Total over the boards delivered that were asked for: needed boards, plus
-   * nice-to-have boards the order happens to deliver.
-   */
+  /** Total over the needed boards the order delivers. */
   costPerNeededBoard: number;
   received: Received[];
   lines: ScenarioLine[];
   /** Rests on at least one unverified number. */
   estimate: boolean;
-  /** Some instances ship bare. */
-  partial: boolean;
   /** Layer count the panel was promoted to, when it was. */
   promotedTo?: 2 | 4 | 6;
   warnings: string[];
@@ -118,7 +111,7 @@ export interface QuoteResult {
 
 export interface QuoteRequest {
   name: string;
-  /** Designs and quantities. Designs with nothing needed or wished for are ignored. */
+  /** Designs and quantities. Designs with nothing needed are ignored. */
   sources: PanelSource[];
   resolved: ResolvedSources;
   /** Settings panels are built with (rails, spacing, tabs). */
@@ -146,10 +139,6 @@ interface Ctx {
   rejected: RejectedScenario[];
 }
 
-function wish(s: PanelSource): number {
-  return Math.max(s.needed, s.niceToHave);
-}
-
 function received(ctx: Ctx, orders: ScenarioOrder[]): Received[] {
   return ctx.wanted.map((s) => {
     let assembled = 0;
@@ -166,16 +155,13 @@ function received(ctx: Ctx, orders: ScenarioOrder[]): Received[] {
         assembled += c.total * pcb; // nothing to place: a bare board is a finished board
       }
     }
-    const wished = wish(s);
     return {
       key: s.key,
       name: s.name,
       needed: s.needed,
-      niceToHave: s.niceToHave,
       assembled,
       bare,
       overage: Math.max(0, assembled - s.needed),
-      unwanted: Math.max(0, assembled - wished),
       shortfall: Math.max(0, s.needed - assembled),
     };
   });
@@ -264,7 +250,7 @@ function planPanel(ctx: Ctx, plan: PanelPlan): ScenarioOrder | string {
   for (const s of plan.designs) {
     ops.push({
       op: 'addSource',
-      source: { key: s.key, path: s.path, hash: s.hash, name: s.name, needed: s.needed, niceToHave: s.niceToHave },
+      source: { key: s.key, path: s.path, hash: s.hash, name: s.name, needed: s.needed },
     });
   }
   for (const c of plan.counts) {
@@ -416,10 +402,7 @@ function assemble(
   const lines: ScenarioLine[] = orders.flatMap((o) => o.priced.cost.lines.map((l) => ({ ...l, order: o.label })));
   const total = cents(orders.reduce((s, o) => s + o.priced.cost.total, 0));
   const got = received(ctx, orders);
-  const asked = got.reduce((n, r) => {
-    const wished = Math.max(r.needed, r.niceToHave);
-    return n + Math.min(r.assembled + (r.niceToHave > r.needed ? r.bare : 0), wished);
-  }, 0);
+  const asked = got.reduce((n, r) => n + Math.min(r.assembled, r.needed), 0);
   const warnings = [...extraWarnings];
   for (const o of orders) {
     for (const n of o.priced.cost.notes) {
@@ -434,7 +417,7 @@ function assemble(
   }
   for (const r of got) {
     if (r.shortfall > 0) warnings.push(`${r.key}: ${r.shortfall} of the ${r.needed} needed are not delivered`);
-    if (r.unwanted > 0) warnings.push(`${r.key}: ${r.unwanted} more assembled than asked for`);
+    if (r.overage > 0) warnings.push(`${r.key}: ${r.overage} more assembled than asked for`);
   }
   const panels = orders.filter((o) => o.panel);
   if (panels.length > 1) {
@@ -457,54 +440,10 @@ function assemble(
     received: got,
     lines,
     estimate: lines.some((l) => l.estimate),
-    partial: orders.some((o) => o.counts.some((c) => c.populated < c.total && ctx.hasParts(c.key))),
     ...(promotedTo !== undefined ? { promotedTo } : {}),
     warnings,
     layout: panels[0]?.layout ?? null,
   };
-}
-
-interface Variant {
-  /** Suffix for ids and titles. */
-  tag: string;
-  label: string;
-  /** Boards per panel for `asm` panels assembled of `pcb` fabricated. */
-  counts: (s: PanelSource, asm: number, pcb: number) => PieceCount;
-}
-
-function variants(ctx: Ctx, designs: PanelSource[]): Variant[] {
-  const out: Variant[] = [
-    {
-      tag: 'needed',
-      label: '',
-      counts: (s, asm, pcb) => {
-        const n = ctx.hasParts(s.key) ? Math.ceil(s.needed / asm) : Math.ceil(s.needed / pcb);
-        return { key: s.key, total: n, populated: ctx.hasParts(s.key) ? n : 0 };
-      },
-    },
-  ];
-  if (designs.some((s) => s.niceToHave > s.needed)) {
-    out.push({
-      tag: 'wish',
-      label: ', nice-to-have populated',
-      counts: (s, asm, pcb) => {
-        const n = ctx.hasParts(s.key) ? Math.ceil(wish(s) / asm) : Math.ceil(wish(s) / pcb);
-        return { key: s.key, total: n, populated: ctx.hasParts(s.key) ? n : 0 };
-      },
-    });
-    out.push({
-      tag: 'bare',
-      label: ', nice-to-have bare',
-      counts: (s, asm, pcb) => {
-        if (!ctx.hasParts(s.key)) return { key: s.key, total: Math.ceil(wish(s) / pcb), populated: 0 };
-        const populated = Math.ceil(s.needed / asm);
-        // Every fabricated panel carries the board, assembled or not.
-        const total = Math.max(populated, Math.ceil(wish(s) / pcb));
-        return { key: s.key, total, populated };
-      },
-    });
-  }
-  return out;
 }
 
 /** Every panel plan of one family over `designs`, deduplicated. */
@@ -513,37 +452,40 @@ function panelPlans(
   designs: PanelSource[],
   separation: Separation,
   layers: 'auto' | 2 | 4 | 6,
-): Array<PanelPlan & { tag: string; variantLabel: string }> {
+): Array<PanelPlan & { tag: string }> {
   const { fees } = ctx.req;
   const anyParts = designs.some((s) => ctx.hasParts(s.key) && s.needed > 0);
   const asmSteps = [...new Set([...fees.assembly.economic.qtySteps.value, ...fees.assembly.standard.qtySteps.value])];
-  const out: Array<PanelPlan & { tag: string; variantLabel: string }> = [];
+  const out: Array<PanelPlan & { tag: string }> = [];
   const seen = new Set<string>();
 
-  for (const v of variants(ctx, designs)) {
-    const targets = designs.map((s) => (v.tag === 'wish' ? wish(s) : Math.max(s.needed, 1)));
-    const counts = anyParts ? panelCounts(targets, asmSteps) : panelCounts(targets, fees.pcb.qtySteps.value);
-    for (const p of counts) {
-      const asm = anyParts ? p : 0;
-      const pcb = stepAtLeast(fees.pcb.qtySteps.value, p);
-      if (pcb === null) continue;
-      const perPanel = designs.map((s) => v.counts(s, Math.max(asm, 1), pcb)).filter((c) => c.total > 0);
-      if (perPanel.length === 0) continue;
-      const key = `${pcb}/${asm}/${perPanel.map((c) => `${c.key}:${c.total}:${c.populated}`).join(',')}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({
-        designs: designs.filter((s) => perPanel.some((c) => c.key === s.key)),
-        counts: perPanel,
-        separation,
-        layers,
-        pcbQty: pcb,
-        asmQty: asm,
-        label: `${describeCounts(perPanel)} per panel`,
-        tag: `${v.tag}-x${p}`,
-        variantLabel: v.label,
-      });
-    }
+  /** Boards of `s` per panel for `asm` panels assembled of `pcb` fabricated. */
+  const perDesign = (s: PanelSource, asm: number, pcb: number): PieceCount => {
+    const n = ctx.hasParts(s.key) ? Math.ceil(s.needed / asm) : Math.ceil(s.needed / pcb);
+    return { key: s.key, total: n, populated: ctx.hasParts(s.key) ? n : 0 };
+  };
+
+  const targets = designs.map((s) => Math.max(s.needed, 1));
+  const counts = anyParts ? panelCounts(targets, asmSteps) : panelCounts(targets, fees.pcb.qtySteps.value);
+  for (const p of counts) {
+    const asm = anyParts ? p : 0;
+    const pcb = stepAtLeast(fees.pcb.qtySteps.value, p);
+    if (pcb === null) continue;
+    const perPanel = designs.map((s) => perDesign(s, Math.max(asm, 1), pcb)).filter((c) => c.total > 0);
+    if (perPanel.length === 0) continue;
+    const key = `${pcb}/${asm}/${perPanel.map((c) => `${c.key}:${c.total}:${c.populated}`).join(',')}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      designs: designs.filter((s) => perPanel.some((c) => c.key === s.key)),
+      counts: perPanel,
+      separation,
+      layers,
+      pcbQty: pcb,
+      asmQty: asm,
+      label: `${describeCounts(perPanel)} per panel`,
+      tag: `needed-x${p}`,
+    });
   }
   return out;
 }
@@ -593,16 +535,15 @@ function cheapest(orders: ScenarioOrder[]): ScenarioOrder | null {
 }
 
 function rank(scenarios: Scenario[], objective: Objective): Scenario[] {
-  const unwanted = (s: Scenario): number => s.received.reduce((n, r) => n + r.unwanted, 0);
   const overage = (s: Scenario): number => s.received.reduce((n, r) => n + r.overage, 0);
   const key = (s: Scenario): number[] => {
     switch (objective) {
       case 'total':
-        return [s.total, unwanted(s), s.orders.length];
+        return [s.total, overage(s), s.orders.length];
       case 'per-board':
         return [s.costPerNeededBoard, s.total, s.orders.length];
       case 'overage':
-        return [unwanted(s), overage(s), s.total];
+        return [overage(s), s.total];
     }
   };
   return [...scenarios].sort((a, b) => {
@@ -619,7 +560,7 @@ function rank(scenarios: Scenario[], objective: Objective): Scenario[] {
 export function quoteOrder(req: QuoteRequest): QuoteResult {
   const t0 = performance.now();
   const objective = req.objective ?? 'total';
-  const wanted = req.sources.filter((s) => wish(s) > 0);
+  const wanted = req.sources.filter((s) => s.needed > 0);
   const ctx: Ctx = {
     req,
     wanted,
@@ -632,7 +573,7 @@ export function quoteOrder(req: QuoteRequest): QuoteResult {
   };
 
   if (wanted.length === 0) {
-    return { objective, scenarios: [], rejected: [{ id: 'none', title: 'Nothing to order', reason: 'No board has a needed or nice-to-have quantity.' }], elapsedMs: 0 };
+    return { objective, scenarios: [], rejected: [{ id: 'none', title: 'Nothing to order', reason: 'No board has a needed quantity.' }], elapsedMs: 0 };
   }
 
   // A board that cannot be read cannot be priced, and an order that leaves it
@@ -698,7 +639,6 @@ export function quoteOrder(req: QuoteRequest): QuoteResult {
       const options: ScenarioOrder[] = [];
       let why = '';
       for (const plan of panelPlans(ctx, [s], panelized, 'auto')) {
-        if (plan.tag.startsWith('wish') || plan.tag.startsWith('bare')) continue;
         if (plan.counts.every((c) => c.total <= 1)) continue; // that is a single board, not a panel
         const o = planPanel(ctx, { ...plan, label: `${s.key} (${s.name}), ${plan.label}` });
         if (typeof o === 'string') why = o;
@@ -727,7 +667,7 @@ export function quoteOrder(req: QuoteRequest): QuoteResult {
   }
 
   // --- merged and silk-divider: all designs on one panel --------------------
-  if (wanted.length > 1 || wanted.some((s) => s.niceToHave > s.needed)) {
+  if (wanted.length > 1) {
     for (const separation of [panelized, 'silk-divider'] as const) {
       const kind: ScenarioKind = separation === 'silk-divider' ? 'silk-divider' : 'merged';
       const base =
@@ -754,7 +694,7 @@ export function quoteOrder(req: QuoteRequest): QuoteResult {
       for (const plan of panelPlans(ctx, wanted, separation, mixed ? top : 'auto')) {
         const id = `${kind}-${plan.tag}`;
         const o = planPanel(ctx, plan);
-        const title = `${base}${promoted}${plan.variantLabel}`;
+        const title = `${base}${promoted}`;
         if (typeof o === 'string') {
           reject(id, `${title}: ${plan.label}`, o);
           continue;
@@ -790,7 +730,6 @@ export function quoteOrder(req: QuoteRequest): QuoteResult {
         else options.push(single);
       }
       for (const plan of panelPlans(ctx, group, panelized, 'auto')) {
-        if (plan.tag.startsWith('wish') || plan.tag.startsWith('bare')) continue;
         if (group.length === 1 && plan.counts.every((c) => c.total <= 1)) continue;
         const o = planPanel(ctx, { ...plan, label: `${layers}-layer: ${plan.label}` });
         if (typeof o === 'string') why = o;

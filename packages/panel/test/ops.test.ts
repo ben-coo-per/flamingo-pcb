@@ -37,7 +37,7 @@ describe('applyPanelOp', () => {
       source: { path: 'second-sensor.flamingo', hash: 'h3', name: 'sensor2' },
     });
     expect(p.sources.map((s) => s.key)).toEqual(['S', 'M', 'A']);
-    expect(p.sources[0]).toMatchObject({ needed: 1, niceToHave: 0 });
+    expect(p.sources[0]).toEqual({ key: 'S', path: 'sensor.flamingo', hash: 'h1', name: 'sensor', needed: 1 });
     expect(suggestSourceKey(p, 'zebra')).toBe('Z');
   });
 
@@ -140,8 +140,8 @@ describe('applyPanelOp', () => {
   });
 
   it('setQuantity validates counts', () => {
-    const p = apply(newPanel('x'), SENSOR, { op: 'setQuantity', key: 'S', needed: 4, niceToHave: 10 });
-    expect(p.sources[0]).toMatchObject({ needed: 4, niceToHave: 10 });
+    const p = apply(newPanel('x'), SENSOR, { op: 'setQuantity', key: 'S', needed: 4 });
+    expect(p.sources[0]).toMatchObject({ needed: 4 });
     expect(errorOf(p, { op: 'setQuantity', key: 'S', needed: -1 })).toContain('non-negative integer');
     expect(errorOf(p, { op: 'setQuantity', key: 'S', needed: 1.5 })).toContain('non-negative integer');
   });

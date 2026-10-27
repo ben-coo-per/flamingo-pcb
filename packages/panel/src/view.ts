@@ -21,7 +21,6 @@ export interface SourceView {
   stale: boolean;
   error?: string;
   needed: number;
-  niceToHave: number;
   instances: number;
   populated: number;
   geometry?: Omit<SourceGeometry, 'parts'> & { partLines: number; extendedParts: number };

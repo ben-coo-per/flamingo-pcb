@@ -38,7 +38,7 @@ export type PanelLook = 'layout' | 'fab';
 export interface QuoteSnapshot {
   key: string;
   quote: QuoteResult | null;
-  quantities: Array<{ key: string; needed: number; niceToHave: number }>;
+  quantities: Array<{ key: string; needed: number }>;
 }
 
 export interface QuotePending {

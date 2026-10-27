@@ -52,11 +52,6 @@ export interface PanelSource {
   name: string;
   /** Assembled boards of this design that the order must deliver. */
   needed: number;
-  /**
-   * Total boards of this design that would be welcome if they come cheap.
-   * 0 (or anything <= needed) means "no wish beyond needed".
-   */
-  niceToHave: number;
 }
 
 export interface PanelInstance {

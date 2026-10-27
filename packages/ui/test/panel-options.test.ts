@@ -11,8 +11,8 @@ const instance = (id: string, source: string, x: number, populate = true) => ({
   populate,
 });
 
-const got = (key: string, needed: number, assembled: number, bare = 0, niceToHave = 0): Received =>
-  ({ key, needed, niceToHave, assembled, bare }) as Received;
+const got = (key: string, needed: number, assembled: number, bare = 0): Received =>
+  ({ key, needed, assembled, bare }) as Received;
 
 /** One panel of S and M, the way the optimizer would lay it out. */
 const LAYOUT = {
@@ -46,7 +46,6 @@ function scenario(id: string, kind: Scenario['kind'], total: number, loads: bool
     received: [got('S', 2, 2), got('M', 2, 2)],
     lines: [],
     estimate: true,
-    partial: false,
     warnings: [],
     layout: loads ? LAYOUT : null,
   } as unknown as Scenario;
@@ -61,7 +60,7 @@ function view(instances: ReturnType<typeof instance>[], cost: number | null = 50
     instances.filter((i) => i.source === key && (!populated || i.populate)).length;
   return {
     panel: { name: 'combo', sources: [{ key: 'S' }, { key: 'M' }], instances, settings: { separation: 'mouse-bite' } },
-    sources: ['S', 'M'].map((key) => ({ key, instances: count(key), populated: count(key, true), needed: 2, niceToHave: 0 })),
+    sources: ['S', 'M'].map((key) => ({ key, instances: count(key), populated: count(key, true), needed: 2 })),
     issues: [],
     minimums: { made: 5, assembled: 2, verified: false },
     quote:
@@ -160,18 +159,16 @@ describe('panel view: ways to order', () => {
     expect(minimumsReached({ counts: one, made: 5, assembled: 2 }, [got('S', 2, 2, 3)], v)).toEqual({ minMade: true, minAssembled: false });
     // 5 needed: both are the need.
     expect(minimumsReached({ counts: one, made: 5, assembled: 5 }, [got('S', 5, 5)], v)).toEqual({ minMade: false, minAssembled: false });
-    // 3 on a panel, 6 wished for: 2 panels assembled is what the wish asks for.
+    // 3 on a panel, 6 needed: 2 panels assembled is what the need asks for.
     const three = [{ key: 'S', total: 3, populated: 3 }];
-    expect(minimumsReached({ counts: three, made: 5, assembled: 2 }, [got('S', 2, 6, 9, 6)], v)).toEqual({ minMade: true, minAssembled: false });
+    expect(minimumsReached({ counts: three, made: 5, assembled: 2 }, [got('S', 6, 6, 9)], v)).toEqual({ minMade: true, minAssembled: false });
     // More than the minimum is never the minimum.
     expect(minimumsReached({ counts: one, made: 10, assembled: 10 }, [got('S', 7, 10)], v)).toEqual({ minMade: false, minAssembled: false });
   });
 
   it('counts the boards that were asked for', () => {
     expect(boardsAskedFor([got('S', 2, 4), got('M', 2, 2)])).toBe(4);
-    // A wish for 5: three more than needed count, assembled or bare.
-    expect(boardsAskedFor([got('S', 2, 3, 4, 5)])).toBe(5);
-    // No wish: bare boards are not counted.
+    // Bare boards are not counted.
     expect(boardsAskedFor([got('S', 2, 2, 3)])).toBe(2);
     expect(boardsAskedFor([got('S', 2, 1)])).toBe(1);
   });

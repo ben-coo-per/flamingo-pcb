@@ -71,7 +71,7 @@ at 4242.
 `boards + quantities → quote_order → panel_apply_scenario → panel_check → export_panel_fab`
 
 1. `panel_new`, then `panel_add_board` per board with `needed` (assembled
-   boards that must be delivered) and optionally `niceToHave`.
+   boards that must be delivered).
 2. `quote_order` ranks the ways to order them and itemizes every fee.
    `panel_apply_scenario id=...` loads a scenario's panel. Or build the panel
    by hand: `panel_add_instance`, then `panel_arrange`.

@@ -26,7 +26,7 @@ describe('flamingo panel CLI', () => {
   async function build(): Promise<void> {
     await ok('new', file, '--name', 'combo');
     await ok('add-board', file, join(dir, 'sensor.flamingo'), '--needed', '1');
-    await ok('add-board', file, join(dir, 'mini.flamingo'), '--needed', '5', '--nice', '8');
+    await ok('add-board', file, join(dir, 'mini.flamingo'), '--needed', '5');
     await ok('add-instance', file, 'S');
     await ok('add-instance', file, 'M', '--count', '3');
     await ok('arrange', file);
@@ -60,9 +60,9 @@ describe('flamingo panel CLI', () => {
     await build();
     const panel = parsePanel(await readFile(file, 'utf8'));
     expect(panel.name).toBe('combo');
-    expect(panel.sources.map((s) => [s.key, s.path, s.needed, s.niceToHave])).toEqual([
-      ['S', 'sensor.flamingo', 1, 0],
-      ['M', 'mini.flamingo', 5, 8],
+    expect(panel.sources.map((s) => [s.key, s.path, s.needed])).toEqual([
+      ['S', 'sensor.flamingo', 1],
+      ['M', 'mini.flamingo', 5],
     ]);
     expect(panel.instances.map((i) => i.id)).toEqual(['S1', 'M1', 'M2', 'M3']);
     // Arranged: no two instances share a corner any more.
@@ -78,7 +78,7 @@ describe('flamingo panel CLI', () => {
     expect(await ok('rotate-instance', file, 'M1')).toBe('Rotated M1 to 90, now at (103, 4)');
     expect(await ok('pin', file, 'M1', '--unpin')).toBe('M1 is now unpinned');
     expect(await ok('set-populate', file, 'M2', 'false')).toBe('M2 is now bare');
-    expect(await ok('set-quantity', file, 'S', '--needed', '2')).toBe('S: need 2, nice to have 0');
+    expect(await ok('set-quantity', file, 'S', '--needed', '2')).toBe('S: need 2');
     expect(await ok('set', file, '--rail-left', '5', '--rail-right', '5', '--spacing', '2.5')).toBe('Settings updated.');
     expect(await ok('remove-instance', file, 'M3')).toBe('Removed M3');
 

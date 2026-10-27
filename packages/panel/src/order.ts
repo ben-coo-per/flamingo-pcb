@@ -22,13 +22,10 @@ export interface Received {
   key: string;
   name: string;
   needed: number;
-  niceToHave: number;
   assembled: number;
   bare: number;
   /** Assembled boards beyond the needed quantity. */
   overage: number;
-  /** Assembled boards beyond what was needed or wished for. */
-  unwanted: number;
   /** Needed boards the order does not deliver. */
   shortfall: number;
 }
@@ -217,16 +214,13 @@ export function receivedFor(
     // A design without parts is complete as a bare board.
     const assembled = hasParts(s.key) ? c.populated * asmQty : c.total * pcbQty;
     const bare = hasParts(s.key) ? c.total * pcbQty - assembled : 0;
-    const wished = Math.max(s.needed, s.niceToHave);
     return {
       key: s.key,
       name: s.name,
       needed: s.needed,
-      niceToHave: s.niceToHave,
       assembled,
       bare,
       overage: Math.max(0, assembled - s.needed),
-      unwanted: Math.max(0, assembled - wished),
       shortfall: Math.max(0, s.needed - assembled),
     };
   });

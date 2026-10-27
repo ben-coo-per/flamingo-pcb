@@ -25,10 +25,10 @@ export interface InstancePlacement {
 
 export type PanelOp =
   | { op: 'setName'; name: string }
-  | { op: 'addSource'; source: Omit<PanelSource, 'key' | 'needed' | 'niceToHave'> & { key?: string; needed?: number; niceToHave?: number } }
+  | { op: 'addSource'; source: Omit<PanelSource, 'key' | 'needed'> & { key?: string; needed?: number } }
   | { op: 'removeSource'; key: string }
   | { op: 'refreshSource'; key: string; hash: string; name?: string }
-  | { op: 'setQuantity'; key: string; needed?: number; niceToHave?: number }
+  | { op: 'setQuantity'; key: string; needed?: number }
   | { op: 'addInstance'; source: string; at?: Point; rotation?: Rotation; pinned?: boolean; populate?: boolean }
   | { op: 'removeInstance'; id: string }
   | { op: 'moveInstance'; id: string; at: Point; pin?: boolean }
@@ -145,10 +145,8 @@ export function applyPanelOp(p: Panel, op: PanelOp): PanelOpResult | PanelOpErro
       }
       if (panel.sources.some((s) => s.key === key)) return err(`Source key "${key}" is already in use`);
       const needed = src.needed ?? 1;
-      const niceToHave = src.niceToHave ?? 0;
       if (!isCount(needed)) return err('needed must be a non-negative integer');
-      if (!isCount(niceToHave)) return err('niceToHave must be a non-negative integer');
-      panel.sources.push({ key, path: src.path, hash: src.hash, name: src.name, needed, niceToHave });
+      panel.sources.push({ key, path: src.path, hash: src.hash, name: src.name, needed });
       created.push(key);
       return ok(panel, created);
     }
@@ -175,10 +173,6 @@ export function applyPanelOp(p: Panel, op: PanelOp): PanelOpResult | PanelOpErro
       if (op.needed !== undefined) {
         if (!isCount(op.needed)) return err('needed must be a non-negative integer');
         src.needed = op.needed;
-      }
-      if (op.niceToHave !== undefined) {
-        if (!isCount(op.niceToHave)) return err('niceToHave must be a non-negative integer');
-        src.niceToHave = op.niceToHave;
       }
       return ok(panel, created);
     }

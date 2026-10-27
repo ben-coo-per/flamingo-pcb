@@ -129,16 +129,10 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
           .optional()
           .describe('Short label for this board, e.g. "S" or "M": 1-4 characters, uppercase letter first. Instances are named S1, S2, ... and merged refdes S1_U2. Defaults to the first letter of the board name'),
         needed: z.number().int().min(0).optional().describe('Assembled boards of this design you must end up with (default 1)'),
-        niceToHave: z
-          .number()
-          .int()
-          .min(0)
-          .optional()
-          .describe('Total boards of this design you would welcome if they come cheap, assembled or bare (default 0 = no wish beyond needed)'),
       },
     },
-    async ({ path, key, needed, niceToHave }) => {
-      const r = await session.addBoard(path, { key, needed, niceToHave });
+    async ({ path, key, needed }) => {
+      const r = await session.addBoard(path, { key, needed });
       if (!r.ok) return error(r.error);
       return text(`Added board ${r.key} = "${r.name}" (${fmt(r.width)} x ${fmt(r.height)} mm, ${r.layers}-layer)`);
     },
@@ -172,17 +166,16 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
   server.registerTool(
     'panel_set_quantity',
     {
-      description: 'Set how many boards of a design are needed, and how many would be nice to have.',
+      description: 'Set how many boards of a design are needed.',
       inputSchema: {
         board: z.string().describe('Board key, e.g. "S"'),
-        needed: z.number().int().min(0).optional().describe('Assembled boards you must end up with'),
-        niceToHave: z.number().int().min(0).optional().describe('Total boards you would welcome if cheap (0 = no wish beyond needed)'),
+        needed: z.number().int().min(0).describe('Assembled boards you must end up with'),
       },
     },
-    ({ board, needed, niceToHave }) =>
-      applied(session.apply({ op: 'setQuantity', key: board, needed, niceToHave }), (r) => {
+    ({ board, needed }) =>
+      applied(session.apply({ op: 'setQuantity', key: board, needed }), (r) => {
         const s = r.panel.sources.find((x) => x.key === board)!;
-        return `${board}: need ${s.needed}, nice to have ${s.niceToHave}`;
+        return `${board}: need ${s.needed}`;
       }),
   );
 
@@ -467,7 +460,7 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
     'quote_order',
     {
       description:
-        'Compare ways to order the boards on the panel, from their needed and nice-to-have quantities: separate orders per design, each design on its own panel, one merged mouse-bite panel (different-designs fee), one silkscreen-divided board, different panel counts, nice-to-have boards populated or bare, and split versus promote when layer counts differ. Returns ranked scenarios with total, cost per board, boards received per design, warnings and itemized fees. Every amount marked ~ is an ESTIMATE. Prices come from a local fee table; nothing is sent to JLCPCB and nothing is ordered. Also reports the cost of the panel exactly as it stands.',
+        'Compare ways to order the boards on the panel, from their needed quantities: separate orders per design, each design on its own panel, one merged mouse-bite panel (different-designs fee), one silkscreen-divided board, different panel counts, and split versus promote when layer counts differ. Returns ranked scenarios with total, cost per board, boards received per design, warnings and itemized fees. Every amount marked ~ is an ESTIMATE. Prices come from a local fee table; nothing is sent to JLCPCB and nothing is ordered. Also reports the cost of the panel exactly as it stands.',
       inputSchema: {
         objective: z
           .enum(OBJECTIVES as unknown as [string, ...string[]])

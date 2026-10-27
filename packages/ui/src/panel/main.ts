@@ -110,7 +110,7 @@ let boardsFor = '';
 let settled: QuoteSnapshot | null = null;
 
 function quantitiesOf(view: PanelView): QuoteSnapshot['quantities'] {
-  return view.panel.sources.map((s) => ({ key: s.key, needed: s.needed, niceToHave: s.niceToHave }));
+  return view.panel.sources.map((s) => ({ key: s.key, needed: s.needed }));
 }
 
 /** Is `view` the settled quote's panel with only its quantities changed? Then a cancel can put them back. */
@@ -121,7 +121,7 @@ function onlyQuantitiesChanged(view: PanelView, from: QuoteSnapshot): boolean {
       ...view.panel,
       sources: view.panel.sources.map((s) => {
         const q = from.quantities.find((x) => x.key === s.key);
-        return q ? { ...s, needed: q.needed, niceToHave: q.niceToHave } : s;
+        return q ? { ...s, needed: q.needed } : s;
       }),
     },
   };
@@ -140,8 +140,8 @@ function cancelQuote(): void {
   const ops: PanelOp[] = [];
   for (const q of previous.quantities) {
     const s = view.panel.sources.find((x) => x.key === q.key);
-    if (s && (s.needed !== q.needed || s.niceToHave !== q.niceToHave)) {
-      ops.push({ op: 'setQuantity', key: q.key, needed: q.needed, niceToHave: q.niceToHave });
+    if (s && s.needed !== q.needed) {
+      ops.push({ op: 'setQuantity', key: q.key, needed: q.needed });
     }
   }
   if (ops.length > 0) send(ops.length === 1 ? ops[0]! : { op: 'transaction', ops });
@@ -650,7 +650,7 @@ const renderSidebar = createSidebar(
   },
   {
     setCount: (board, count) => void setCount(board, count),
-    setQuantity: (board, field, value) => send({ op: 'setQuantity', key: board, [field]: value }),
+    setQuantity: (board, needed) => send({ op: 'setQuantity', key: board, needed }),
     cancelQuote,
     selectOption: (id) => void selectOption(id),
     selectInstance: (id) => store.set({ selection: id, menu: null }),

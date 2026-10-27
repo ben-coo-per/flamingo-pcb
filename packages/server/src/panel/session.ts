@@ -313,7 +313,6 @@ export class PanelSession extends EventEmitter {
           stale: r?.stale ?? false,
           ...(r?.error ? { error: r.error } : {}),
           needed: ps.needed,
-          niceToHave: ps.niceToHave,
           instances: mine.length,
           populated: mine.filter((i) => i.populate).length,
           ...(geometryView ? { geometry: geometryView } : {}),
@@ -505,7 +504,7 @@ export class PanelSession extends EventEmitter {
 
   async addBoard(
     path: string,
-    opts: { key?: string; needed?: number; niceToHave?: number } = {},
+    opts: { key?: string; needed?: number } = {},
   ): Promise<Outcome<{ key: string; name: string; width: number; height: number; layers: number }>> {
     const abs = this.resolvePath(path);
     let loaded;
@@ -526,7 +525,6 @@ export class PanelSession extends EventEmitter {
         name: loaded.board.name,
         ...(opts.key !== undefined ? { key: opts.key } : {}),
         ...(opts.needed !== undefined ? { needed: opts.needed } : {}),
-        ...(opts.niceToHave !== undefined ? { niceToHave: opts.niceToHave } : {}),
       },
     });
     if (!result.ok) return fail(result.error);

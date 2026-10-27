@@ -96,12 +96,12 @@ describe('panel MCP tools', () => {
   it('panel_add_board stores a relative path and a hash, and picks keys', async () => {
     await ok('panel_new', { name: 'combo' });
     expect(await ok('panel_add_board', { path: 'sensor.flamingo' })).toBe('Added board S = "sensor" (40 x 30 mm, 2-layer)');
-    expect(await ok('panel_add_board', { path: join(dir, 'mini.flamingo'), needed: 5, niceToHave: 8 })).toContain('Added board M');
+    expect(await ok('panel_add_board', { path: join(dir, 'mini.flamingo'), needed: 5 })).toContain('Added board M');
     await ok('panel_save');
     const panel = parsePanel(await readFile(join(dir, 'combo.plamingo'), 'utf8'));
-    expect(panel.sources.map((s) => [s.key, s.path, s.needed, s.niceToHave])).toEqual([
-      ['S', 'sensor.flamingo', 1, 0],
-      ['M', 'mini.flamingo', 5, 8],
+    expect(panel.sources.map((s) => [s.key, s.path, s.needed])).toEqual([
+      ['S', 'sensor.flamingo', 1],
+      ['M', 'mini.flamingo', 5],
     ]);
     expect(panel.sources[0]!.hash).toMatch(/^sha256:[0-9a-f]{64}$/);
 
@@ -118,7 +118,7 @@ describe('panel MCP tools', () => {
     const state = await ok('panel_get_state');
     expect(state).toContain('Panel "combo"');
     expect(state).toMatch(/Size: [\d.]+ x [\d.]+ mm, 2-layer \(jlcpcb-2l\), mouse-bite, spacing 2 mm/);
-    expect(state).toContain('S = sensor.flamingo "sensor" (40 x 30 mm, 2-layer, 2 part line(s), 1 extended) — need 1, nice to have 0, on panel 1 (1 populated)');
+    expect(state).toContain('S = sensor.flamingo "sensor" (40 x 30 mm, 2-layer, 2 part line(s), 1 extended) — need 1, on panel 1 (1 populated)');
     expect(state).toContain('M = mini.flamingo "mini"');
     expect(state).toMatch(/M3 at \([\d.]+, [\d.]+\) rot (0|90) — populated/);
     expect(state).toContain('Check: 0 error(s)');

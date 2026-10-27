@@ -178,10 +178,10 @@ boards + quantities → quote_order → panel_apply_scenario → panel_check →
 | | `panel_open` | Open a panel file. |
 | | `panel_save` | Save now (edits also autosave). |
 | | `panel_get_state` | Text summary: size, settings, boards and quantities, every instance, check and cost totals. |
-| **Boards** | `panel_add_board` | Add a board file as a source, with a short key (`S`, `M`) and its quantities. |
+| **Boards** | `panel_add_board` | Add a board file as a source, with a short key (`S`, `M`) and its quantity. |
 | | `panel_remove_board` | Remove a board and all of its instances. |
 | | `panel_refresh_boards` | Accept source boards as they are on disk now; clears `stale`. |
-| | `panel_set_quantity` | Set `needed` (assembled boards you must get) and `niceToHave` (total boards welcome if cheap). |
+| | `panel_set_quantity` | Set `needed`: the assembled boards you must get. |
 | **Instances** | `panel_add_instance` | Put one more copy of a board on the panel. |
 | | `panel_remove_instance` | Remove one instance. |
 | | `panel_move_instance` | Move an instance; pins it unless `pin:false`. |
@@ -260,7 +260,7 @@ defaults live in `packages/panel/config/panel-limits.json`.
 
 ### Cost model
 
-`quote_order` compares, from each design's `needed` and `niceToHave`:
+`quote_order` compares, from each design's `needed` quantity:
 
 - separate orders, one per design
 - each design on a panel of its own
@@ -268,7 +268,6 @@ defaults live in `packages/panel/config/panel-limits.json`.
 - one board with the designs divided by silkscreen lines (counts as one design;
   you cut the boards apart yourself)
 - different panel counts and quantity steps
-- nice-to-have boards populated, or shipped bare (partial population)
 - for boards with different layer counts: split into one order per layer
   count, or promote
 
@@ -304,10 +303,10 @@ flamingo panel export combo.plamingo --out fab/combo
 | --- | --- |
 | `new <file> [--name N]` | `panel_new` |
 | `show <file>` | `panel_get_state` |
-| `add-board <file> <board> [--key K] [--needed N] [--nice N]` | `panel_add_board` |
+| `add-board <file> <board> [--key K] [--needed N]` | `panel_add_board` |
 | `remove-board <file> <key>` | `panel_remove_board` |
 | `refresh <file> [key ...]` | `panel_refresh_boards` |
-| `set-quantity <file> <key> [--needed N] [--nice N]` | `panel_set_quantity` |
+| `set-quantity <file> <key> --needed N` | `panel_set_quantity` |
 | `add-instance <file> <key> [--x X --y Y] [--rotation R] [--bare] [--count N]` | `panel_add_instance` |
 | `remove-instance <file> <id>` | `panel_remove_instance` |
 | `move-instance <file> <id> --x X --y Y [--no-pin]` | `panel_move_instance` |

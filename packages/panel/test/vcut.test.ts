@@ -244,7 +244,7 @@ describe('v-cut fab output', () => {
 });
 
 describe('v-cut scenarios', () => {
-  const src = { key: 'A', path: A.path, hash: 'h', name: A.name, needed: 20, niceToHave: 0 };
+  const src = { key: 'A', path: A.path, hash: 'h', name: A.name, needed: 20 };
   const request = (separation: 'mouse-bite' | 'v-cut') => ({
     name: 'q',
     sources: [src],

@@ -9,7 +9,7 @@ function demo(): Panel {
   let p = newPanel('demo');
   for (const op of [
     { op: 'addSource', source: { path: 'a.flamingo', hash: 'sha256:aa', name: 'sensor' } },
-    { op: 'addSource', source: { path: 'sub/b.flamingo', hash: 'sha256:bb', name: 'mini', needed: 5, niceToHave: 8 } },
+    { op: 'addSource', source: { path: 'sub/b.flamingo', hash: 'sha256:bb', name: 'mini', needed: 5 } },
     { op: 'addInstance', source: 'S', at: { x: 7, y: 7 } },
     { op: 'addInstance', source: 'M', at: { x: 50, y: 7 }, rotation: 90, populate: false, pinned: true },
   ] as const) {
@@ -42,6 +42,14 @@ describe('panel format', () => {
   it('round-trips through serialize / parse', () => {
     const p = demo();
     expect(parsePanel(serializePanel(p))).toEqual(p);
+  });
+
+  it('loads an older file with a nice-to-have quantity, and drops it', () => {
+    const old = JSON.parse(serializePanel(demo())) as { sources: Array<Record<string, unknown>> };
+    old.sources[1]!.niceToHave = 8;
+    const p = parsePanel(JSON.stringify(old));
+    expect(p).toEqual(demo());
+    expect(serializePanel(p)).not.toContain('niceToHave');
   });
 
   it('serializes as indented JSON, one value per line', () => {

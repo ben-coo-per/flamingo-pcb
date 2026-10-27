@@ -130,8 +130,8 @@ describe('panel view: what to fit', () => {
 
 describe('panel view: text', () => {
   const received: Received[] = [
-    { key: 'S', name: 'sensor', needed: 1, niceToHave: 0, assembled: 2, bare: 3, overage: 1, unwanted: 1, shortfall: 0 },
-    { key: 'M', name: 'mini', needed: 5, niceToHave: 8, assembled: 5, bare: 0, overage: 0, unwanted: 0, shortfall: 0 },
+    { key: 'S', name: 'sensor', needed: 1, assembled: 2, bare: 3, overage: 1, shortfall: 0 },
+    { key: 'M', name: 'mini', needed: 5, assembled: 5, bare: 0, overage: 0, shortfall: 0 },
   ];
 
   it('formats money and escapes markup', () => {
@@ -142,7 +142,7 @@ describe('panel view: text', () => {
   it('summarizes boards received against boards needed', () => {
     expect(receivedShort(received)).toBe('S 2/1  M 5/5');
     expect(receivedLong(received[0]!)).toBe('S  2 assembled + 3 bare  (need 1; 1 over)');
-    expect(receivedLong(received[1]!)).toBe('M  5 assembled  (need 5, nice to have 8; exact)');
+    expect(receivedLong(received[1]!)).toBe('M  5 assembled  (need 5; exact)');
     expect(receivedLong({ ...received[1]!, assembled: 3, shortfall: 2 })).toContain('short by 2');
   });
 
@@ -162,7 +162,7 @@ describe('panel view: text', () => {
   it('asks for new scenarios when quantities, boards or settings change, not when an instance moves', () => {
     const view = {
       panel: {
-        sources: [{ key: 'S', hash: 'h1', needed: 1, niceToHave: 0 }],
+        sources: [{ key: 'S', hash: 'h1', needed: 1 }],
         settings: { spacing: 2 },
         instances: [{ id: 'S1', at: { x: 0, y: 0 } }],
       },
@@ -266,8 +266,7 @@ describe('panel view: short forms', () => {
 
   it('tags what sets a scenario apart', () => {
     expect(scenarioTags({ id: 'merged-needed-x2' })).toEqual([]);
-    expect(scenarioTags({ id: 'merged-wish-x2' })).toEqual(['extras populated']);
-    expect(scenarioTags({ id: 'silk-divider-bare-x5', promotedTo: 4 })).toEqual(['extras bare', 'as 4-layer']);
+    expect(scenarioTags({ id: 'silk-divider-needed-x5', promotedTo: 4 })).toEqual(['as 4-layer']);
   });
 });
 

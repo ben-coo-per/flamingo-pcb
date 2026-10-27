@@ -41,9 +41,8 @@ export function formatReceived(received: Received[]): string {
     .map((r) => {
       const bits = [`${r.assembled} assembled`];
       if (r.bare > 0) bits.push(`${r.bare} bare`);
-      const need = r.niceToHave > r.needed ? `need ${r.needed}, nice to have ${r.niceToHave}` : `need ${r.needed}`;
       const over = r.shortfall > 0 ? `SHORT by ${r.shortfall}` : r.overage > 0 ? `${r.overage} over` : 'exact';
-      return `  ${r.key} (${r.name}): ${bits.join(' + ')} (${need}; ${over})`;
+      return `  ${r.key} (${r.name}): ${bits.join(' + ')} (need ${r.needed}; ${over})`;
     })
     .join('\n');
 }
@@ -81,7 +80,7 @@ export function formatView(view: PanelView): string {
     const size = s.geometry ? `${fmt(s.geometry.width)} x ${fmt(s.geometry.height)} mm, ${s.geometry.copperLayers}-layer, ${s.geometry.partLines} part line(s), ${s.geometry.extendedParts} extended` : s.error ?? 'unresolved';
     const flags = [s.stale ? 'STALE' : '', s.error ? 'MISSING' : ''].filter(Boolean).join(' ');
     lines.push(
-      `  ${s.key} = ${s.path} "${s.name}" (${size}) — need ${s.needed}, nice to have ${s.niceToHave}, on panel ${s.instances} (${s.populated} populated)${flags ? ` ${flags}` : ''}`,
+      `  ${s.key} = ${s.path} "${s.name}" (${size}) — need ${s.needed}, on panel ${s.instances} (${s.populated} populated)${flags ? ` ${flags}` : ''}`,
     );
   }
 
