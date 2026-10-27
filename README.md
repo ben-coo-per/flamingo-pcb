@@ -65,6 +65,12 @@ node packages/server/dist/cli.js serve board.flamingo
 open http://localhost:4242
 ```
 
+The server accepts edits and the live WebSocket only from pages opened on
+`localhost` (a guard against other sites driving your open session). To open it
+from another machine by name, list that name:
+`FLAMINGO_ALLOWED_HOSTS=myhost node packages/server/dist/cli.js serve board.flamingo`,
+then browse to `http://myhost:4242`. Comma-separate several names.
+
 Point Claude Code at the running server by dropping this `.mcp.json` in your
 project (it's already at the repo root):
 

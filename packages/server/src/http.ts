@@ -21,7 +21,10 @@ import type { RouteRunner } from './route.js';
 import { defaultRouteRunner } from './route.js';
 import type { ScreenshotOpts } from './screenshot.js';
 import { renderPNG } from './screenshot.js';
-import { BOARD_T, exportStep, exportStepDetail } from './step.js';
+import { BOARD_T, exportStep, exportStepDetail, stepHasSolids } from './step.js';
+import { exportDxf, exportSvg } from './drawing.js';
+import type { ExportFormat, ExportQuery } from './export-opts.js';
+import { exportFileName, parseExportQuery } from './export-opts.js';
 import { parseObjMesh, placeMeshGroups } from './objmesh.js';
 import type { MeshGroup } from './objmesh.js';
 import type { PanelChannel } from './panel/http.js';
@@ -75,10 +78,32 @@ function isAllowedOrigin(origin: string | undefined): boolean {
   if (!origin) return true;
   try {
     const { hostname } = new URL(origin);
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'; // WHATWG URL keeps IPv6 brackets
+    return (
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname === '[::1]' || // WHATWG URL keeps IPv6 brackets
+      extraAllowedHosts().has(hostname.toLowerCase())
+    );
   } catch {
     return false;
   }
+}
+
+/**
+ * Hostnames to trust besides loopback, from FLAMINGO_ALLOWED_HOSTS
+ * (comma-separated, e.g. `FLAMINGO_ALLOWED_HOSTS=bennet`): for a server bound to
+ * a LAN or tailnet address and opened by that name from another machine, whose
+ * page would otherwise be refused its WebSocket and every edit. Empty by default,
+ * so the guard stays loopback-only unless the person serving opts in. Read on each
+ * call, so a test or a long-lived process sees the current value.
+ */
+function extraAllowedHosts(): Set<string> {
+  return new Set(
+    (process.env.FLAMINGO_ALLOWED_HOSTS ?? '')
+      .split(',')
+      .map((h) => h.trim().toLowerCase())
+      .filter(Boolean),
+  );
 }
 
 function sendJSON(res: ServerResponse, status: number, body: unknown): void {
@@ -427,20 +452,46 @@ async function handleApi(
     return true;
   }
 
-  if (method === 'GET' && pathname === '/api/export.step') {
-    // ?mode=detail adds copper/silk/real component meshes; default is blocks.
-    const detail = url.searchParams.get('mode') === 'detail';
+  const exportMatch = method === 'GET' ? /^\/api\/export\.(step|dxf|svg)$/.exec(pathname) : null;
+  if (exportMatch) {
+    // Mechanical exports, driven by the UI's export modal:
+    //   ?detail=hd (step; `mode=detail` also works) adds copper/silk/real meshes
+    //   &include=board,comps,vias,pth,mnt   (default: all)
+    //   &side=top|bottom|both (step)  &layers=single|layered (dxf)  &units=mm|in (dxf/svg)
+    const format = exportMatch[1] as ExportFormat;
+    let q: ExportQuery;
     try {
-      const step = detail
-        ? exportStepDetail(doc.board, await collectDetailModels(doc.board))
-        : exportStep(doc.board);
-      const fileName = `${doc.board.name.replace(/[^\w.-]+/g, '_') || 'board'}${detail ? '.detail' : ''}.step`;
+      q = parseExportQuery(url.searchParams);
+    } catch (err) {
+      sendJSON(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
+      return true;
+    }
+    try {
+      let body: string;
+      let contentType: string;
+      if (format === 'step') {
+        const opts = { include: q.include, side: q.side };
+        body = q.detail
+          ? exportStepDetail(doc.board, q.include.comps ? await collectDetailModels(doc.board) : new Map(), opts)
+          : exportStep(doc.board, opts);
+        if (!stepHasSolids(body)) {
+          throw new Error('Nothing to export: the board has no outline, or the selected elements have no geometry');
+        }
+        contentType = 'application/step';
+      } else if (format === 'dxf') {
+        body = exportDxf(doc.board, { include: q.include, layers: q.layers, units: q.units });
+        contentType = 'application/dxf';
+      } else {
+        body = exportSvg(doc.board, { include: q.include, units: q.units });
+        contentType = 'image/svg+xml';
+      }
+      const fileName = exportFileName(doc.board.name, format, q);
       res.writeHead(200, {
-        'content-type': 'application/step',
+        'content-type': contentType,
         'content-disposition': `attachment; filename="${fileName}"`,
-        'content-length': Buffer.byteLength(step),
+        'content-length': Buffer.byteLength(body),
       });
-      res.end(step);
+      res.end(body);
     } catch (err) {
       sendJSON(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) });
     }
