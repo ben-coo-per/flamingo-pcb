@@ -20,6 +20,7 @@ import { fillAllZones, renderSVG } from '@flamingo/engine';
 import { generateBOM, generateCPL, generateGerbers } from '@flamingo/fab';
 import type {
   ArrangeResult,
+  CostCurve,
   FeeTable,
   Objective,
   Panel,
@@ -51,6 +52,7 @@ import {
   rotatedSize,
   checkPanel,
   computeGeometry,
+  costCurve,
   hasErrors,
   newPanel,
   parsePanel,
@@ -684,6 +686,20 @@ export class PanelSession extends EventEmitter {
   async quote(objective: Objective = 'total'): Promise<QuoteResult> {
     const sources = await this.resolved();
     return quoteOrder({
+      name: this.panel.name,
+      sources: this.panel.sources,
+      resolved: sources,
+      settings: this.panel.settings,
+      limits: this.limits,
+      fees: this.fees,
+      objective,
+    });
+  }
+
+  /** Total and per-board cost of the cheapest way at each of a set of quantities. */
+  async costCurve(objective: Objective = 'total'): Promise<CostCurve> {
+    const sources = await this.resolved();
+    return costCurve({
       name: this.panel.name,
       sources: this.panel.sources,
       resolved: sources,

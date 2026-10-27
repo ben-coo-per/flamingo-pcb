@@ -30,6 +30,7 @@ import { stepAtLeast } from './fees.js';
 import { computeGeometry } from './geometry.js';
 import type { PanelGeometry } from './geometry.js';
 import { arrange } from './layout.js';
+import type { ArrangeResult } from './layout.js';
 import { applyPanelOp } from './ops.js';
 import type { PanelOp, SettingsPatch } from './ops.js';
 import type { PieceCount, PricedOrder, Received } from './order.js';
@@ -233,6 +234,28 @@ function settingsFor(
   };
 }
 
+/**
+ * The same panel is packed again and again: every quantity asks for the same
+ * few layouts (so many of each board per panel), and nesting outlines is
+ * slow. Layouts are kept by what they depend on, newest last.
+ */
+const packings = new Map<string, ArrangeResult>();
+const PACKINGS_KEPT = 400;
+
+function arrangeCached(panel: Panel, resolved: ResolvedSources, limits: PanelLimits): ArrangeResult {
+  const key = JSON.stringify([
+    panel.settings,
+    panel.instances.map((i) => [i.source, i.rotation, i.populate]),
+    resolved.map((r) => [r.key, r.hash]),
+  ]);
+  const hit = packings.get(key);
+  if (hit) return hit;
+  const result = arrange(panel, resolved, limits);
+  if (packings.size >= PACKINGS_KEPT) packings.delete(packings.keys().next().value!);
+  packings.set(key, result);
+  return result;
+}
+
 /** Build, arrange, check and price one panel. Returns the reason when it cannot be done. */
 function planPanel(ctx: Ctx, plan: PanelPlan): ScenarioOrder | string {
   const { req } = ctx;
@@ -260,7 +283,7 @@ function planPanel(ctx: Ctx, plan: PanelPlan): ScenarioOrder | string {
   const unresolved = resolved.find((r) => !r.geometry);
   if (unresolved) return `${unresolved.key}: ${unresolved.error ?? 'not resolved'}`;
 
-  const packed = arrange(panel, resolved, req.limits);
+  const packed = arrangeCached(panel, resolved, req.limits);
   if (!packed.ok) return packed.reason;
   const placed = applyPanelOp(panel, { op: 'placeInstances', placements: packed.placements });
   if (!placed.ok) return placed.error;

@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { PanelOp, PanelOpError, PanelOpResult, Rotation, SettingsPatch } from '@flamingo/panel';
+import { costCurve, CURVE_QUANTITIES } from '@flamingo/panel';
 import { OBJECTIVES } from '@flamingo/panel';
 import {
   ESTIMATE_LEGEND,
@@ -57,6 +58,7 @@ export const PANEL_TOOL_NAMES = [
   'panel_undo',
   'panel_redo',
   'quote_order',
+  'panel_cost_curve',
   'panel_apply_scenario',
   'export_panel_fab',
 ] as const;
@@ -420,6 +422,45 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
     'panel_redo',
     { description: 'Redo the last undone panel operation.', inputSchema: {} },
     () => (session.redo() ? text('Redid last undone panel operation.') : error('Nothing to redo.')),
+  );
+
+  server.registerTool(
+    'panel_cost_curve',
+    {
+      description:
+        'How the cost changes with quantity: for each of a set of quantities (1 to 100), the cheapest way to order that many of every design on the panel, with its total and cost per board. Shows where a few more boards come almost free (the panel has room) and where they tip into another panel or assembly setup. Every amount is an estimate from the local fee table; nothing is sent to JLCPCB.',
+      inputSchema: {
+        objective: z
+          .enum(OBJECTIVES)
+          .optional()
+          .describe('What "cheapest" means at each quantity: total (default), or perBoard'),
+        quantities: z.array(z.number().int().positive()).optional().describe('Quantities to price (default 1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 75, 100)'),
+      },
+    },
+    async ({ objective, quantities }) => {
+      const sources = await session.resolved();
+      const curve = costCurve(
+        {
+          name: session.panel.name,
+          sources: session.panel.sources,
+          resolved: sources,
+          settings: session.panel.settings,
+          limits: session.limits,
+          fees: session.fees,
+          objective: objective ?? 'total',
+        },
+        quantities ?? CURVE_QUANTITIES,
+      );
+      const lines = [
+        `Cost by quantity (${curve.designs.join(', ')}; ~ = estimate; cheapest by ${curve.objective}):`,
+        '  qty   per board      total  way',
+      ];
+      for (const p of curve.points) {
+        lines.push(`  ${String(p.quantity).padStart(3)}  ${(p.estimate ? '~' : '') + `$${p.perBoard.toFixed(2)}`.padStart(9)}  ${`$${p.total.toFixed(2)}`.padStart(9)}  ${p.way.title}`);
+      }
+      for (const i of curve.impossible) lines.push(`  ${String(i.quantity).padStart(3)}  not possible: ${i.reason}`);
+      return text(lines.join('\n'));
+    },
   );
 
   server.registerTool(

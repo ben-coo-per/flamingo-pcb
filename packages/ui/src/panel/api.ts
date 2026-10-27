@@ -3,7 +3,7 @@
  * the Vite dev proxy and when served by the Flamingo server itself.
  */
 
-import type { ArrangeResult, PanelOp, QuoteResult } from '@flamingo/panel';
+import type { ArrangeResult, CostCurve, PanelOp, QuoteResult } from '@flamingo/panel';
 
 export interface ApiError {
   ok: false;
@@ -41,6 +41,15 @@ export const api = {
     try {
       const res = await fetch('/api/panel/quote?objective=total');
       return (await res.json()) as QuoteResult | ApiError;
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  },
+
+  async costCurve(): Promise<CostCurve | ApiError> {
+    try {
+      const res = await fetch('/api/panel/cost-curve?objective=total');
+      return (await res.json()) as CostCurve | ApiError;
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }

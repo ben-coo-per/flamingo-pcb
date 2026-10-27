@@ -16,6 +16,7 @@
  * sentence is behind a disclosure, never in the row.
  */
 
+import { renderCostChart } from './chart.js';
 import type { CostLine, PanelView, PieceCount, Received, ScenarioKind, ScenarioLine } from '@flamingo/panel';
 import { boardColor } from '@flamingo/panel';
 import type { BoardFile } from './api.js';
@@ -44,6 +45,7 @@ export interface SidebarEls {
   boardAdd: HTMLElement;
   boardMsg: HTMLElement;
   optionList: HTMLElement;
+  costCurve: HTMLElement;
   plateTitle: HTMLElement;
   plateMeaning: HTMLElement;
   plateEdit: HTMLElement;
@@ -469,6 +471,28 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
     });
   }
 
+  // --- 2b: cost by quantity ---------------------------------------------------
+
+  function curve(state: PanelState): void {
+    const view = state.view!;
+    const needed = view.panel.sources.length === 1 ? view.panel.sources[0]!.needed : null;
+    once('curve', `${state.curveRev}/${state.curveError}/${needed}/${view.sources.length}`, () => {
+      if (view.sources.length === 0) {
+        els.costCurve.innerHTML = '';
+        return;
+      }
+      if (state.curveError) {
+        els.costCurve.innerHTML = `<div class="hint">${escapeHtml(state.curveError)}</div>`;
+        return;
+      }
+      if (!state.curve) {
+        els.costCurve.innerHTML = '<div class="hint">Pricing quantities…</div>';
+        return;
+      }
+      renderCostChart(els.costCurve, state.curve, needed);
+    });
+  }
+
   // --- 3: on the plate -------------------------------------------------------
 
   function plate(state: PanelState, list: Option[]): void {
@@ -604,6 +628,7 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
     boards(view);
     addable(state.boardFiles, view, state.busy);
     ways(state, list);
+    curve(state);
     plate(state, list);
     issues(view);
   };

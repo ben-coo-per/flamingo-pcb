@@ -86,6 +86,10 @@ export async function handlePanelApi(
         sendJSON(res, 200, { ok: true, ...(await session.quote(objectiveOf(url.searchParams.get('objective')))) });
         return true;
       }
+      case 'cost-curve': {
+        sendJSON(res, 200, { ok: true, ...(await session.costCurve(objectiveOf(url.searchParams.get('objective')))) });
+        return true;
+      }
       case 'config': {
         sendJSON(res, 200, {
           ok: true,

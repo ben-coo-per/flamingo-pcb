@@ -577,6 +577,20 @@ async function main(): Promise<void> {
     await until("v.panel.sources.find((s) => s.key === 'M').needed === 5", 'needed 5 for M');
 
     // --- scenarios ---------------------------------------------------------
+    step('the cost-by-quantity chart has a point per quantity and says the numbers on hover');
+    await page.waitForFunction('!!(window.flamingoPanel.state().curve)', undefined, { timeout: 60000 });
+    const points = await page.locator('#cost-curve svg .pt').count();
+    assert(points >= 20, `the chart has ${points} points (two charts of at least ten)`);
+    const chart = page.locator('#cost-curve svg');
+    await chart.scrollIntoViewIfNeeded();
+    const cb = (await chart.boundingBox())!;
+    await chart.hover({ position: { x: cb.width * 0.6, y: cb.height * 0.3 } });
+    await page.locator('#cost-curve .chart-note.chart-tip').waitFor({ timeout: 5000 });
+    const tipText = await text('#cost-curve .chart-note');
+    assert(/\d+ boards?( of each)?: \$[\d.]+ each, \$[\d.]+ in all/.test(tipText), `the chart tooltip reads "${tipText}"`);
+    console.log(`  ${points / 2} quantities priced; hover: ${tipText.replace(/\s+/g, ' ')}`);
+    await shot('17-cost-curve', 'Cost by quantity: per-board and total cost of the cheapest way at each quantity, with the current needed quantity marked.');
+
     step('picking a way to order puts its panel on the plate, with its cost');
     await page.waitForFunction("document.querySelectorAll('#option-list [data-option]').length >= 5");
     await page.waitForFunction("[...document.querySelectorAll('#option-list .got[data-board=\"M\"]')].every((e) => e.getAttribute('data-need') === '5')");

@@ -29,6 +29,9 @@ export { applyPanelOp, suggestSourceKey, nextInstanceId } from './ops.js';
 
 export { History, HISTORY_CAP } from './history.js';
 
+export type { CostCurve, CostPoint } from './curve.js';
+export { costCurve, CURVE_QUANTITIES } from './curve.js';
+
 export type { Sourced, SizeRange, AssemblyType, AssemblyLimits, PanelLimits } from './config.js';
 export { settingsFromLimits, listSourced } from './config.js';
 

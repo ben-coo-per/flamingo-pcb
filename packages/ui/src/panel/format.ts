@@ -75,6 +75,18 @@ export function scenarioWarningCount(s: Scenario): string {
 }
 
 /** What decides whether the scenarios have to be fetched again. */
+/** What the cost curve depends on: the quote key without the quantities. */
+export function curveKey(view: {
+  panel: { sources: Array<{ key: string; hash: string }>; settings: unknown };
+  sources: Array<{ key: string; stale: boolean; error?: string }>;
+}): string {
+  return JSON.stringify([
+    view.panel.sources.map((s) => [s.key, s.hash]),
+    view.sources.map((s) => [s.key, s.stale, s.error ?? '']),
+    view.panel.settings,
+  ]);
+}
+
 export function quoteKey(view: {
   panel: { sources: Array<{ key: string; hash: string; needed: number; niceToHave: number }>; settings: unknown };
   sources: Array<{ key: string; stale: boolean; error?: string }>;

@@ -1188,3 +1188,69 @@ table.lines tr.order td {
     transform: rotate(360deg);
   }
 }
+
+/* Cost by quantity: two small charts on one axis, ink on paper. */
+.cost-curve {
+  position: relative;
+}
+.cost-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.cost-chart .line {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.cost-chart .pt {
+  fill: var(--paper, #fff);
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+.cost-chart .pt.hot {
+  fill: var(--ink);
+}
+.cost-chart .grid {
+  stroke: var(--ink);
+  stroke-opacity: 0.15;
+  stroke-width: 1;
+}
+.cost-chart .axis {
+  stroke: var(--ink);
+  stroke-opacity: 0.4;
+  stroke-width: 1;
+}
+.cost-chart .now {
+  stroke: var(--ink);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.cost-chart .cursor {
+  stroke: var(--ink);
+  stroke-opacity: 0.5;
+  stroke-width: 1;
+}
+.cost-chart .tick,
+.cost-chart .title,
+.cost-chart .value {
+  font-family: inherit;
+  font-size: 9px;
+  fill: var(--ink);
+}
+.cost-chart .title {
+  font-size: 10px;
+  font-weight: 700;
+}
+.cost-chart .value {
+  font-weight: 700;
+}
+.chart-note {
+  min-height: 2.6em;
+  font-size: 11px;
+  opacity: 0.7;
+}
+.chart-note.chart-tip {
+  opacity: 1;
+}

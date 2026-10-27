@@ -17,7 +17,7 @@ import type { PanelOp, PanelView, Scenario } from '@flamingo/panel';
 import { fitToBoard, panBy, screenToWorld, worldToScreen, zoomAt } from '../view.js';
 import { addBoard, api, isError, listBoards } from './api.js';
 import { drawPlate } from './draw.js';
-import { loadsOntoPanel, mm, previewLine, quoteKey } from './format.js';
+import { curveKey, loadsOntoPanel, mm, previewLine, quoteKey } from './format.js';
 import { OWN, buildOptions, rankOf, scenarioOnPlate } from './options.js';
 import { DRAG_THRESHOLD_PX, contentBox, dropPosition, hitInstance, platePlaces, platesBox } from './hit.js';
 import { createLoading } from './loading.js';
@@ -157,6 +157,23 @@ function refreshBoardFiles(view: PanelView | null, force = false): void {
   void listBoards().then((boardFiles) => store.set({ boardFiles }));
 }
 
+let curveFor = '';
+let curveSeq = 0;
+
+/** Fetch the cost-by-quantity curve again when the boards or settings changed (quantities do not matter to it). */
+function refreshCurve(view: PanelView): void {
+  const key = curveKey(view);
+  if (key === curveFor) return;
+  curveFor = key;
+  const seq = ++curveSeq;
+  void (async () => {
+    const r = await api.costCurve();
+    if (seq !== curveSeq) return;
+    if (isError(r)) store.set({ curve: null, curveError: r.error, curveRev: store.get().curveRev + 1 });
+    else store.set({ curve: r, curveError: null, curveRev: store.get().curveRev + 1 });
+  })();
+}
+
 /** Fetch the scenarios again when what they depend on has changed. */
 function refreshQuote(view: PanelView): void {
   const key = quoteKey(view);
@@ -215,6 +232,7 @@ const ws = connectPanelWs({
     });
     if (!store.get().hasFit && cssWidth > 0) fit(view);
     refreshQuote(view);
+    refreshCurve(view);
     refreshBoardFiles(view);
   },
 });
@@ -609,6 +627,7 @@ const renderSidebar = createSidebar(
     boardAdd: $('board-add'),
     boardMsg: $('board-msg'),
     optionList: $('option-list'),
+    costCurve: $('cost-curve'),
     plateTitle: $('plate-title'),
     plateMeaning: $('plate-meaning'),
     plateEdit: $('plate-edit'),

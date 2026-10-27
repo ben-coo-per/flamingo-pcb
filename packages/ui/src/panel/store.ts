@@ -7,7 +7,7 @@
  */
 
 import type { Point } from '@flamingo/engine';
-import type { PanelLoading, PanelView, QuoteResult } from '@flamingo/panel';
+import type { CostCurve, PanelLoading, PanelView, QuoteResult } from '@flamingo/panel';
 import type { ViewTransform } from '../state.js';
 import type { BoardFile } from './api.js';
 
@@ -67,6 +67,10 @@ export interface PanelState {
    * previous ways again instead of waiting.
    */
   quoting: QuotePending | null;
+  /** Cost against quantity for the panel's boards and settings; null until fetched. */
+  curve: CostCurve | null;
+  curveError: string | null;
+  curveRev: number;
   /** Counts up whenever `quote` is replaced, so lists built from it know when to rebuild. */
   quoteRev: number;
   /**
@@ -99,6 +103,9 @@ function initial(): PanelState {
     quote: null,
     quoteError: null,
     quoting: null,
+    curve: null,
+    curveError: null,
+    curveRev: 0,
     quoteRev: 0,
     preview: null,
     arrangeMsg: null,
