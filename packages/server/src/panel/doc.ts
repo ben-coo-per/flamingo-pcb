@@ -13,7 +13,7 @@
 import { EventEmitter } from 'node:events';
 import { readFile, rename, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import type { Panel, PanelOp, PanelOpError, PanelOpResult } from '@flamingo/panel';
+import type { Panel, PanelCurve, PanelOp, PanelOpError, PanelOpResult } from '@flamingo/panel';
 import { applyPanelOp, History, parsePanel, serializePanel } from '@flamingo/panel';
 
 const DEFAULT_DEBOUNCE_MS = 500;
@@ -28,16 +28,41 @@ export class PanelDoc extends EventEmitter {
   private version = 0;
   /** Saves run one at a time, in call order, so an older panel's rename never lands last. */
   private saveChain: Promise<void> = Promise.resolve();
+  /**
+   * The stored cost curve, held beside the history rather than in it: a
+   * cache that an undo must not roll back and that is no undo step itself.
+   */
+  private _curve: PanelCurve | undefined;
 
   constructor(initial: Panel, filePath?: string, debounceMs: number = DEFAULT_DEBOUNCE_MS) {
     super();
-    this.history = new History(initial);
+    const { curve, ...panel } = initial;
+    this.history = new History(panel);
+    this._curve = curve;
     this._filePath = filePath;
     this.debounceMs = debounceMs;
   }
 
+  /** The panel the ops edit; never carries the stored curve. */
   get panel(): Panel {
     return this.history.state;
+  }
+
+  get curve(): PanelCurve | undefined {
+    return this._curve;
+  }
+
+  /**
+   * Keep a priced curve with the file. Not an undo step and not a change to
+   * the panel (no 'change' is emitted); the same curve again writes nothing.
+   */
+  setCurve(curve: PanelCurve | undefined): void {
+    if (curve === this._curve) return;
+    if (JSON.stringify(curve ?? null) === JSON.stringify(this._curve ?? null)) return;
+    this._curve = curve;
+    this.version++;
+    if (this._filePath) this.dirty = true;
+    this.scheduleSave();
   }
 
   get filePath(): string | undefined {
@@ -84,7 +109,9 @@ export class PanelDoc extends EventEmitter {
       clearTimeout(this.saveTimer);
       this.saveTimer = null;
     }
-    this.history.reset(panel);
+    const { curve, ...rest } = panel;
+    this.history.reset(rest);
+    this._curve = curve;
     this.version++;
     if (filePath !== undefined) this._filePath = filePath;
     this.dirty = false;
@@ -142,7 +169,7 @@ export class PanelDoc extends EventEmitter {
     if (!filePath) throw new Error('no file path set — cannot save');
     const version = this.version;
     const tmpPath = `${filePath}.tmp-${randomUUID()}`;
-    await writeFile(tmpPath, serializePanel(this.panel), 'utf8');
+    await writeFile(tmpPath, serializePanel(this._curve ? { ...this.panel, curve: this._curve } : this.panel), 'utf8');
     await rename(tmpPath, filePath);
     // An edit made while this was writing is not on disk yet.
     if (this.version === version) this.dirty = false;

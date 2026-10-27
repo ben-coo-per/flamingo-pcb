@@ -9,6 +9,7 @@
  */
 
 import type { Point } from '@flamingo/engine';
+import type { PanelCurve } from './curve.js';
 
 /** Instances sit on the panel at right angles only. */
 /** Degrees CCW, any angle; stored in [0, 360). Multiples of 90 stay exact. */
@@ -139,6 +140,12 @@ export interface Panel {
   sources: PanelSource[];
   instances: PanelInstance[];
   settings: PanelSettings;
+  /**
+   * The cost-by-quantity curve last priced for this panel, kept in the file
+   * so it is there again on open. A cache, not part of the design: ops never
+   * read or write it, and undo does not restore it (`PanelDoc` holds it).
+   */
+  curve?: PanelCurve;
 }
 
 /** Axis-aligned box. */

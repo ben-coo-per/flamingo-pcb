@@ -6,6 +6,7 @@
  * settings added after a file was written.
  */
 
+import { parsePanelCurve } from './curve.js';
 import { normalizeRotation } from './poly.js';
 import type { Panel, PanelInstance, PanelSettings, PanelSource } from './types.js';
 
@@ -192,6 +193,8 @@ export function parsePanel(json: string): Panel {
   const problem = validateSettings(settings);
   if (problem) throw new Error(`settings: ${problem}`);
 
+  // The stored cost curve is a cache: one that does not parse is dropped, never a reason to refuse the file.
+  const curve = parsePanelCurve(parsed.curve);
   return {
     formatVersion: 1,
     kind: 'flamingo-panel',
@@ -199,5 +202,6 @@ export function parsePanel(json: string): Panel {
     sources,
     instances,
     settings,
+    ...(curve ? { curve } : {}),
   };
 }

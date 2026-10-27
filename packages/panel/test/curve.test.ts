@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { costCurve } from '../src/curve.js';
+import { costCurve, curveKey, CURVE_QUANTITIES, ENTERED_KEPT, parsePanelCurve, priceCurve } from '../src/curve.js';
 import { FEES, LIMITS, plainBoard, resolved } from './helpers.js';
 import { DEFAULT_SETTINGS } from '../src/panel.js';
 
@@ -38,5 +38,80 @@ describe('costCurve', () => {
     const c = costCurve(req);
     expect(c.points.length).toBeGreaterThan(10);
     expect(performance.now() - t0).toBeLessThan(2000);
+  });
+});
+
+describe('priceCurve', () => {
+  const r = resolved('M', plainBoard('mini', 30, 20));
+  const req = {
+    name: 'p',
+    sources: [{ key: 'M', path: 'mini.flamingo', hash: 'h', name: 'mini', needed: 11 }],
+    resolved: [r],
+    settings: DEFAULT_SETTINGS,
+    limits: LIMITS,
+    fees: FEES,
+  };
+
+  it('adds the needed quantity to the curve, remembers it, and prices nothing the second time', () => {
+    const first = priceCurve(req, undefined);
+    expect(first.curve.points.map((p) => p.quantity)).toEqual([...CURVE_QUANTITIES, 11].sort((a, b) => a - b));
+    expect(first.curve.entered).toEqual([11]);
+    expect(first.curve.priced).toBe(CURVE_QUANTITIES.length + 1);
+    expect(first.stored.entered).toEqual([11]);
+    expect(first.stored.key).toBe(curveKey(req));
+
+    const again = priceCurve(req, first.stored);
+    expect(again.curve.priced).toBe(0);
+    expect(again.curve.points).toEqual(first.curve.points);
+    expect(again.stored).toBe(first.stored);
+  });
+
+  it('a later quantity joins the earlier ones; a standard one is not an entry', () => {
+    const a = priceCurve(req, undefined).stored;
+    const b = priceCurve({ ...req, sources: [{ ...req.sources[0]!, needed: 7 }] }, a);
+    expect(b.curve.priced).toBe(1);
+    expect(b.curve.entered).toEqual([7, 11]);
+    expect(b.stored.entered).toEqual([11, 7]);
+    const c = priceCurve({ ...req, sources: [{ ...req.sources[0]!, needed: 10 }] }, b.stored);
+    expect(c.curve.priced).toBe(0);
+    expect(c.stored).toBe(b.stored);
+  });
+
+  it('forgets the points when what they were priced from changes', () => {
+    const a = priceCurve(req, undefined).stored;
+    const changed = { ...req, settings: { ...DEFAULT_SETTINGS, spacing: 3 } };
+    const b = priceCurve(changed, a);
+    expect(curveKey(changed)).not.toBe(curveKey(req));
+    expect(b.curve.priced).toBe(CURVE_QUANTITIES.length + 1);
+    expect(b.stored.key).toBe(curveKey(changed));
+    expect(b.stored.entered).toEqual([11]);
+  });
+
+  it('a one-off table is cached but not entered', () => {
+    const a = priceCurve(req, undefined).stored;
+    const table = priceCurve(req, a, [9, 11, 200]);
+    expect(table.curve.points.map((p) => p.quantity)).toEqual([9, 11, 200]);
+    expect(table.curve.priced).toBe(2);
+    expect(table.stored.entered).toEqual([11]);
+    expect(table.stored.points.map((p) => p.quantity)).toContain(200);
+    expect(priceCurve(req, table.stored, [200]).curve.priced).toBe(0);
+  });
+
+  it('keeps at most ENTERED_KEPT entered quantities, the oldest dropped', () => {
+    let stored = priceCurve(req, undefined).stored;
+    for (let q = 101; q < 101 + ENTERED_KEPT + 2; q++) {
+      stored = priceCurve({ ...req, sources: [{ ...req.sources[0]!, needed: q }] }, stored).stored;
+    }
+    expect(stored.entered).toHaveLength(ENTERED_KEPT);
+    expect(stored.entered[0]).toBe(103);
+    expect(stored.entered).not.toContain(11);
+  });
+
+  it('a stored curve survives a file round trip, and a damaged one is dropped', () => {
+    const stored = priceCurve(req, undefined).stored;
+    expect(parsePanelCurve(JSON.parse(JSON.stringify(stored)))).toEqual(stored);
+    expect(parsePanelCurve({ ...stored, points: [{ quantity: 1 }] })).toBeUndefined();
+    expect(parsePanelCurve({ ...stored, objective: 'cheapest' })).toBeUndefined();
+    expect(parsePanelCurve(null)).toBeUndefined();
   });
 });

@@ -17,7 +17,7 @@ import type { PanelOp, PanelView, Scenario } from '@flamingo/panel';
 import { fitToBoard, panBy, screenToWorld, worldToScreen, zoomAt } from '../view.js';
 import { addBoard, api, isError, listBoards } from './api.js';
 import { drawPlate } from './draw.js';
-import { curveKey, loadsOntoPanel, mm, previewLine, quoteKey } from './format.js';
+import { loadsOntoPanel, mm, previewLine, quoteKey } from './format.js';
 import { OWN, buildOptions, rankOf, scenarioOnPlate } from './options.js';
 import { DRAG_THRESHOLD_PX, contentBox, dropPosition, hitInstance, platePlaces, platesBox } from './hit.js';
 import { createLoading } from './loading.js';
@@ -160,9 +160,14 @@ function refreshBoardFiles(view: PanelView | null, force = false): void {
 let curveFor = '';
 let curveSeq = 0;
 
-/** Fetch the cost-by-quantity curve again when the boards or settings changed (quantities do not matter to it). */
+/**
+ * Fetch the cost-by-quantity curve again when the boards, settings or
+ * quantities changed: a new quantity becomes a point on it. The chart it
+ * replaces stays up meanwhile; the server answers from the stored curve when
+ * nothing has to be priced.
+ */
 function refreshCurve(view: PanelView): void {
-  const key = curveKey(view);
+  const key = quoteKey(view);
   if (key === curveFor) return;
   curveFor = key;
   const seq = ++curveSeq;

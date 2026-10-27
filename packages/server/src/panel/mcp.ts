@@ -9,7 +9,6 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { PanelOp, PanelOpError, PanelOpResult, Rotation, SettingsPatch } from '@flamingo/panel';
-import { costCurve, CURVE_QUANTITIES } from '@flamingo/panel';
 import { OBJECTIVES } from '@flamingo/panel';
 import {
   ESTIMATE_LEGEND,
@@ -427,23 +426,14 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
           .enum(OBJECTIVES)
           .optional()
           .describe('What "cheapest" means at each quantity: total (default), or perBoard'),
-        quantities: z.array(z.number().int().positive()).optional().describe('Quantities to price (default 1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 75, 100)'),
+        quantities: z
+          .array(z.number().int().positive())
+          .optional()
+          .describe('Quantities to price (default 1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 75, 100 plus every quantity the boards have been set to)'),
       },
     },
     async ({ objective, quantities }) => {
-      const sources = await session.resolved();
-      const curve = costCurve(
-        {
-          name: session.panel.name,
-          sources: session.panel.sources,
-          resolved: sources,
-          settings: session.panel.settings,
-          limits: session.limits,
-          fees: session.fees,
-          objective: objective ?? 'total',
-        },
-        quantities ?? CURVE_QUANTITIES,
-      );
+      const curve = await session.costCurve(objective ?? 'total', quantities);
       const lines = [
         `Cost by quantity (${curve.designs.join(', ')}; ~ = estimate; cheapest by ${curve.objective}):`,
         '  qty   per board      total  way',
@@ -452,6 +442,8 @@ export function registerPanelTools(server: McpServer, session: PanelSession): vo
         lines.push(`  ${String(p.quantity).padStart(3)}  ${(p.estimate ? '~' : '') + `$${p.perBoard.toFixed(2)}`.padStart(9)}  ${`$${p.total.toFixed(2)}`.padStart(9)}  ${p.way.title}`);
       }
       for (const i of curve.impossible) lines.push(`  ${String(i.quantity).padStart(3)}  not possible: ${i.reason}`);
+      const kept = curve.points.length + curve.impossible.length - curve.priced;
+      lines.push(`${curve.priced} priced now${kept > 0 ? `, ${kept} from the panel file` : ''}.`);
       return text(lines.join('\n'));
     },
   );

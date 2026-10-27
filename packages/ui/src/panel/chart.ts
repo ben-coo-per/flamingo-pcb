@@ -3,7 +3,8 @@
  *
  * Two small charts on one quantity axis: cost per board above, total below.
  * They are different scales, so they never share a y axis. Lines are the
- * page's ink; the current needed quantity is a dashed rule; hovering puts
+ * page's ink; a quantity the boards were set to is a filled point and the
+ * current one is also a dashed rule; hovering puts
  * the numbers and the way that gives them in the caption under the chart,
  * where they cover nothing. Drawn as inline SVG so it needs nothing the page
  * does not already have.
@@ -50,6 +51,7 @@ interface Series {
 }
 
 function plot(curve: CostCurve, s: Series, qMin: number, qMax: number, current: number | null): string {
+  const entered = new Set(curve.entered);
   const max = niceMax(Math.max(...curve.points.map(s.value)));
   const y = (v: number): number => s.top + PLOT_H - (v / max) * PLOT_H;
   const pts = curve.points.map((p) => ({ x: xOf(p.quantity, qMin, qMax), y: y(s.value(p)), p }));
@@ -70,7 +72,7 @@ function plot(curve: CostCurve, s: Series, qMin: number, qMax: number, current: 
     grid.join('') +
     `<line class="axis" x1="${LEFT}" x2="${W - RIGHT}" y1="${(s.top + PLOT_H).toFixed(1)}" y2="${(s.top + PLOT_H).toFixed(1)}"/>` +
     `<path class="line" d="${line}"/>` +
-    pts.map((d) => `<circle class="pt" cx="${d.x.toFixed(1)}" cy="${d.y.toFixed(1)}" r="3.5" data-q="${d.p.quantity}"/>`).join('') +
+    pts.map((d) => `<circle class="pt${entered.has(d.p.quantity) ? ' entered' : ''}" cx="${d.x.toFixed(1)}" cy="${d.y.toFixed(1)}" r="3.5" data-q="${d.p.quantity}"/>`).join('') +
     `<text class="value" x="${Math.min(labelled.x, W - RIGHT - 8).toFixed(1)}" y="${(labelled.y - 7).toFixed(1)}" text-anchor="middle">${money(s.value(labelled.p))}</text>` +
     `</g>`
   );
@@ -84,7 +86,7 @@ export function renderCostChart(el: HTMLElement, curve: CostCurve, current: numb
   }
   const qMin = curve.points[0]!.quantity;
   const qMax = curve.points[curve.points.length - 1]!.quantity;
-  const ticks = [1, 2, 5, 10, 20, 50, 100, 200, 500].filter((q) => q >= qMin && q <= qMax);
+  const ticks = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000].filter((q) => q >= qMin && q <= qMax);
   const series: Series[] = [
     { label: 'per board', value: (p) => p.perBoard, top: TOP },
     { label: 'total', value: (p) => p.total, top: TOP + PLOT_H + GAP },
@@ -109,7 +111,9 @@ export function renderCostChart(el: HTMLElement, curve: CostCurve, current: numb
     `</svg>` +
     `<div class="chart-note"></div>`;
   const note = el.querySelector<HTMLElement>('.chart-note')!;
-  const caption = `${curve.designs.length > 1 ? `${curve.designs.length} designs, this many of each` : 'boards'}; the cheapest way at each quantity${estimate ? '; ~ estimates' : ''}`;
+  const caption =
+    `${curve.designs.length > 1 ? `${curve.designs.length} designs, this many of each` : 'boards'}; the cheapest way at each quantity` +
+    `${curve.entered.length > 0 ? '; filled: quantities you entered' : ''}${estimate ? '; ~ estimates' : ''}`;
   note.textContent = caption;
 
   const svg = el.querySelector<SVGSVGElement>('svg')!;

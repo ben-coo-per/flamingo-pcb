@@ -162,7 +162,10 @@ A panel is a `.plamingo` file stored next to the boards. It refers to each
 source board by relative path plus a content hash and never copies it, so a
 board edited after it was added marks the panel **stale** until
 `panel_refresh_boards` accepts the change. Every edit is an operation with
-undo/redo, as for boards.
+undo/redo, as for boards. The file also carries the last priced cost-by-quantity
+curve (`curve`): a cache, not part of the design, so the chart is there the
+moment the panel opens and a quantity you have entered before costs nothing to
+go back to.
 
 ```
 boards + quantities → quote_order → panel_apply_scenario → panel_check → export_panel_fab
@@ -194,7 +197,7 @@ boards + quantities → quote_order → panel_apply_scenario → panel_check →
 | | `panel_screenshot` | Render the panel to a PNG. |
 | **History** | `panel_undo`, `panel_redo` | Walk the panel's op log. |
 | **Cost** | `quote_order` | Ranked order scenarios with itemized fees, plus the cost of the panel as it stands. |
-| | `panel_cost_curve` | Total and cost per board of the cheapest way at each quantity from 1 to 100; the panel view charts it. |
+| | `panel_cost_curve` | Total and cost per board of the cheapest way at a standard set of quantities from 1 to 100 plus every quantity the boards have been set to; the panel view charts it. The points are kept in the panel file (`curve`) and reused until a board, a setting or a fee table changes. |
 | | `panel_apply_scenario` | Load the panel a scenario implies onto the panel. |
 | **Output** | `export_panel_fab` | Write `gerbers.zip`, merged `bom.csv` and `cpl.csv`, and `panel.render.svg`. |
 

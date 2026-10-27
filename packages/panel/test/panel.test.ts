@@ -123,3 +123,26 @@ describe('panel format', () => {
     expect(() => parsePanel(JSON.stringify(c))).toThrow('Duplicate instance id');
   });
 });
+
+describe('stored cost curve', () => {
+  const curve = {
+    key: 'fnv1a:0',
+    objective: 'total' as const,
+    entered: [11],
+    points: [{ quantity: 11, total: 40, perBoard: 3.64, way: { id: 'x', kind: 'merged' as const, title: 'one panel' }, estimate: true }],
+    impossible: [],
+    pricedAt: '2026-10-27T00:00:00.000Z',
+  };
+
+  it('is written with the panel and read back', () => {
+    const p = { ...demo(), curve };
+    expect(parsePanel(serializePanel(p)).curve).toEqual(curve);
+  });
+
+  it('is left out when absent and dropped when damaged, never a reason to refuse the file', () => {
+    expect(parsePanel(serializePanel(demo()))).not.toHaveProperty('curve');
+    const broken = JSON.parse(serializePanel({ ...demo(), curve }));
+    broken.curve.points = 'none';
+    expect(parsePanel(JSON.stringify(broken))).not.toHaveProperty('curve');
+  });
+});

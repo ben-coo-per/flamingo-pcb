@@ -1209,8 +1209,12 @@ table.lines tr.order td {
   stroke: var(--ink);
   stroke-width: 1.5;
 }
+.cost-chart .pt.entered {
+  fill: var(--ink);
+}
 .cost-chart .pt.hot {
   fill: var(--ink);
+  r: 5;
 }
 .cost-chart .grid {
   stroke: var(--ink);

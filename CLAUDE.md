@@ -78,6 +78,10 @@ at 4242.
 3. `panel_check` returns findings as data. Errors gate `export_panel_fab`
    (`waive: true` overrides).
 4. `panel_screenshot` to look at it; `export_panel_fab` to write the fileset.
+5. `panel_cost_curve` for the cost at each quantity. Every `needed` a board
+   has been set to joins the curve; the points live in the panel file under
+   `curve` (a cache, dropped when a board, setting or fee changes) so a
+   quantity priced once is free to come back to.
 
 Conventions:
 

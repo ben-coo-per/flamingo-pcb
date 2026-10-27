@@ -64,7 +64,7 @@
  */
 
 import { existsSync, readdirSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -589,7 +589,23 @@ async function main(): Promise<void> {
     const tipText = await text('#cost-curve .chart-note');
     assert(/\d+ boards?( of each)?: \$[\d.]+ each, \$[\d.]+ in all/.test(tipText), `the chart tooltip reads "${tipText}"`);
     console.log(`  ${points / 2} quantities priced; hover: ${tipText.replace(/\s+/g, ' ')}`);
-    await shot('17-cost-curve', 'Cost by quantity: per-board and total cost of the cheapest way at each quantity, with the current needed quantity marked.');
+    // A quantity entered in step 1 becomes a point on the curve, stays there, and is kept in the panel file.
+    await needed.fill('7');
+    await needed.press('Enter');
+    await until("v.panel.sources.find((s) => s.key === 'M').needed === 7", 'needed 7 for M');
+    await page.locator('#cost-curve svg .pt.entered[data-q="7"]').first().waitFor({ timeout: 60000 });
+    assert((await page.locator('#cost-curve svg .pt.entered[data-q="7"]').count()) === 2, 'the entered quantity is not a filled point on both charts');
+    await needed.fill('5');
+    await needed.press('Enter');
+    await until("v.panel.sources.find((s) => s.key === 'M').needed === 5", 'needed 5 for M');
+    await page.waitForFunction("window.flamingoPanel.state().curve && window.flamingoPanel.state().curve.priced === 0", undefined, { timeout: 60000 });
+    assert((await page.locator('#cost-curve svg .pt.entered[data-q="7"]').count()) === 2, 'the entered quantity left the curve when the need moved on');
+    await page.waitForTimeout(1200); // the debounced save
+    const onDisk = JSON.parse(await readFile(join(projectDir, 'combo.plamingo'), 'utf8')) as { curve?: { entered: number[]; points: Array<{ quantity: number }> } };
+    assert(onDisk.curve !== undefined && onDisk.curve.entered.includes(7), 'the entered quantity is not in the panel file');
+    assert(onDisk.curve.points.some((pt) => pt.quantity === 7), 'the priced point is not in the panel file');
+    console.log(`  7 entered: a filled point on the curve, kept in the file with ${onDisk.curve.points.length} priced points`);
+    await shot('17-cost-curve', 'Cost by quantity: per-board and total cost of the cheapest way at each quantity. Filled points are quantities that were entered; they stay on the curve and are kept in the panel file.');
 
     step('picking a way to order puts its panel on the plate, with its cost');
     await page.waitForFunction("document.querySelectorAll('#option-list [data-option]').length >= 5");

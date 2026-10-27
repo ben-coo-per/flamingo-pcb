@@ -100,3 +100,45 @@ describe('PanelSession derived state', () => {
     expect(view).not.toHaveBeenCalled();
   });
 });
+
+describe('PanelSession cost curve', () => {
+  let dir: string;
+  let session: PanelSession;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'flamingo-panel-curve-'));
+    await writeBoards(dir);
+    session = testSession(dir, { watchMs: 0 });
+    await session.create('p');
+    expect((await session.addBoard('mini.flamingo', { key: 'M', needed: 11 })).ok).toBe(true);
+  });
+
+  afterEach(async () => {
+    await session.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('puts the quantity entered on the curve, stores the points in the file, and reuses them', async () => {
+    const first = await session.costCurve();
+    expect(first.entered).toEqual([11]);
+    expect(first.points.some((p) => p.quantity === 11)).toBe(true);
+    expect(first.priced).toBe(first.points.length + first.impossible.length);
+    expect(session.doc.curve?.entered).toEqual([11]);
+
+    expect(session.apply({ op: 'setQuantity', key: 'M', needed: 7 }).ok).toBe(true);
+    const second = await session.costCurve();
+    expect(second.entered).toEqual([7, 11]);
+    expect(second.priced).toBe(1);
+
+    await session.save();
+    const other = testSession(dir, { watchMs: 0 });
+    try {
+      expect((await other.open(join(dir, 'p.plamingo'))).ok).toBe(true);
+      const third = await other.costCurve();
+      expect(third.priced).toBe(0);
+      expect(third.points).toEqual(second.points);
+    } finally {
+      await other.close();
+    }
+  });
+});

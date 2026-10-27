@@ -142,3 +142,59 @@ describe('PanelDoc', () => {
     await expect(PanelDoc.load(file)).rejects.toThrow('Not a panel file');
   });
 });
+
+describe('PanelDoc stored curve', () => {
+  const curve = {
+    key: 'fnv1a:0',
+    objective: 'total' as const,
+    entered: [11],
+    points: [{ quantity: 11, total: 40, perBoard: 3.64, way: { id: 'x', kind: 'merged' as const, title: 'one panel' }, estimate: true }],
+    impossible: [],
+    pricedAt: '2026-10-27T00:00:00.000Z',
+  };
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'flamingo-paneldoc-curve-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('is saved with the file, kept out of the ops, and not undone', async () => {
+    const file = join(dir, 'p.plamingo');
+    const doc = new PanelDoc(newPanel('p'), file, 10_000);
+    doc.apply(ADD);
+    let changes = 0;
+    doc.on('change', () => changes++);
+    doc.setCurve(curve);
+    expect(changes).toBe(0);
+    expect(doc.canUndo).toBe(true);
+    expect(doc.panel).not.toHaveProperty('curve');
+    await doc.save();
+    expect(parsePanel(await readFile(file, 'utf8')).curve).toEqual(curve);
+
+    doc.undo();
+    expect(doc.curve).toEqual(curve);
+    expect(doc.canUndo).toBe(false);
+
+    const loaded = await PanelDoc.load(file);
+    expect(loaded.curve).toEqual(curve);
+    expect(loaded.panel).not.toHaveProperty('curve');
+  });
+
+  it('the same curve again schedules no save', async () => {
+    const file = join(dir, 'p.plamingo');
+    const doc = new PanelDoc(newPanel('p'), file, 10_000);
+    await doc.save();
+    const before = await readFile(file, 'utf8');
+    doc.setCurve(curve);
+    await doc.save();
+    const once = await readFile(file, 'utf8');
+    expect(once).not.toBe(before);
+    doc.setCurve(JSON.parse(JSON.stringify(curve)));
+    await doc.close();
+    expect(await readFile(file, 'utf8')).toBe(once);
+  });
+});

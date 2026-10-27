@@ -52,7 +52,7 @@ import {
   rotatedSize,
   checkPanel,
   computeGeometry,
-  costCurve,
+  priceCurve,
   hasErrors,
   newPanel,
   parsePanel,
@@ -694,18 +694,30 @@ export class PanelSession extends EventEmitter {
     });
   }
 
-  /** Total and per-board cost of the cheapest way at each of a set of quantities. */
-  async costCurve(objective: Objective = 'total'): Promise<CostCurve> {
+  /**
+   * Total and per-board cost of the cheapest way at each quantity: the
+   * standard set plus every quantity the boards have been set to, or
+   * `quantities` for a one-off table. Points come from the curve stored in
+   * the panel file while its inputs are unchanged, and what is priced anew
+   * goes back into it.
+   */
+  async costCurve(objective: Objective = 'total', quantities?: readonly number[]): Promise<CostCurve> {
     const sources = await this.resolved();
-    return costCurve({
-      name: this.panel.name,
-      sources: this.panel.sources,
-      resolved: sources,
-      settings: this.panel.settings,
-      limits: this.limits,
-      fees: this.fees,
-      objective,
-    });
+    const { curve, stored } = priceCurve(
+      {
+        name: this.panel.name,
+        sources: this.panel.sources,
+        resolved: sources,
+        settings: this.panel.settings,
+        limits: this.limits,
+        fees: this.fees,
+        objective,
+      },
+      this.doc.curve,
+      quantities,
+    );
+    this.doc.setCurve(stored);
+    return curve;
   }
 
   /** Load a scenario's panel onto the plate: one undo step. */
