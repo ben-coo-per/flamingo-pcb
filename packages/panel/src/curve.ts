@@ -50,6 +50,8 @@ export interface CostCurve {
   impossible: Impossible[];
   /** Quantities on the curve because the panel's boards were set to them, past or present. */
   entered: number[];
+  /** Quantities on the curve that have not been priced (only when pricing was not asked for). */
+  missing: number[];
   /** How many of the points were priced in this call rather than taken from the store. */
   priced: number;
   elapsedMs: number;
@@ -102,12 +104,14 @@ function cleanQuantities(quantities: Iterable<number>): number[] {
  * ascending order without repeats. The request's own quantities are
  * ignored: each point sets every design's `needed` to the point's quantity,
  * so the curve is per design. A point `known` already has (same key as the
- * request, which the caller vouches for) is taken as it is.
+ * request, which the caller vouches for) is taken as it is. With `price`
+ * false nothing is priced: a quantity not known is listed as `missing`.
  */
 export function costCurve(
   req: QuoteRequest,
   quantities: readonly number[] = CURVE_QUANTITIES,
   known?: Pick<PanelCurve, 'points' | 'impossible'>,
+  price = true,
 ): CostCurve {
   const t0 = performance.now();
   const designs = req.sources.filter((s) => req.resolved.some((r) => r.key === s.key && r.geometry));
@@ -115,6 +119,7 @@ export function costCurve(
   const knownImpossible = new Map(known?.impossible.map((i) => [i.quantity, i]) ?? []);
   const points: CostPoint[] = [];
   const impossible: Impossible[] = [];
+  const missing: number[] = [];
   let priced = 0;
   for (const quantity of cleanQuantities(quantities)) {
     const had = knownPoints.get(quantity);
@@ -125,6 +130,10 @@ export function costCurve(
     const hadNot = knownImpossible.get(quantity);
     if (hadNot) {
       impossible.push(hadNot);
+      continue;
+    }
+    if (!price) {
+      missing.push(quantity);
       continue;
     }
     priced++;
@@ -151,6 +160,7 @@ export function costCurve(
     points,
     impossible,
     entered: [],
+    missing,
     priced,
     elapsedMs: Math.round(performance.now() - t0),
   };
@@ -162,13 +172,17 @@ export function costCurve(
  * Every design's current `needed` joins the entered quantities, which stay
  * on the curve with the standard ones. `quantities`, when given, are priced
  * instead (a one-off table) and are cached but not remembered as entered.
- * Returns the curve and the store to keep: the same object as `stored` when
- * nothing changed, so a caller can skip a save.
+ * With `price` false nothing is priced: the curve has the points the store
+ * already holds and names the rest `missing`, which is how a view shows what
+ * it has and offers to price the rest. Returns the curve and the store to
+ * keep: the same object as `stored` when nothing changed, so a caller can
+ * skip a save.
  */
 export function priceCurve(
   req: QuoteRequest,
   stored: PanelCurve | undefined,
   quantities?: readonly number[],
+  price = true,
 ): { curve: CostCurve; stored: PanelCurve } {
   const objective = req.objective ?? 'total';
   const key = curveKey(req);
@@ -180,7 +194,7 @@ export function priceCurve(
     entered.push(s.needed);
   }
   const kept = entered.slice(Math.max(0, entered.length - ENTERED_KEPT));
-  const curve = costCurve(req, quantities ?? [...CURVE_QUANTITIES, ...kept], same ? stored : undefined);
+  const curve = costCurve(req, quantities ?? [...CURVE_QUANTITIES, ...kept], same ? stored : undefined, price);
   curve.entered = kept.filter((q) => curve.points.some((p) => p.quantity === q)).sort((a, b) => a - b);
   if (same && curve.priced === 0 && sameList(kept, stored.entered)) return { curve, stored };
 

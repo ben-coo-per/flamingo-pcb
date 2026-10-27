@@ -98,9 +98,10 @@ describe('priceCurve', () => {
   });
 
   it('keeps at most ENTERED_KEPT entered quantities, the oldest dropped', () => {
-    let stored = priceCurve(req, undefined).stored;
+    // Entering is remembered without pricing, so this needs no quotes.
+    let stored = priceCurve(req, undefined, undefined, false).stored;
     for (let q = 101; q < 101 + ENTERED_KEPT + 2; q++) {
-      stored = priceCurve({ ...req, sources: [{ ...req.sources[0]!, needed: q }] }, stored).stored;
+      stored = priceCurve({ ...req, sources: [{ ...req.sources[0]!, needed: q }] }, stored, undefined, false).stored;
     }
     expect(stored.entered).toHaveLength(ENTERED_KEPT);
     expect(stored.entered[0]).toBe(103);
@@ -113,5 +114,34 @@ describe('priceCurve', () => {
     expect(parsePanelCurve({ ...stored, points: [{ quantity: 1 }] })).toBeUndefined();
     expect(parsePanelCurve({ ...stored, objective: 'cheapest' })).toBeUndefined();
     expect(parsePanelCurve(null)).toBeUndefined();
+  });
+});
+
+describe('priceCurve without pricing', () => {
+  const r = resolved('M', plainBoard('mini', 30, 20));
+  const req = {
+    name: 'p',
+    sources: [{ key: 'M', path: 'mini.flamingo', hash: 'h', name: 'mini', needed: 11 }],
+    resolved: [r],
+    settings: DEFAULT_SETTINGS,
+    limits: LIMITS,
+    fees: FEES,
+  };
+
+  it('reports what is stored and what is missing, remembering the entered quantity without pricing it', () => {
+    const look = priceCurve(req, undefined, undefined, false);
+    expect(look.curve.priced).toBe(0);
+    expect(look.curve.points).toEqual([]);
+    expect(look.curve.missing).toEqual([...CURVE_QUANTITIES, 11].sort((a, b) => a - b));
+    expect(look.stored.entered).toEqual([11]);
+    expect(look.stored.points).toEqual([]);
+
+    const some = priceCurve(req, look.stored, [1, 11]);
+    expect(some.curve.priced).toBe(2);
+    const again = priceCurve(req, some.stored, undefined, false);
+    expect(again.curve.points.map((p) => p.quantity)).toEqual([1, 11]);
+    expect(again.curve.entered).toEqual([11]);
+    expect(again.curve.missing).toHaveLength(CURVE_QUANTITIES.length - 1);
+    expect(again.stored).toBe(some.stored);
   });
 });

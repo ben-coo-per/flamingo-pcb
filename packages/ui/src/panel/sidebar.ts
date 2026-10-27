@@ -70,8 +70,13 @@ export interface SidebarEls {
 export interface SidebarActions {
   setCount(board: string, count: number): void;
   setQuantity(board: string, needed: number): void;
+  /** Set every design's needed quantity: a point on the cost curve was picked. */
+  setAllQuantities(needed: number): void;
   /** Stop waiting for a new quote: quantities back, previous ways shown. */
   cancelQuote(): void;
+  /** Price the quantities the cost curve is missing. */
+  priceCurve(): void;
+  stopPricing(): void;
   selectOption(id: string): void;
   selectInstance(id: string): void;
   addBoard(path: string): void;
@@ -253,6 +258,10 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
   els.boardAdd.addEventListener('click', (ev) => {
     const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-path]');
     if (btn && !btn.disabled) actions.addBoard(btn.dataset.path!);
+  });
+  els.costCurve.addEventListener('click', (ev) => {
+    if ((ev.target as HTMLElement).closest('#curve-price')) actions.priceCurve();
+    else if ((ev.target as HTMLElement).closest('#curve-stop')) actions.stopPricing();
   });
   els.optionList.addEventListener('click', (ev) => {
     if ((ev.target as HTMLElement).closest('#quote-cancel')) {
@@ -475,7 +484,9 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
   function curve(state: PanelState): void {
     const view = state.view!;
     const needed = view.panel.sources.length === 1 ? view.panel.sources[0]!.needed : null;
-    once('curve', `${state.curveRev}/${state.curveError}/${needed}/${view.sources.length}`, () => {
+    const pricing = state.curvePricing;
+    const missing = state.curve?.missing.length ?? 0;
+    once('curve', `${state.curveRev}/${state.curveError}/${needed}/${view.sources.length}/${pricing ? `${pricing.done}/${pricing.total}` : ''}/${missing}`, () => {
       if (view.sources.length === 0) {
         els.costCurve.innerHTML = '';
         return;
@@ -484,11 +495,37 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
         els.costCurve.innerHTML = `<div class="hint">${escapeHtml(state.curveError)}</div>`;
         return;
       }
-      if (!state.curve) {
-        els.costCurve.innerHTML = '<div class="hint">Pricing quantities…</div>';
+      const curve = state.curve;
+      if (!curve) {
+        els.costCurve.innerHTML = '';
         return;
       }
-      renderCostChart(els.costCurve, state.curve, needed);
+      // Pricing is work (each quantity is packed and priced), so it waits for a
+      // press; while it runs the count moves and the chart fills in.
+      let head = '';
+      if (pricing) {
+        const pct = pricing.total > 0 ? Math.round((pricing.done / pricing.total) * 100) : 0;
+        head =
+          `<div id="curve-pricing" class="pending-bar curve-pricing" role="status" aria-live="polite">` +
+          `<span class="spin" aria-hidden="true"></span><span>Pricing quantities <b>${pricing.done} of ${pricing.total}</b>…</span>` +
+          `<button type="button" id="curve-stop" class="btn btn-small" title="Stop here; what is priced stays on the chart">Stop</button>` +
+          `</div>` +
+          `<div class="progress" aria-hidden="true"><i style="width:${pct}%"></i></div>`;
+      } else if (missing > 0) {
+        const have = curve.points.length + curve.impossible.length;
+        head =
+          `<div class="curve-ask">` +
+          `<button type="button" id="curve-price" class="btn" title="Price the cheapest way to order each quantity">` +
+          `Price ${missing} ${have > 0 ? 'more ' : ''}quantit${missing === 1 ? 'y' : 'ies'}</button>` +
+          `<div class="hint">${have > 0 ? 'A quantity you entered is not on the chart yet.' : 'The cheapest way to order each quantity from 1 to 100, so you can see where more boards come almost free. Takes a moment.'}</div>` +
+          `</div>`;
+      }
+      els.costCurve.innerHTML = `${head}<div class="chart-host"></div>`;
+      const host = els.costCurve.querySelector<HTMLElement>('.chart-host')!;
+      if (curve.points.length >= 2) renderCostChart(host, curve, needed, (q) => actions.setAllQuantities(q));
+      else if (curve.points.length + curve.impossible.length > 0 && missing === 0) {
+        host.innerHTML = `<div class="hint">${escapeHtml(curve.impossible[0]?.reason ?? 'Not enough to chart.')}</div>`;
+      }
     });
   }
 

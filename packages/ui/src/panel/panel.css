@@ -1193,10 +1193,31 @@ table.lines tr.order td {
 .cost-curve {
   position: relative;
 }
+.cost-curve .curve-ask .btn {
+  width: auto;
+  margin-bottom: 6px;
+}
+.cost-curve .curve-pricing {
+  margin-bottom: 4px;
+}
+.cost-curve .progress {
+  height: 6px;
+  margin-bottom: 10px;
+  border: 1px solid var(--ink);
+}
+.cost-curve .progress i {
+  display: block;
+  height: 100%;
+  background: var(--ink);
+  transition: width 0.2s;
+}
 .cost-chart {
   display: block;
   width: 100%;
   height: auto;
+}
+.cost-chart.pickable {
+  cursor: pointer;
 }
 .cost-chart .line {
   fill: none;

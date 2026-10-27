@@ -4,7 +4,8 @@
  * Two small charts on one quantity axis: cost per board above, total below.
  * They are different scales, so they never share a y axis. Lines are the
  * page's ink; a quantity the boards were set to is a filled point and the
- * current one is also a dashed rule; hovering puts
+ * current one is also a dashed rule; a click on a point makes it the
+ * quantity; hovering puts
  * the numbers and the way that gives them in the caption under the chart,
  * where they cover nothing. Drawn as inline SVG so it needs nothing the page
  * does not already have.
@@ -78,8 +79,12 @@ function plot(curve: CostCurve, s: Series, qMin: number, qMax: number, current: 
   );
 }
 
-/** Build the chart into `el`, with hover. `current` is the needed quantity the panel has now. */
-export function renderCostChart(el: HTMLElement, curve: CostCurve, current: number | null): void {
+/**
+ * Build the chart into `el`, with hover. `current` is the needed quantity
+ * the panel has now; `onPick` is called with a point's quantity when it is
+ * clicked.
+ */
+export function renderCostChart(el: HTMLElement, curve: CostCurve, current: number | null, onPick?: (quantity: number) => void): void {
   if (curve.points.length < 2) {
     el.innerHTML = `<div class="hint">${curve.impossible[0] ? esc(curve.impossible[0].reason) : 'Not enough to chart.'}</div>`;
     return;
@@ -98,7 +103,7 @@ export function renderCostChart(el: HTMLElement, curve: CostCurve, current: numb
       : '';
   const estimate = curve.points.some((p) => p.estimate);
   el.innerHTML =
-    `<svg class="cost-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Cost per board and total cost against quantity">` +
+    `<svg class="cost-chart${onPick ? ' pickable' : ''}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Cost per board and total cost against quantity${onPick ? '; click a point to order that many' : ''}">` +
     currentRule +
     series.map((s) => plot(curve, s, qMin, qMax, current)).join('') +
     ticks
@@ -118,7 +123,7 @@ export function renderCostChart(el: HTMLElement, curve: CostCurve, current: numb
 
   const svg = el.querySelector<SVGSVGElement>('svg')!;
   const cursor = svg.querySelector<SVGLineElement>('.cursor')!;
-  const show = (ev: MouseEvent): void => {
+  const nearest = (ev: MouseEvent): CostPoint | null => {
     const box = svg.getBoundingClientRect();
     const x = ((ev.clientX - box.left) / box.width) * W;
     let best: CostPoint | null = null;
@@ -130,6 +135,10 @@ export function renderCostChart(el: HTMLElement, curve: CostCurve, current: numb
         best = p;
       }
     }
+    return best;
+  };
+  const show = (ev: MouseEvent): void => {
+    const best = nearest(ev);
     if (!best) return;
     const cx = xOf(best.quantity, qMin, qMax);
     cursor.setAttribute('x1', cx.toFixed(1));
@@ -149,4 +158,10 @@ export function renderCostChart(el: HTMLElement, curve: CostCurve, current: numb
   };
   svg.addEventListener('mousemove', show);
   svg.addEventListener('mouseleave', hide);
+  if (onPick) {
+    svg.addEventListener('click', (ev) => {
+      const best = nearest(ev);
+      if (best && best.quantity !== current) onPick(best.quantity);
+    });
+  }
 }

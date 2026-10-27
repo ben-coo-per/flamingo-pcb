@@ -161,22 +161,71 @@ let curveFor = '';
 let curveSeq = 0;
 
 /**
- * Fetch the cost-by-quantity curve again when the boards, settings or
- * quantities changed: a new quantity becomes a point on it. The chart it
- * replaces stays up meanwhile; the server answers from the stored curve when
- * nothing has to be priced.
+ * Show the cost-by-quantity points the panel file already holds whenever the
+ * boards, settings or quantities change, and which quantities are missing.
+ * Nothing is priced here: that waits for `priceCurve`, so a change to the
+ * panel never starts a job nobody asked for. Pricing in flight is dropped,
+ * since what it was pricing may no longer be the panel.
  */
-function refreshCurve(view: PanelView): void {
+function refreshCurve(view: PanelView, force = false): void {
   const key = quoteKey(view);
-  if (key === curveFor) return;
+  if (!force && key === curveFor) return;
   curveFor = key;
   const seq = ++curveSeq;
+  if (store.get().curvePricing) store.set({ curvePricing: null });
   void (async () => {
-    const r = await api.costCurve();
+    const r = await api.costCurve({ price: false });
     if (seq !== curveSeq) return;
     if (isError(r)) store.set({ curve: null, curveError: r.error, curveRev: store.get().curveRev + 1 });
     else store.set({ curve: r, curveError: null, curveRev: store.get().curveRev + 1 });
   })();
+}
+
+const CURVE_BATCH = 3;
+
+/**
+ * Price the missing quantities, a few at a time so the chart fills in and
+ * the count moves while it runs. Each step is stored by the server, so a
+ * stop or a reload keeps what was done.
+ */
+async function priceCurve(): Promise<void> {
+  const { curve, curvePricing } = store.get();
+  if (!curve || curvePricing || curve.missing.length === 0) return;
+  const seq = ++curveSeq;
+  const missing = [...curve.missing];
+  store.set({ curvePricing: { done: 0, total: missing.length } });
+  let points = curve.points;
+  let impossible = curve.impossible;
+  for (let i = 0; i < missing.length; i += CURVE_BATCH) {
+    const batch = missing.slice(i, i + CURVE_BATCH);
+    const r = await api.costCurve({ price: true, quantities: batch });
+    if (seq !== curveSeq) return;
+    if (isError(r)) {
+      store.set({ curveError: r.error, curvePricing: null, curveRev: store.get().curveRev + 1 });
+      return;
+    }
+    points = [...points, ...r.points].sort((a, b) => a.quantity - b.quantity);
+    impossible = [...impossible, ...r.impossible].sort((a, b) => a.quantity - b.quantity);
+    const done = Math.min(missing.length, i + batch.length);
+    const left = missing.slice(done);
+    store.set({
+      curve: { ...curve, points, impossible, missing: left },
+      curvePricing: { done, total: missing.length },
+      curveRev: store.get().curveRev + 1,
+    });
+  }
+  // The whole curve as the file now has it: entered quantities and all.
+  const whole = await api.costCurve({ price: false });
+  if (seq !== curveSeq) return;
+  if (isError(whole)) store.set({ curveError: whole.error, curvePricing: null, curveRev: store.get().curveRev + 1 });
+  else store.set({ curve: whole, curveError: null, curvePricing: null, curveRev: store.get().curveRev + 1 });
+}
+
+/** Stop pricing; what was priced so far stays on the chart and in the file. */
+function stopPricing(): void {
+  const view = store.get().view;
+  if (!store.get().curvePricing || !view) return;
+  refreshCurve(view, true);
 }
 
 /** Fetch the scenarios again when what they depend on has changed. */
@@ -656,7 +705,16 @@ const renderSidebar = createSidebar(
   {
     setCount: (board, count) => void setCount(board, count),
     setQuantity: (board, needed) => send({ op: 'setQuantity', key: board, needed }),
+    setAllQuantities: (needed) => {
+      // The curve is "this many of each design", so a point on it means every design.
+      const view = store.get().view;
+      if (!view) return;
+      const ops: PanelOp[] = view.panel.sources.filter((s) => s.needed !== needed).map((s) => ({ op: 'setQuantity', key: s.key, needed }));
+      if (ops.length > 0) send(ops.length === 1 ? ops[0]! : { op: 'transaction', ops });
+    },
     cancelQuote,
+    priceCurve,
+    stopPricing,
     selectOption: (id) => void selectOption(id),
     selectInstance: (id) => store.set({ selection: id, menu: null }),
     addBoard: (path) => void addBoardToPanel(path),

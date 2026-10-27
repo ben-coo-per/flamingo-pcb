@@ -46,6 +46,15 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown> |
   }
 }
 
+function quantitiesOf(v: string | null): number[] | undefined {
+  if (!v) return undefined;
+  const out = v
+    .split(',')
+    .map((q) => Number(q))
+    .filter((q) => Number.isInteger(q) && q >= 1);
+  return out.length > 0 ? out : undefined;
+}
+
 function objectiveOf(v: unknown): Objective {
   return typeof v === 'string' && (OBJECTIVES as readonly string[]).includes(v) ? (v as Objective) : 'total';
 }
@@ -87,7 +96,10 @@ export async function handlePanelApi(
         return true;
       }
       case 'cost-curve': {
-        sendJSON(res, 200, { ok: true, ...(await session.costCurve(objectiveOf(url.searchParams.get('objective')))) });
+        // `quantities=a,b,c` prices those alone; `price=0` only reports what is stored and what is missing.
+        const quantities = quantitiesOf(url.searchParams.get('quantities'));
+        const price = url.searchParams.get('price') !== '0';
+        sendJSON(res, 200, { ok: true, ...(await session.costCurve(objectiveOf(url.searchParams.get('objective')), quantities, price)) });
         return true;
       }
       case 'config': {

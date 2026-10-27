@@ -699,9 +699,10 @@ export class PanelSession extends EventEmitter {
    * standard set plus every quantity the boards have been set to, or
    * `quantities` for a one-off table. Points come from the curve stored in
    * the panel file while its inputs are unchanged, and what is priced anew
-   * goes back into it.
+   * goes back into it. With `price` false nothing is priced: the curve has
+   * what is stored and lists the rest as `missing`.
    */
-  async costCurve(objective: Objective = 'total', quantities?: readonly number[]): Promise<CostCurve> {
+  async costCurve(objective: Objective = 'total', quantities?: readonly number[], price = true): Promise<CostCurve> {
     const sources = await this.resolved();
     const { curve, stored } = priceCurve(
       {
@@ -715,6 +716,7 @@ export class PanelSession extends EventEmitter {
       },
       this.doc.curve,
       quantities,
+      price,
     );
     this.doc.setCurve(stored);
     return curve;

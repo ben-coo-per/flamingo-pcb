@@ -46,9 +46,16 @@ export const api = {
     }
   },
 
-  async costCurve(): Promise<CostCurve | ApiError> {
+  /**
+   * The cost-by-quantity curve. `price` false only reports the points the
+   * panel file holds and which quantities are missing; `quantities` prices
+   * those alone, so a long job can go in small steps.
+   */
+  async costCurve(opts: { price: boolean; quantities?: number[] }): Promise<CostCurve | ApiError> {
     try {
-      const res = await fetch('/api/panel/cost-curve?objective=total');
+      const q = new URLSearchParams({ objective: 'total', price: opts.price ? '1' : '0' });
+      if (opts.quantities?.length) q.set('quantities', opts.quantities.join(','));
+      const res = await fetch(`/api/panel/cost-curve?${q}`);
       return (await res.json()) as CostCurve | ApiError;
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };

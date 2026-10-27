@@ -67,10 +67,16 @@ export interface PanelState {
    * previous ways again instead of waiting.
    */
   quoting: QuotePending | null;
-  /** Cost against quantity for the panel's boards and settings; null until fetched. */
+  /**
+   * Cost against quantity for the panel's boards and settings: the points the
+   * panel file holds, null until asked for. Nothing is priced until the
+   * person asks; `curve.missing` lists what pricing would add.
+   */
   curve: CostCurve | null;
   curveError: string | null;
   curveRev: number;
+  /** Pricing in progress, a few quantities at a time: how many of the missing ones are done. */
+  curvePricing: { done: number; total: number } | null;
   /** Counts up whenever `quote` is replaced, so lists built from it know when to rebuild. */
   quoteRev: number;
   /**
@@ -106,6 +112,7 @@ function initial(): PanelState {
     curve: null,
     curveError: null,
     curveRev: 0,
+    curvePricing: null,
     quoteRev: 0,
     preview: null,
     arrangeMsg: null,
