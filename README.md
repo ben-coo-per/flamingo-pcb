@@ -194,6 +194,7 @@ boards + quantities → quote_order → panel_apply_scenario → panel_check →
 | | `panel_screenshot` | Render the panel to a PNG. |
 | **History** | `panel_undo`, `panel_redo` | Walk the panel's op log. |
 | **Cost** | `quote_order` | Ranked order scenarios with itemized fees, plus the cost of the panel as it stands. |
+| | `panel_cost_curve` | Total and cost per board of the cheapest way at each quantity from 1 to 100; the panel view charts it. |
 | | `panel_apply_scenario` | Load the panel a scenario implies onto the panel. |
 | **Output** | `export_panel_fab` | Write `gerbers.zip`, merged `bom.csv` and `cpl.csv`, and `panel.render.svg`. |
 
