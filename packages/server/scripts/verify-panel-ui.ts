@@ -524,6 +524,38 @@ async function main(): Promise<void> {
     const flat = (t: string): string => t.replace(/\s*\n\s*/g, ', ');
     console.log(`  needed 5: ${flat(orderBefore)}, ${totalBefore}; needed 12: ${flat(orderAfter)}, ${totalAfter}`);
     assert(orderAfter !== orderBefore && totalAfter !== totalBefore, 'the cost summary did not follow the needed quantity');
+    // While the ways are priced again the list says so; once they are in, it stops.
+    await page.waitForFunction('!window.flamingoPanel.state().quoting', undefined, { timeout: 60000 });
+    const waysFor12 = await text('#option-list .scenarios');
+    assert(waysFor12.length > 0, 'no ways listed for needed 12');
+    const idsOf = (): Promise<string> => page.$$eval('#option-list [data-option]', (els) => els.map((e) => (e as HTMLElement).dataset.option!).sort().join(','));
+    const idsSettled = await idsOf();
+
+    step('Cancel puts the quantities and the ways back while a quote is on its way');
+    // Hold the next quote request so the pending state can be looked at, however fast the server is.
+    let release: (() => void) | null = null;
+    const held = new Promise<void>((r) => (release = r));
+    await page.route('**/api/panel/quote*', async (route) => {
+      await held;
+      await route.abort().catch(() => undefined); // unroute may have let it go already
+    });
+    await needed.fill('40');
+    await needed.press('Enter');
+    await until("v.panel.sources.find((s) => s.key === 'M').needed === 40", 'needed 40 for M');
+    await page.locator('#quote-pending').waitFor({ timeout: 10000 });
+    // The rows are drawn against the new numbers (their marks and rank move), but the ways are the old ones.
+    const idsWhilePricing = await idsOf();
+    assert(idsWhilePricing === idsSettled, `the ways changed while pricing: ${idsWhilePricing} vs ${idsSettled}`);
+    await page.locator('#quote-cancel').click();
+    await until("v.panel.sources.find((s) => s.key === 'M').needed === 12", 'needed back to 12 after Cancel');
+    assert((await page.locator('#quote-pending').count()) === 0, 'the pending bar did not go away on Cancel');
+    assert((await needed.inputValue()) === '12', `the needed field shows ${await needed.inputValue()} after Cancel`);
+    assert((await text('#option-list .scenarios')) === waysFor12, 'Cancel did not bring the previous ways back');
+    release!();
+    await page.unroute('**/api/panel/quote*');
+    await page.waitForTimeout(300);
+    assert(!(await state<boolean>('!!s.quoting')), 'a quote was fetched again after Cancel');
+    console.log('  pending bar shown while pricing; Cancel restored needed 12 and the same ways, with no new fetch');
     const gotM = page.locator('#cost-summary .received .got[data-board="M"]');
     assert((await gotM.getAttribute('data-need')) === '12', 'boards received does not show the new need');
     assert(Number(await gotM.getAttribute('data-got')) >= 12, 'fewer boards received than needed');

@@ -68,6 +68,8 @@ export interface SidebarEls {
 export interface SidebarActions {
   setCount(board: string, count: number): void;
   setQuantity(board: string, field: 'needed' | 'niceToHave', value: number): void;
+  /** Stop waiting for a new quote: quantities back, previous ways shown. */
+  cancelQuote(): void;
   selectOption(id: string): void;
   selectInstance(id: string): void;
   addBoard(path: string): void;
@@ -251,6 +253,10 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
     if (btn && !btn.disabled) actions.addBoard(btn.dataset.path!);
   });
   els.optionList.addEventListener('click', (ev) => {
+    if ((ev.target as HTMLElement).closest('#quote-cancel')) {
+      actions.cancelQuote();
+      return;
+    }
     const row = (ev.target as HTMLElement).closest<HTMLElement>('[data-option]');
     if (row) actions.selectOption(row.dataset.option!);
   });
@@ -376,9 +382,22 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
   function ways(state: PanelState, list: Option[]): void {
     const view = state.view!;
     const quote = state.quote;
-    once('ways', `${optionsFor}/${state.quoteError}/${opened('ways/')}`, () => {
+    const pending = state.quoting;
+    once('ways', `${optionsFor}/${state.quoteError}/${opened('ways/')}/${pending ? `pending:${pending.since}:${pending.previous !== null}` : ''}`, () => {
       const keys = view.panel.sources.map((s) => s.key);
       const min = view.minimums;
+      // Working out the ways takes a moment (each one is packed and priced):
+      // say so, keep the previous ways visible but dimmed, and offer to put the
+      // numbers back instead of waiting.
+      const pendingBar = pending
+        ? `<div id="quote-pending" class="pending-bar" role="status" aria-live="polite">` +
+          `<span class="spin" aria-hidden="true"></span><span>Pricing the ways to order${pending.previous ? ' for the new quantities' : ''}…</span>` +
+          (pending.previous
+            ? `<button type="button" id="quote-cancel" class="btn btn-small" title="Put the quantities back to what they were and keep these ways">Cancel</button>`
+            : '') +
+          `</div>`
+        : '';
+      els.optionList.classList.toggle('pending', pending !== null && quote !== null);
       if (view.sources.length === 0) {
         els.optionList.innerHTML = '<div class="hint">Add a board in step 1 and the ways to order it appear here.</div>';
         return;
@@ -388,7 +407,7 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
         return;
       }
       if (!quote) {
-        els.optionList.innerHTML = '<div class="hint">Working…</div>';
+        els.optionList.innerHTML = pendingBar || '<div class="hint">Working…</div>';
         return;
       }
       const rejected = notesBlock(
@@ -399,7 +418,7 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
         'ways not possible',
       );
       if (list.length === 0) {
-        els.optionList.innerHTML = `<div class="hint">Nothing to compare yet: no board has a needed quantity.</div>${rejected}`;
+        els.optionList.innerHTML = `${pendingBar}<div class="hint">Nothing to compare yet: no board has a needed quantity.</div>${rejected}`;
         return;
       }
       const dearest = Math.max(...list.map((o) => o.total ?? 0), 0.01);
@@ -440,6 +459,7 @@ export function createSidebar(els: SidebarEls, actions: SidebarActions): (state:
       const anyBare = list.some((o) => o.received.some((r) => r.bare > 0));
       const anyMin = list.some((o) => o.orders.some((x) => x.minMade || x.minAssembled));
       els.optionList.innerHTML =
+        pendingBar +
         `<div class="sc-legend">` +
         `<span><i class="pip pip-met"></i> assembled, needed</span><span><i class="pip pip-over"></i> assembled, extra</span>` +
         (anyBare ? `<span><b>bare</b> = delivered without parts</span>` : '') +

@@ -34,6 +34,18 @@ export interface Message {
 /** How the plate draws the panel: the editable layout, or as the fab makes it. */
 export type PanelLook = 'layout' | 'fab';
 
+/** The last quote that settled, with the quantities it was for. */
+export interface QuoteSnapshot {
+  key: string;
+  quote: QuoteResult | null;
+  quantities: Array<{ key: string; needed: number; niceToHave: number }>;
+}
+
+export interface QuotePending {
+  since: number;
+  previous: QuoteSnapshot | null;
+}
+
 export interface PanelState {
   view: PanelView | null;
   look: PanelLook;
@@ -48,6 +60,13 @@ export interface PanelState {
   cursorMm: Point | null;
   quote: QuoteResult | null;
   quoteError: string | null;
+  /**
+   * A new quote is being fetched, because the quantities (or something else
+   * the ways depend on) changed. `previous` is what was shown before, when
+   * only quantities changed: a cancel puts those numbers back and shows the
+   * previous ways again instead of waiting.
+   */
+  quoting: QuotePending | null;
   /** Counts up whenever `quote` is replaced, so lists built from it know when to rebuild. */
   quoteRev: number;
   /**
@@ -79,6 +98,7 @@ function initial(): PanelState {
     cursorMm: null,
     quote: null,
     quoteError: null,
+    quoting: null,
     quoteRev: 0,
     preview: null,
     arrangeMsg: null,

@@ -22,7 +22,7 @@ import { OWN, buildOptions, rankOf, scenarioOnPlate } from './options.js';
 import { DRAG_THRESHOLD_PX, contentBox, dropPosition, hitInstance, platePlaces, platesBox } from './hit.js';
 import { createLoading } from './loading.js';
 import { createSidebar } from './sidebar.js';
-import { PanelStore, loadLook, saveLook } from './store.js';
+import { PanelStore, loadLook, saveLook, type QuoteSnapshot } from './store.js';
 import { connectPanelWs } from './ws.js';
 
 const WHEEL_ZOOM_PER_PX = 0.001;
@@ -106,6 +106,48 @@ function fitNewLayout(since: number): void {
 let quotedFor = '';
 let quoteSeq = 0;
 let boardsFor = '';
+/** The last quote that settled, so a change of quantities can be cancelled back to it. */
+let settled: QuoteSnapshot | null = null;
+
+function quantitiesOf(view: PanelView): QuoteSnapshot['quantities'] {
+  return view.panel.sources.map((s) => ({ key: s.key, needed: s.needed, niceToHave: s.niceToHave }));
+}
+
+/** Is `view` the settled quote's panel with only its quantities changed? Then a cancel can put them back. */
+function onlyQuantitiesChanged(view: PanelView, from: QuoteSnapshot): boolean {
+  const restored = {
+    ...view,
+    panel: {
+      ...view.panel,
+      sources: view.panel.sources.map((s) => {
+        const q = from.quantities.find((x) => x.key === s.key);
+        return q ? { ...s, needed: q.needed, niceToHave: q.niceToHave } : s;
+      }),
+    },
+  };
+  return quoteKey(restored) === from.key && quoteKey(view) !== from.key;
+}
+
+/**
+ * Stop waiting for the quote in flight, put the quantities back to what the
+ * last settled quote was for, and show that quote's ways again.
+ */
+function cancelQuote(): void {
+  const { quoting, view } = store.get();
+  const previous = quoting?.previous;
+  if (!previous || !view) return;
+  quoteSeq++; // the answer on its way is for numbers nobody wants any more
+  const ops: PanelOp[] = [];
+  for (const q of previous.quantities) {
+    const s = view.panel.sources.find((x) => x.key === q.key);
+    if (s && (s.needed !== q.needed || s.niceToHave !== q.niceToHave)) {
+      ops.push({ op: 'setQuantity', key: q.key, needed: q.needed, niceToHave: q.niceToHave });
+    }
+  }
+  if (ops.length > 0) send(ops.length === 1 ? ops[0]! : { op: 'transaction', ops });
+  quotedFor = previous.key;
+  store.set({ quote: previous.quote, quoteError: null, quoting: null, quoteRev: store.get().quoteRev + 1 });
+}
 
 /** List the project's board files again when the panel's boards have changed. */
 function refreshBoardFiles(view: PanelView | null, force = false): void {
@@ -121,17 +163,22 @@ function refreshQuote(view: PanelView): void {
   if (key === quotedFor) return;
   quotedFor = key;
   const seq = ++quoteSeq;
+  const quantities = quantitiesOf(view);
+  // Cancelling makes sense only when the numbers are all that changed.
+  const previous = settled && onlyQuantitiesChanged(view, settled) ? settled : null;
+  store.set({ quoting: { since: Date.now(), previous } });
   void (async () => {
     const r = await api.quote();
-    if (seq !== quoteSeq) return; // a newer request is on its way
+    if (seq !== quoteSeq) return; // a newer request is on its way, or this one was cancelled
     if (isError(r)) {
-      store.set({ quote: null, quoteError: r.error, quoteRev: store.get().quoteRev + 1, preview: null });
+      store.set({ quote: null, quoteError: r.error, quoting: null, quoteRev: store.get().quoteRev + 1, preview: null });
       return;
     }
+    settled = { key, quote: r, quantities };
     // What was shown for comparison may not be among the new answers.
     const still = r.scenarios.some((s) => s.id === store.get().preview);
     const left = !still && store.get().preview !== null;
-    store.set({ quote: r, quoteError: null, quoteRev: store.get().quoteRev + 1, ...(still ? {} : { preview: null }) });
+    store.set({ quote: r, quoteError: null, quoting: null, quoteRev: store.get().quoteRev + 1, ...(still ? {} : { preview: null }) });
     const view = store.get().view;
     if (left && view) fit(view);
   })();
@@ -585,6 +632,7 @@ const renderSidebar = createSidebar(
   {
     setCount: (board, count) => void setCount(board, count),
     setQuantity: (board, field, value) => send({ op: 'setQuantity', key: board, [field]: value }),
+    cancelQuote,
     selectOption: (id) => void selectOption(id),
     selectInstance: (id) => store.set({ selection: id, menu: null }),
     addBoard: (path) => void addBoardToPanel(path),
