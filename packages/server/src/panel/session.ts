@@ -77,15 +77,14 @@ import {
 } from '@flamingo/panel/node';
 import { PanelDoc } from './doc.js';
 import { boardDrcAsync } from './drc-run.js';
-
-/** Unit price lookup, injected so tests need no network. Returns undefined when unknown. */
-export type PriceLookup = (lcsc: string) => Promise<number | undefined>;
+import type { PartInfo, PartLookup } from './parts.js';
 
 export interface PanelSessionOptions {
   projectDir: string;
   limits?: PanelLimits;
   fees?: FeeTable;
-  priceLookup?: PriceLookup;
+  /** What is known about each part beyond the board file: prices, attrition, Standard only. */
+  partLookup?: PartLookup;
   /** Debounce for the panel's autosave, ms. */
   debounceMs?: number;
   /** How often to look at the source boards' file times, ms. */
@@ -120,6 +119,15 @@ function fail(error: unknown): { ok: false; error: string } {
   return { ok: false, error: error instanceof Error ? error.message : String(error) };
 }
 
+/** A lookup's answer with anything that is not a usable number or library entry dropped. */
+function cleanPartInfo(info: PartInfo | undefined): PartInfo | undefined {
+  if (!info || typeof info !== 'object') return undefined;
+  const out: PartInfo = {};
+  if (typeof info.unitPrice === 'number' && Number.isFinite(info.unitPrice) && info.unitPrice >= 0) out.unitPrice = info.unitPrice;
+  if (info.jlc && typeof info.jlc === 'object') out.jlc = info.jlc;
+  return out.unitPrice === undefined && out.jlc === undefined ? undefined : out;
+}
+
 function safeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]+/g, '_') || 'panel';
 }
@@ -129,8 +137,8 @@ export class PanelSession extends EventEmitter {
   readonly projectDir: string;
   readonly limits: PanelLimits;
   readonly fees: FeeTable;
-  private readonly priceLookup: PriceLookup | undefined;
-  private readonly prices = new Map<string, number | undefined>();
+  private readonly partLookup: PartLookup | undefined;
+  private readonly parts = new Map<string, PartInfo | undefined>();
   /** Last DRC result per source key: one entry each, replaced when the board's hash changes. */
   private readonly drcCache = new Map<string, { hash: string; violations: DrcViolation[] }>();
   /** DRC runs in flight, by content hash, so one board is never checked twice at once. */
@@ -148,7 +156,7 @@ export class PanelSession extends EventEmitter {
     this.projectDir = opts.projectDir;
     this.limits = opts.limits ?? loadPanelLimits();
     this.fees = opts.fees ?? loadFeeTable();
-    this.priceLookup = opts.priceLookup;
+    this.partLookup = opts.partLookup;
     this.doc = doc ?? new PanelDoc(newPanel('panel', settingsFromLimits(this.limits)), undefined, opts.debounceMs);
     this.doc.on('change', () => {
       this.cached = null;
@@ -186,8 +194,14 @@ export class PanelSession extends EventEmitter {
             geometry: {
               ...s.geometry,
               parts: s.geometry.parts.map((p) => {
-                const price = this.prices.get(p.lcsc);
-                return price === undefined ? p : { ...p, unitPrice: price };
+                const info = this.parts.get(p.lcsc);
+                if (!info) return p;
+                return {
+                  ...p,
+                  ...(info.unitPrice !== undefined ? { unitPrice: info.unitPrice } : {}),
+                  // JLCPCB's library says what is basic today; the board's flag is from when the part was placed.
+                  ...(info.jlc ? { jlc: info.jlc, basic: info.jlc.basic } : {}),
+                };
               }),
             },
           }
@@ -386,26 +400,26 @@ export class PanelSession extends EventEmitter {
   // Prices
   // -------------------------------------------------------------------------
 
-  /** Look up unit prices for every part of the given sources that has none yet. Never throws. */
+  /** Look up prices and JLCPCB's library data for every part of the given sources not looked up yet. Never throws. */
   async loadPrices(sources: ResolvedSource[]): Promise<void> {
-    if (!this.priceLookup || process.env.FLAMINGO_PANEL_PRICES === 'off') return;
+    if (!this.partLookup || process.env.FLAMINGO_PANEL_PRICES === 'off') return;
     const wanted = new Set<string>();
     for (const s of sources) {
       for (const p of s.geometry?.parts ?? []) {
-        if (LCSC_ID.test(p.lcsc) && !this.prices.has(p.lcsc)) wanted.add(p.lcsc);
+        if (LCSC_ID.test(p.lcsc) && !this.parts.has(p.lcsc)) wanted.add(p.lcsc);
       }
     }
     if (wanted.size === 0) return;
-    const lookup = this.priceLookup;
+    const lookup = this.partLookup;
     const one = async (lcsc: string): Promise<void> => {
       try {
-        const price = await Promise.race([
+        const info = await Promise.race([
           lookup(lcsc),
           new Promise<undefined>((r) => setTimeout(() => r(undefined), PRICE_TIMEOUT_MS)),
         ]);
-        this.prices.set(lcsc, typeof price === 'number' && Number.isFinite(price) ? price : undefined);
+        this.parts.set(lcsc, cleanPartInfo(info));
       } catch {
-        this.prices.set(lcsc, undefined);
+        this.parts.set(lcsc, undefined);
       }
     };
     const queue = [...wanted];

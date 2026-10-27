@@ -16,7 +16,7 @@ import { basename, dirname, resolve } from 'node:path';
 import type { Objective, PanelOp, PanelOpError, PanelOpResult, Rotation, Separation, SettingsPatch } from '@flamingo/panel';
 import { OBJECTIVES, PANEL_EXTENSION, newPanel, settingsFromLimits } from '@flamingo/panel';
 import { loadPanelLimits } from '@flamingo/panel/node';
-import { fetchPart } from '@flamingo/parts';
+import { fetchJlcStock, fetchPart } from '@flamingo/parts';
 import { PanelDoc } from './doc.js';
 import {
   fmt,
@@ -26,6 +26,7 @@ import {
   formatQuote,
   formatView,
 } from './format.js';
+import { partLookupFrom } from './parts.js';
 import { PanelSession } from './session.js';
 
 export const PANEL_USAGE = `Usage: flamingo panel <command> <file${PANEL_EXTENSION}> [arguments]
@@ -165,7 +166,7 @@ export async function runPanelCli(argv: string[], io: PanelCliIo = { out: consol
       {
         projectDir,
         limits,
-        ...(offline ? {} : { priceLookup: async (lcsc: string) => (await fetchPart(lcsc)).info.price }),
+        ...(offline ? {} : { partLookup: partLookupFrom({ fetchStock: fetchJlcStock, fetchPart }) }),
       },
       doc,
     );

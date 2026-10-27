@@ -142,3 +142,33 @@ describe('PanelSession cost curve', () => {
     }
   });
 });
+
+describe('PanelSession part lookup', () => {
+  it("puts JLCPCB's library data on the resolved parts, and its basic flag over the board's", async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'flamingo-panel-session-parts-'));
+    const session = testSession(dir, {
+      watchMs: 0,
+      partLookup: async (lcsc) =>
+        lcsc === 'C25804'
+          ? { jlc: { basic: false, standardOnly: true, prices: [{ from: 1, to: null, price: 0.002 }], attrition: { loss: 10, minimum: 20 } } }
+          : { unitPrice: 1.5 },
+    });
+    try {
+      await writeBoards(dir);
+      await session.create('p');
+      expect((await session.addBoard('mini.flamingo', { key: 'M', needed: 1 })).ok).toBe(true);
+      expect(session.apply({ op: 'addInstance', source: 'M' }).ok).toBe(true);
+      const parts = (await session.resolved())[0]!.geometry!.parts;
+      const r = parts.find((p) => p.lcsc === 'C25804')!;
+      expect(r.jlc).toEqual({ basic: false, standardOnly: true, prices: [{ from: 1, to: null, price: 0.002 }], attrition: { loss: 10, minimum: 20 } });
+      expect(r.basic).toBe(false);
+      expect(r.unitPrice).toBeUndefined();
+      for (const p of parts.filter((p) => p.lcsc !== 'C25804')) expect(p.unitPrice).toBe(1.5);
+      const view = await session.view();
+      expect(view.issues.map((c) => c.code)).toContain('assembly-standard-only');
+    } finally {
+      await session.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

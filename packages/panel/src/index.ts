@@ -102,6 +102,8 @@ export type { QtyPrice, AreaTier, JointTier, PerSide, AttritionRule, AssemblyFee
 export { stepAtLeast } from './fees.js';
 
 export type {
+  JlcPart,
+  PriceTier,
   OrderPart,
   OrderPiece,
   OrderAssembly,
@@ -110,7 +112,7 @@ export type {
   CostLine,
   CostBreakdown,
 } from './cost.js';
-export { computeCost, boardPrice, billedQuantity } from './cost.js';
+export { computeCost, boardPrice, billedQuantity, tierPrice, JLC_PARTS_LIBRARY } from './cost.js';
 
 export type { Received, PieceCount, Eligibility, PricedOrder, PanelQuote } from './order.js';
 export {

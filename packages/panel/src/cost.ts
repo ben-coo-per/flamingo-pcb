@@ -17,6 +17,30 @@ import type { AssemblyType, Sourced } from './config.js';
 import type { AttritionRule, FeeTable } from './fees.js';
 import type { Separation } from './types.js';
 
+/** One step of JLCPCB's assembly price for a part: `price` USD each from `from` units up to `to` (null: no upper bound). */
+export interface PriceTier {
+  from: number;
+  to: number | null;
+  price: number;
+}
+
+/**
+ * What JLCPCB's parts library says about a part, as the cost model uses it.
+ * These are JLCPCB's own numbers for the part on the day they were looked
+ * up, not estimates: the price tiers it bills assembly parts at, the spares
+ * it adds and the least it bills, and whether only Standard PCBA places it.
+ */
+export interface JlcPart {
+  basic: boolean;
+  /** Economic PCBA cannot place the part. */
+  standardOnly: boolean;
+  /** Ascending by `from`. */
+  prices?: PriceTier[];
+  attrition?: { loss: number; minimum: number };
+}
+
+export const JLC_PARTS_LIBRARY = 'https://jlcpcb.com/parts';
+
 export interface OrderPart {
   lcsc: string;
   /** JLCPCB basic part. */
@@ -27,8 +51,10 @@ export interface OrderPart {
   smtJoints: number;
   /** Through-hole joints per part. */
   thtJoints: number;
-  /** USD each. Absent = unknown: the line is listed at 0 and flagged. */
+  /** USD each, from the EasyEDA part data; used when `jlc` has no prices. Absent = unknown: the line is listed at 0 and flagged. */
   unitPrice?: number;
+  /** JLCPCB's parts-library data for the part, when it was looked up and is listed. */
+  jlc?: JlcPart;
   value?: string;
 }
 
@@ -165,6 +191,16 @@ export function billedQuantity(
   const rule = rules.find((r) => r.maxJoints === null || joints <= r.maxJoints) ?? rules[rules.length - 1];
   if (!rule) return { qty: used, extra: 0, minimum: 0, kind: 'no rule' };
   return { qty: Math.max(rule.minimum, used + rule.extra), extra: rule.extra, minimum: rule.minimum, kind: rule.kind };
+}
+
+/** JLCPCB's price each for `qty` units of a part, from its tiers; undefined with no tiers. */
+export function tierPrice(tiers: readonly PriceTier[] | undefined, qty: number): number | undefined {
+  if (!tiers || tiers.length === 0) return undefined;
+  let price: number | undefined;
+  for (const t of tiers) {
+    if (qty >= t.from) price = t.price;
+  }
+  return price ?? tiers[0]!.price;
 }
 
 export function computeCost(order: OrderConfig, fees: FeeTable): CostBreakdown {
@@ -334,8 +370,30 @@ export function computeCost(order: OrderConfig, fees: FeeTable): CostBreakdown {
     const unknown: string[] = [];
     for (const p of asm.parts) {
       const used = p.perPiece * asm.qty;
-      const billed = billedQuantity(used, p.smtJoints + p.thtJoints, rules);
       const name2 = p.value ? `${p.lcsc} ${p.value}` : p.lcsc;
+      // JLCPCB's own attrition for the part when known, the fee table's classes when not.
+      const attrition = p.jlc?.attrition;
+      const billed = attrition
+        ? {
+            qty: Math.max(attrition.minimum, used + attrition.loss),
+            kind: `JLCPCB: +${attrition.loss} spare, at least ${attrition.minimum}`,
+            fromLibrary: true,
+          }
+        : { ...billedQuantity(used, p.smtJoints + p.thtJoints, rules), fromLibrary: false };
+      const attritionSource = billed.fromLibrary ? JLC_PARTS_LIBRARY : fees.parts.attrition.source;
+      const jlcPrice = tierPrice(p.jlc?.prices, billed.qty);
+      if (jlcPrice !== undefined) {
+        lines.push({
+          code: 'part',
+          label: `${name2} x ${billed.qty}`,
+          amount: cents(billed.qty * jlcPrice),
+          // JLCPCB's assembly price for the part, read from its parts library.
+          estimate: !billed.fromLibrary,
+          sources: [...new Set([JLC_PARTS_LIBRARY, attritionSource])],
+          detail: `${used} used, billed ${billed.qty} (${billed.kind}) x ${jlcPrice.toFixed(4)} JLCPCB`,
+        });
+        continue;
+      }
       if (p.unitPrice === undefined) {
         unknown.push(p.lcsc);
         lines.push({
@@ -343,7 +401,7 @@ export function computeCost(order: OrderConfig, fees: FeeTable): CostBreakdown {
           label: `${name2} x ${billed.qty}`,
           amount: 0,
           estimate: true,
-          sources: [fees.parts.attrition.source],
+          sources: [attritionSource],
           detail: `${used} used + spares; unit price unknown, not in the total`,
         });
         continue;
@@ -354,7 +412,7 @@ export function computeCost(order: OrderConfig, fees: FeeTable): CostBreakdown {
         amount: cents(billed.qty * p.unitPrice),
         // Prices come from the EasyEDA part data, not JLCPCB's assembly quote.
         estimate: true,
-        sources: [fees.parts.attrition.source, 'EasyEDA/LCSC part data'],
+        sources: [attritionSource, 'EasyEDA/LCSC part data'],
         detail: `${used} used, billed ${billed.qty} (${billed.kind}) x ${p.unitPrice.toFixed(4)}`,
       });
     }

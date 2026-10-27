@@ -57,6 +57,7 @@ export type IssueCode =
   | 'v-cut-small-board'
   | 'v-cut-near-copper'
   | 'assembly-sides'
+  | 'assembly-standard-only'
   | 'empty';
 
 export interface PanelIssue {
@@ -603,6 +604,22 @@ function settingIssues(panel: Panel, sources: ResolvedSources, geometry: PanelGe
         message: `${[...new Set(bottom.map((i) => i.source))].join(', ')} has parts on the bottom side: only Standard PCBA places both sides.`,
         instances: bottom.map((i) => i.id),
         sources: [...new Set(bottom.map((i) => i.source))],
+      });
+    }
+    const standardOnly = new Map<string, string[]>();
+    for (const key of new Set(populated.map((i) => i.source))) {
+      const parts = sources.find((x) => x.key === key)?.geometry?.parts ?? [];
+      const only = parts.filter((p) => p.jlc?.standardOnly).map((p) => p.lcsc);
+      if (only.length > 0) standardOnly.set(key, only);
+    }
+    if (standardOnly.size > 0) {
+      const named = [...standardOnly].map(([key, parts]) => `${key} (${parts.join(', ')})`).join('; ');
+      issues.push({
+        code: 'assembly-standard-only',
+        severity: 'info',
+        message: `${named}: Standard only in JLCPCB's parts library. Economic PCBA cannot place ${standardOnly.size === 1 && standardOnly.values().next().value!.length === 1 ? 'it' : 'them'}.`,
+        instances: populated.filter((i) => standardOnly.has(i.source)).map((i) => i.id),
+        sources: [...standardOnly.keys()],
       });
     }
   }

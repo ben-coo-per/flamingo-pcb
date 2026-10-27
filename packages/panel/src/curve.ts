@@ -86,12 +86,19 @@ function fnv1a(s: string): string {
 }
 
 /**
- * Everything a point depends on: which boards (by content hash), the panel
- * settings, the limits and fees, the objective. The same inputs give the
+ * Everything a point depends on: which boards (by content hash), what their
+ * parts cost, the panel settings, the limits and fees, the objective. The same inputs give the
  * same key across runs, so a stored curve is still good after a restart.
  */
 export function curveKey(req: QuoteRequest): string {
-  const designs = req.resolved.map((r) => [r.key, r.hash ?? '', r.geometry ? 1 : 0, r.error ?? '']);
+  const designs = req.resolved.map((r) => [
+    r.key,
+    r.hash ?? '',
+    r.geometry ? 1 : 0,
+    r.error ?? '',
+    // What each part costs is looked up after the board is read, so it is not in the hash.
+    (r.geometry?.parts ?? []).map((p) => [p.lcsc, p.unitPrice ?? null, p.jlc ?? null]),
+  ]);
   return `fnv1a:${fnv1a(JSON.stringify([designs, req.settings, req.limits, req.fees, req.objective ?? 'total']))}`;
 }
 

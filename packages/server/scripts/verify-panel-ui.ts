@@ -73,6 +73,8 @@ import { chromium } from 'playwright-core';
 import type { Browser, Page } from 'playwright-core';
 import { Resvg } from '@resvg/resvg-js';
 import { newBoard } from '@flamingo/engine';
+import type { JlcStock } from '@flamingo/parts';
+import { fetchPart, searchParts } from '@flamingo/parts';
 import type { PanelView } from '@flamingo/panel';
 import { BOARD_COLORS, FAB_COLORS, boardColorAt, tint } from '@flamingo/panel';
 import { Doc } from '../src/document.js';
@@ -83,6 +85,32 @@ process.env.FLAMINGO_STOCK_CHECK ??= 'off';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(here, '..', '..', '..');
+/**
+ * What JLCPCB's parts library said about the fixture boards' parts on
+ * 2026-10-27, fixed here so the check does not depend on the live library:
+ * a part going out of stock or Standard-only would otherwise change which
+ * ways to order exist. The ESP32 module (C2913204) is in fact Standard only
+ * there; the check keeps it Economic-eligible so the fixtures stay an
+ * Economic PCBA order, which is what every cost step below reads.
+ */
+const JLC_PARTS: Record<string, Omit<JlcStock, 'lcsc'>> = {
+  C15850: { stock: 1_000_000, basic: true, standardOnly: false, prices: [{ from: 1, to: null, price: 0.0438 }], attrition: { loss: 10, minimum: 20 } },
+  C165948: { stock: 100_000, basic: false, standardOnly: false, prices: [{ from: 1, to: null, price: 0.187 }], attrition: { loss: 0, minimum: 2 } },
+  C25804: { stock: 10_000_000, basic: true, standardOnly: false, prices: [{ from: 1, to: null, price: 0.0017 }], attrition: { loss: 10, minimum: 20 } },
+  C2913204: { stock: 50_000, basic: false, standardOnly: false, prices: [{ from: 1, to: 9, price: 4.5929 }, { from: 10, to: null, price: 4.2 }], attrition: { loss: 0, minimum: 1 } },
+  C605211: { stock: 1_000_000, basic: false, standardOnly: false, prices: [{ from: 1, to: null, price: 0.0362 }], attrition: { loss: 10, minimum: 20 } },
+  C6186: { stock: 1_000_000, basic: true, standardOnly: false, prices: [{ from: 1, to: null, price: 0.2061 }], attrition: { loss: 0, minimum: 2 } },
+  C23186: { stock: 10_000_000, basic: true, standardOnly: false, prices: [{ from: 1, to: null, price: 0.0015 }], attrition: { loss: 10, minimum: 20 } },
+};
+const PARTS_API = {
+  fetchPart,
+  searchParts,
+  fetchStock: async (lcsc: string): Promise<JlcStock> => {
+    const known = JLC_PARTS[lcsc];
+    return known ? { lcsc, ...known } : { lcsc, stock: null, basic: false, standardOnly: false };
+  },
+};
+
 const BOARDS_DIR = join(ROOT, '.superpowers', 'sdd', 'e2e-panel');
 const SHOTS_DIR = join(ROOT, 'panel-screenshots');
 const BOARDS = ['esp32-breakout.flamingo', 'usbc-breakout.flamingo'] as const;
@@ -128,7 +156,7 @@ async function main(): Promise<void> {
   const shots: Array<[string, string]> = [];
 
   try {
-    started = await startServer(new Doc(newBoard('editor', 2)), 0, { projectDir, panel: true });
+    started = await startServer(new Doc(newBoard('editor', 2)), 0, { projectDir, panel: true, partsApi: PARTS_API });
     const base = `http://127.0.0.1:${started.port}`;
     console.log(`Server on ${base}, project dir ${projectDir}`);
 
@@ -345,6 +373,17 @@ async function main(): Promise<void> {
     assert(await page.locator('#cost-summary .cost-group[open] table.lines td', { hasText: 'Economic PCBA setup' }).isVisible(), 'unfolding Assembly does not show its lines');
     const assemblyFlag = (await text('#cost-summary .cost-group[open] summary .flag'));
     assert(assemblyFlag === '', 'the Assembly subtotal is marked as an estimate although every line in it is verified');
+    // Parts are priced from JLCPCB's library: at its tier, with its attrition, and not as an estimate.
+    await page.locator('#cost-summary .cost-group summary', { hasText: 'Parts' }).click();
+    const usbc = page.locator('#cost-summary .cost-group[open] table.lines tr', { hasText: 'C165948' });
+    assert((await usbc.count()) === 1, 'the USB-C connector is not a part line');
+    assert((await usbc.locator('td.flag').innerText()).trim() === '', "a part priced from JLCPCB's library is marked as an estimate");
+    const usbcText = (await usbc.innerText()).replace(/\s+/g, ' ');
+    const billed = /x (\d+)/.exec(usbcText);
+    assert(billed, `the connector line does not say how many are billed: ${usbcText}`);
+    const amount = (await usbc.locator('td.amount').innerText()).trim();
+    assert(amount.includes((Number(billed[1]) * 0.187).toFixed(2)), `${billed[1]} connectors at the library's $0.187 do not come to ${amount}: ${usbcText}`);
+    await page.locator('#cost-summary .cost-group[open] summary', { hasText: 'Parts' }).click();
     // A panel made by hand is a way to order like the others: listed, priced, ranked.
     const own = page.locator('#option-list [data-option="own"]');
     await own.waitFor();
@@ -1065,7 +1104,7 @@ async function main(): Promise<void> {
 
     // --- a panel file served on its own ------------------------------------
     step('a server started on a panel file has the view at the root');
-    const alone = await startServer(null, 0, { projectDir, panel: true });
+    const alone = await startServer(null, 0, { projectDir, panel: true, partsApi: PARTS_API });
     try {
       const root = `http://127.0.0.1:${alone.port}`;
       const made = await fetch(`${root}/api/panel/new`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'alone' }) });

@@ -467,6 +467,20 @@ describe('checkPanel: settings', () => {
     expect(find(checkPanel(panelOf([src], [['A', 0, 7]]), [src], LIMITS), 'assembly-sides').severity).toBe('info');
   });
 
+  it("names the parts only Standard PCBA places, from JLCPCB's library", () => {
+    const b = plainBoard('faces', 80, 60);
+    const src = resolved('F', b);
+    const plain = checkPanel(panelOf([src], [['F', 0, 0]]), [src], LIMITS);
+    expect(codes(plain)).not.toContain('assembly-standard-only');
+
+    src.geometry!.parts[0]!.jlc = { basic: false, standardOnly: true, prices: [{ from: 1, to: null, price: 0.03 }] };
+    const flagged = find(checkPanel(panelOf([src], [['F', 0, 0]]), [src], LIMITS), 'assembly-standard-only');
+    expect(flagged.severity).toBe('info');
+    expect(flagged.message).toBe("F (C25804): Standard only in JLCPCB's parts library. Economic PCBA cannot place it.");
+    expect(flagged.sources).toEqual(['F']);
+    expect(flagged.instances).toEqual(['F1']);
+  });
+
   it('limits the designs on a silk-divider panel', () => {
     const tight = structuredClone(LIMITS);
     tight.silkDivider.maxDesigns.value = 1;

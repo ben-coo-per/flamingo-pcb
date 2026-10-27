@@ -29,6 +29,7 @@ import { parseObjMesh, placeMeshGroups } from './objmesh.js';
 import type { MeshGroup } from './objmesh.js';
 import type { PanelChannel } from './panel/http.js';
 import { attachPanelChannel, handlePanelApi, isPanelChannel } from './panel/http.js';
+import { partLookupFrom } from './panel/parts.js';
 import { PanelSession } from './panel/session.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -899,7 +900,7 @@ export function startServer(
       : opts.panel === true
         ? new PanelSession({
             projectDir,
-            priceLookup: async (lcsc) => (await partsApi.fetchPart(lcsc)).info.price,
+            partLookup: partLookupFrom(partsApi),
           })
         : undefined;
   if (!doc && !panel) return Promise.reject(new Error('a server with no board needs a panel'));

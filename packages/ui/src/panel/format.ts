@@ -125,6 +125,7 @@ export const ISSUE_TITLE: Record<IssueCode, string> = {
   'v-cut-small-board': 'Small board on V-cut',
   'v-cut-near-copper': 'V-cut near copper',
   'assembly-sides': 'Parts on both sides',
+  'assembly-standard-only': 'Standard-only parts',
   empty: 'Empty panel',
 };
 

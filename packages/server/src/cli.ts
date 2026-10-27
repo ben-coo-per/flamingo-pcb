@@ -8,16 +8,15 @@ import { startServer } from './http.js';
 import { PanelDoc } from './panel/doc.js';
 import { PANEL_EXTENSION } from '@flamingo/panel';
 import { PANEL_USAGE, runPanelCli } from './panel/cli.js';
+import { partLookupFrom } from './panel/parts.js';
 import { PanelSession } from './panel/session.js';
-import { fetchPart } from '@flamingo/parts';
+import { fetchJlcStock, fetchPart } from '@flamingo/parts';
 
 const VERSION = createRequire(import.meta.url)('../package.json').version as string;
 /** What panel files were called before they were `.flamboyance`. */
 const OLD_PANEL_EXTENSIONS = ['.flamingo-panel', '.plamingo'];
 
-function priceLookup(lcsc: string): Promise<number | undefined> {
-  return fetchPart(lcsc).then((part) => part.info.price);
-}
+const partLookup = partLookupFrom({ fetchStock: fetchJlcStock, fetchPart });
 
 function shutDownOn(close: () => Promise<unknown>): void {
   let shuttingDown = false;
@@ -46,10 +45,10 @@ async function servePanel(fileArg: string): Promise<void> {
 
   let panel: PanelSession;
   if (existsSync(filePath)) {
-    panel = new PanelSession({ projectDir, priceLookup }, await PanelDoc.load(filePath));
+    panel = new PanelSession({ projectDir, partLookup }, await PanelDoc.load(filePath));
     void panel.loadPrices(await panel.resolved()).then(() => panel.touch());
   } else {
-    panel = new PanelSession({ projectDir, priceLookup });
+    panel = new PanelSession({ projectDir, partLookup });
     const created = await panel.create(basename(filePath, PANEL_EXTENSION) || 'panel', filePath);
     if (!created.ok) throw new Error(created.error);
   }
@@ -80,10 +79,10 @@ async function serve(fileArg: string, panelArg?: string): Promise<void> {
   if (panelArg) {
     const panelPath = resolve(process.cwd(), panelArg);
     if (!existsSync(panelPath)) throw new Error(`${panelPath} does not exist (create it with: flamingo panel new ${panelArg})`);
-    panel = new PanelSession({ projectDir, priceLookup }, await PanelDoc.load(panelPath));
+    panel = new PanelSession({ projectDir, partLookup }, await PanelDoc.load(panelPath));
     void panel.loadPrices(await panel.resolved()).then(() => panel.touch());
   } else {
-    panel = new PanelSession({ projectDir, priceLookup });
+    panel = new PanelSession({ projectDir, partLookup });
   }
 
   const port = process.env.FLAMINGO_PORT ? Number(process.env.FLAMINGO_PORT) : 4242;

@@ -14,6 +14,7 @@
  * side it overhangs. That is coarser than strictly necessary and always safe.
  */
 
+import type { JlcPart } from './cost.js';
 import type { Board, ComponentInst, Point } from '@flamingo/engine';
 import { componentTransformPoints, isAssembled, outlineToPolygon, padOutline, pointInPolygon } from '@flamingo/engine';
 import type { PanelLimits } from './config.js';
@@ -61,6 +62,8 @@ export interface PartLine {
   refdes: string[];
   /** Unit price in USD when known (the server fills it in from the parts cache). */
   unitPrice?: number;
+  /** What JLCPCB's parts library says about the part (the server fills it in); absent when not looked up or not listed. */
+  jlc?: JlcPart;
 }
 
 export interface SourceGeometry {

@@ -381,7 +381,7 @@
       ],
       "source": "https://jlcpcb.com/help/answers/detail/92-What-are-the-MOQ-and-attrition",
       "verified": false,
-      "note": "ESTIMATE. JLCPCB confirms that attrition and minimum quantities exist and are charged, but sets them per part in the parts library. These three classes are a stand-in; 'extra' is added to the quantity used, and the billed quantity is never below 'minimum'."
+      "note": "ESTIMATE, used only for a part JLCPCB's parts library does not list. The library gives each listed part its own attrition (lossNumber, leastPatchNumber), which the cost model takes first. These three classes are the stand-in; 'extra' is added to the quantity used, and the billed quantity is never below 'minimum'."
     }
   }
 }

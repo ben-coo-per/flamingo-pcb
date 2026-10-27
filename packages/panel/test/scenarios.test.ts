@@ -353,3 +353,27 @@ describe('quoteOrder: a single design', () => {
     expect(panel.layout!.instances.length).toBeGreaterThan(1);
   });
 });
+
+describe('quoteOrder: a part only Standard PCBA places', () => {
+  it('rejects Economic PCBA by name and prices Standard instead', () => {
+    // Big enough for Standard PCBA, which wants 70 x 70 mm.
+    const board = plainBoard('sensor', 90, 80);
+    board.components.push(comp('U1', { ...EDGE_CONN, lcsc: 'C2913204', name: 'MODULE' }, 45, 40));
+    board.components[1]!.fields.basic = false;
+    const s = priced(resolved('S', board), 0.001);
+    const module = s.geometry!.parts.find((p) => p.lcsc === 'C2913204')!;
+    module.jlc = { basic: false, standardOnly: true, attrition: { loss: 2, minimum: 5 }, prices: [{ from: 1, to: null, price: 3 }] };
+    const q = quoteOrder(request([source(s, 5)], [s]));
+    const single = byId(q, 'separate');
+    const sensor = single.orders.find((o) => o.designs.includes('S'))!.priced;
+    expect(sensor.order.assembly?.type).toBe('standard');
+    expect(sensor.rejected.join(' ')).toContain("Economic PCBA cannot place C2913204: Standard only in JLCPCB's parts library");
+    const line = sensor.cost.lines.find((l) => l.code === 'part' && l.label.startsWith('C2913204'))!;
+    expect(line.estimate).toBe(false);
+    expect(line.label).toBe('C2913204 MODULE x 7');
+
+    module.jlc = { ...module.jlc, standardOnly: false };
+    const again = quoteOrder(request([source(s, 5)], [s]));
+    expect(byId(again, 'separate').orders.find((o) => o.designs.includes('S'))!.priced.order.assembly?.type).toBe('economic');
+  });
+});

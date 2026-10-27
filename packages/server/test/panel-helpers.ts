@@ -7,6 +7,7 @@ import { newBoard, serializeBoard } from '@flamingo/engine';
 import { Doc } from '../src/document.js';
 import { startServer } from '../src/http.js';
 import type { StartedServer } from '../src/http.js';
+import type { PartInfo } from '../src/panel/parts.js';
 import { PanelSession } from '../src/panel/session.js';
 import type { PanelSessionOptions } from '../src/panel/session.js';
 
@@ -88,6 +89,12 @@ export function miniBoard(layers: 2 | 4 | 6 = 2): Board {
 
 export const PRICES: Record<string, number> = { C25804: 0.0012, C2913204: 3.2 };
 
+/** The test lookup: an EasyEDA-style unit price for the parts in PRICES, nothing for the rest. */
+export function partInfoFor(lcsc: string): PartInfo | undefined {
+  const unitPrice = PRICES[lcsc];
+  return unitPrice === undefined ? undefined : { unitPrice };
+}
+
 export async function writeBoards(dir: string): Promise<{ sensor: string; mini: string }> {
   const sensor = join(dir, 'sensor.flamingo');
   const mini = join(dir, 'mini.flamingo');
@@ -97,7 +104,7 @@ export async function writeBoards(dir: string): Promise<{ sensor: string; mini: 
 }
 
 export function testSession(projectDir: string, opts: Partial<PanelSessionOptions> = {}): PanelSession {
-  return new PanelSession({ projectDir, priceLookup: async (lcsc) => PRICES[lcsc], debounceMs: 20, ...opts });
+  return new PanelSession({ projectDir, partLookup: async (lcsc) => partInfoFor(lcsc), debounceMs: 20, ...opts });
 }
 
 export async function startPanelServer(

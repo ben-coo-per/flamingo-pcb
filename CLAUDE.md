@@ -94,7 +94,8 @@ Conventions:
   and limits live in `packages/panel/config/*.json` with a source URL and a
   `verified` flag each; bare-board prices are always estimates.
 - **Never call JLCPCB's quote or order endpoints**, and never place an order.
-  The cost model works from the local fee table only.
+  The cost model works from the local fee table plus JLCPCB's parts library
+  (prices, attrition, Standard-only: the lookup the stock check makes).
 - A panel refers to boards by path + content hash. After editing a board that
   is on a panel, `panel_check` reports it stale until `panel_refresh_boards`.
 - Panel support is opt-in in `startServer({ panel: true })`; the CLI turns it

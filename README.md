@@ -291,8 +291,17 @@ because JLCPCB publishes them only through its quote calculator, which
 Flamingo never calls. Shipping, tax and coupons are not included. Nothing is
 ever sent to JLCPCB and nothing is ordered.
 
+Parts are priced from JLCPCB's parts library, the same lookup the stock check
+makes: the price tier for the quantity billed, JLCPCB's own attrition for the
+part (spares added, least billed), basic or extended, and whether the part is
+**Standard only**. A part only Standard PCBA places rejects Economic PCBA for
+every order that carries it, with the part named, and `panel_check` lists such
+parts as an info finding. A part the library does not list falls back to the
+EasyEDA price and the fee table's attrition classes, as an estimate; with no
+price anywhere it is listed at zero and named in the notes.
+
 Set `FLAMINGO_PANEL_CONFIG_DIR` to use your own copies of the two config files,
-and `FLAMINGO_PANEL_PRICES=off` to skip part price lookups.
+and `FLAMINGO_PANEL_PRICES=off` to skip the part lookups.
 
 ### Panel CLI
 

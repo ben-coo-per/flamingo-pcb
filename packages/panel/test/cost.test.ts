@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { listSourced } from '../src/config.js';
-import { billedQuantity, boardPrice, computeCost } from '../src/cost.js';
+import { billedQuantity, boardPrice, computeCost, tierPrice } from '../src/cost.js';
 import type { CostBreakdown, CostCode, OrderConfig, OrderPart } from '../src/cost.js';
 import { computeGeometry } from '../src/geometry.js';
 import { arrange } from '../src/layout.js';
@@ -171,6 +171,64 @@ describe('computeCost: assembly', () => {
     expect(part.label).toBe('C2913204 ESP32 x 6');
     expect(part.amount).toBe(19.2);
     expect(part.estimate).toBe(true);
+  });
+
+  it("bills a part at JLCPCB's tier for the quantity, with its own attrition, as a verified line", () => {
+    const led: OrderPart = {
+      ...MCU,
+      lcsc: 'C41413180',
+      value: 'WS2812B',
+      perPiece: 80,
+      unitPrice: 9,
+      jlc: {
+        basic: false,
+        standardOnly: true,
+        attrition: { loss: 8, minimum: 10 },
+        prices: [
+          { from: 1, to: 199, price: 0.0344 },
+          { from: 200, to: 599, price: 0.0267 },
+          { from: 600, to: 3999, price: 0.0223 },
+          { from: 4000, to: null, price: 0.0212 },
+        ],
+      },
+    };
+    const c = computeCost(order({ assembly: { type: 'standard', qty: 2, sides: 1, parts: [led] } }), FEES);
+    const part = c.lines.find((l) => l.code === 'part')!;
+    // 160 used + 8 spare = 168, in the 1-199 tier; the EasyEDA price is not used.
+    expect(part.label).toBe('C41413180 WS2812B x 168');
+    expect(part.amount).toBe(5.78);
+    expect(part.estimate).toBe(false);
+    expect(part.detail).toContain('billed 168 (JLCPCB: +8 spare, at least 10) x 0.0344 JLCPCB');
+    expect(c.notes).toEqual([]);
+
+    const many = computeCost(order({ assembly: { type: 'standard', qty: 10, sides: 1, parts: [led] } }), FEES);
+    // 808 billed: the 600-3999 tier.
+    expect(many.lines.find((l) => l.code === 'part')!.amount).toBe(18.02);
+
+    const few = computeCost(order({ assembly: { type: 'standard', qty: 2, sides: 1, parts: [{ ...led, perPiece: 1 }] } }), FEES);
+    expect(few.lines.find((l) => l.code === 'part')!.label).toBe('C41413180 WS2812B x 10');
+  });
+
+  it("uses the fee table's attrition classes, as an estimate, when JLCPCB's library has prices but no attrition", () => {
+    const part: OrderPart = { ...R10K, unitPrice: undefined, jlc: { basic: true, standardOnly: false, prices: [{ from: 1, to: null, price: 0.002 }] } };
+    const c = computeCost(order({ assembly: { type: 'economic', qty: 5, sides: 1, parts: [part] } }), FEES);
+    const line = c.lines.find((l) => l.code === 'part')!;
+    expect(line.label).toBe('C25804 10k x 28');
+    expect(line.amount).toBe(0.06);
+    expect(line.estimate).toBe(true);
+  });
+
+  it('tierPrice takes the tier the quantity falls in', () => {
+    const tiers = [
+      { from: 1, to: 9, price: 1 },
+      { from: 10, to: null, price: 0.5 },
+    ];
+    expect(tierPrice(tiers, 1)).toBe(1);
+    expect(tierPrice(tiers, 9)).toBe(1);
+    expect(tierPrice(tiers, 10)).toBe(0.5);
+    expect(tierPrice(tiers, 1000)).toBe(0.5);
+    expect(tierPrice([], 5)).toBeUndefined();
+    expect(tierPrice(undefined, 5)).toBeUndefined();
   });
 
   it('lists a part without a price at zero and says so', () => {
@@ -367,5 +425,11 @@ describe('orders from panels', () => {
     expect(assemblyEligibility('standard', big, 2, 75, true, LIMITS, FEES)).toEqual({ eligible: true });
     expect(assemblyEligibility('standard', big, 1, 5, false, LIMITS, FEES).reason).toBe('Standard PCBA needs edge rails and fiducials on a panel');
     expect(assemblyEligibility('economic', { ...big, separation: 'solid-tab' }, 1, 5, true, LIMITS, FEES).reason).toContain('not solid-tab');
+    const standardOnly: OrderPart = { ...MCU, jlc: { basic: false, standardOnly: true } };
+    expect(assemblyEligibility('economic', small, 1, 5, true, LIMITS, FEES, [R10K, standardOnly]).reason).toBe(
+      "Economic PCBA cannot place C2913204: Standard only in JLCPCB's parts library",
+    );
+    expect(assemblyEligibility('standard', big, 1, 5, true, LIMITS, FEES, [R10K, standardOnly])).toEqual({ eligible: true });
+    expect(assemblyEligibility('economic', small, 1, 5, true, LIMITS, FEES, [R10K, { ...MCU, jlc: { basic: false, standardOnly: false } }])).toEqual({ eligible: true });
   });
 });

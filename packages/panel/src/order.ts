@@ -50,6 +50,7 @@ export function pieceParts(counts: PieceCount[], sources: ResolvedSources): Orde
         line.perPiece += p.count * c.populated;
         // One part, one truth: a price or basic flag known anywhere applies everywhere.
         if (line.unitPrice === undefined && p.unitPrice !== undefined) line.unitPrice = p.unitPrice;
+        if (line.jlc === undefined && p.jlc !== undefined) line.jlc = p.jlc;
         line.basic = line.basic || p.basic;
       } else {
         byLcsc.set(p.lcsc, {
@@ -60,6 +61,7 @@ export function pieceParts(counts: PieceCount[], sources: ResolvedSources): Orde
           thtJoints: p.thtJoints,
           value: p.value,
           ...(p.unitPrice !== undefined ? { unitPrice: p.unitPrice } : {}),
+          ...(p.jlc !== undefined ? { jlc: p.jlc } : {}),
         });
       }
     }
@@ -80,7 +82,12 @@ export interface Eligibility {
   reason?: string;
 }
 
-/** Whether an assembly service can take this piece in this quantity. */
+/** Parts of the list that only Standard PCBA places, by JLCPCB's parts library. */
+export function standardOnlyParts(parts: readonly OrderPart[]): OrderPart[] {
+  return parts.filter((p) => p.jlc?.standardOnly === true);
+}
+
+/** Whether an assembly service can take this piece, with these parts, in this quantity. */
 export function assemblyEligibility(
   type: AssemblyType,
   piece: OrderPiece,
@@ -89,9 +96,21 @@ export function assemblyEligibility(
   hasRails: boolean,
   limits: PanelLimits,
   fees: FeeTable,
+  parts: readonly OrderPart[] = [],
 ): Eligibility {
   const l = limits.assembly[type];
   const name = type === 'economic' ? 'Economic' : 'Standard';
+  if (type === 'economic') {
+    const only = standardOnlyParts(parts);
+    if (only.length > 0) {
+      const named = only.slice(0, 3).map((p) => p.lcsc);
+      const more = only.length > 3 ? ` and ${only.length - 3} more` : '';
+      return {
+        eligible: false,
+        reason: `Economic PCBA cannot place ${named.join(', ')}${more}: Standard only in JLCPCB's parts library`,
+      };
+    }
+  }
   const panelized = piece.boards > 1 && piece.separation !== 'none' && piece.separation !== 'silk-divider';
   const fit = assemblyFit(piece.width, piece.height, panelized, limits)[type];
   if (!fit.fits) return { eligible: false, reason: `${name} PCBA: ${fit.reason}` };
@@ -149,7 +168,7 @@ export function priceOrder(
   const rejected: string[] = [];
   let best: PricedOrder | null = null;
   for (const type of ['economic', 'standard'] as const) {
-    const e = assemblyEligibility(type, piece, sides, asmQty, hasRails, limits, fees);
+    const e = assemblyEligibility(type, piece, sides, asmQty, hasRails, limits, fees, parts);
     if (!e.eligible) {
       rejected.push(e.reason!);
       continue;
