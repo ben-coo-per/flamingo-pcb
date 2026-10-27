@@ -333,6 +333,12 @@ async function exportFab(): Promise<void> {
     return;
   }
   exportUrl = URL.createObjectURL(r.blob);
+  // Start the download at once; the link in the message is for browsers that
+  // only let a user gesture start one, and for fetching the same zip again.
+  const a = document.createElement('a');
+  a.href = exportUrl;
+  a.download = r.name;
+  a.click();
   store.set({
     busy: false,
     exportMsg: {
@@ -340,7 +346,7 @@ async function exportFab(): Promise<void> {
         ? `Exported: ${shown.orders.length} order${shown.orders.length === 1 ? '' : 's'}, a folder each with gerbers.zip, bom.csv, cpl.csv and a render; orders.txt has the quantities (${Math.max(1, Math.round(r.blob.size / 1024))} kB).`
         : `Exported: gerbers, drills, bom.csv, cpl.csv and a render, in one zip (${Math.max(1, Math.round(r.blob.size / 1024))} kB).`,
       problem: false,
-      link: { href: exportUrl, name: r.name, label: `Download ${r.name}` },
+      link: { href: exportUrl, name: r.name, label: `Download ${r.name} again` },
     },
   });
 }

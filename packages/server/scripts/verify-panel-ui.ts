@@ -758,12 +758,14 @@ async function main(): Promise<void> {
     assert((await page.locator('#option-list [data-option="own"]').count()) === 0, 'undoing the edit did not make the panel the computed way again');
 
     // --- export ------------------------------------------------------------
-    step('Export offers the zip');
-    await page.locator('#export-btn').click();
+    step('Export downloads the zip');
+    // The download starts on its own once the zip is built; the link fetches it again.
+    const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#export-btn').click()]);
     await page.locator('#export-link').waitFor();
     assert((await text('#export-msg')).startsWith('Exported:'), `the export message reads "${await text('#export-msg')}"`);
-    const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#export-link').click()]);
     assert(download.suggestedFilename() === 'combo-panel-fab.zip', `the download is called ${download.suggestedFilename()}`);
+    const [again] = await Promise.all([page.waitForEvent('download'), page.locator('#export-link').click()]);
+    assert(again.suggestedFilename() === 'combo-panel-fab.zip', 'the link does not download the zip again');
     const zipPath = join(projectDir, 'download.zip');
     await download.saveAs(zipPath);
     const names = new AdmZip(zipPath).getEntries().map((e) => e.entryName).sort();
@@ -773,7 +775,7 @@ async function main(): Promise<void> {
     const bom = new AdmZip(zipPath).getEntry('bom.csv')!.getData().toString('utf8');
     assert(bom.includes('S1_U1') && bom.includes('M3_J1'), 'the BOM in the zip is not the merged one');
     console.log(`  ${download.suggestedFilename()}: ${names.length} files`);
-    await shot('11-exported', 'Export fab files: the zip is ready and offered as a download link.');
+    await shot('11-exported', 'Export fab files: the zip downloaded on its own, and the link fetches it again.');
 
     step('Export refuses a panel with errors, and says why');
     const s1 = (await instances()).find((i) => i.id === 'S1')!;
